@@ -1,0 +1,67 @@
+:root {
+  color-scheme: dark;
+  --muse-ink: #101416;
+  --muse-raised: #192024;
+  --muse-paper: #ece8dc;
+  --muse-signal: #c9ff4a;
+}
+
+html,
+body,
+#root,
+.muse-whiteboard {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--muse-ink);
+}
+
+.muse-whiteboard {
+  position: fixed;
+  inset: 0;
+  animation: reveal 180ms ease-out both;
+}
+
+.muse-whiteboard .excalidraw {
+  --default-bg-color: var(--muse-ink);
+  --island-bg-color: color-mix(in srgb, var(--muse-raised) 96%, transparent);
+  --popup-bg-color: #20272b;
+  --color-primary: #a8d83d;
+  --color-primary-darker: #8dbb2c;
+  --color-primary-darkest: #739a22;
+  --color-surface-primary-container: #344515;
+  --color-on-primary-container: var(--muse-signal);
+  --focus-highlight-color: color-mix(in srgb, var(--muse-signal) 72%, white);
+  --ui-font: "Avenir Next Condensed", "Helvetica Neue", sans-serif;
+  background: var(--muse-ink);
+}
+
+.muse-whiteboard .excalidraw .Island {
+  border: 1px solid rgb(236 232 220 / 8%);
+  box-shadow: 0 12px 38px rgb(0 0 0 / 30%);
+}
+
+.muse-whiteboard .excalidraw .App-toolbar,
+.muse-whiteboard .excalidraw .App-menu,
+.muse-whiteboard .excalidraw .zoom-actions,
+.muse-whiteboard .excalidraw .undo-redo-buttons {
+  filter: saturate(0.84);
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .muse-whiteboard {
+    animation: none;
+  }
+}

@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""Compile the isolated protocol sources with Apple's compiler and run their real tests.
+
+This deliberately uses no SwiftPM package resolution. Full application checks still use
+scripts/otto-swift. Requires Xcode, Node and `npm ci --ignore-scripts` in PrivateSignIn.
+No server is started and no credentials are persisted.
+"""
+from pathlib import Path
+import os
+import platform
+import subprocess
+import tempfile
+
+root = Path(__file__).resolve().parent.parent
+developer = Path(subprocess.check_output(["xcode-select", "-p"], text=True).strip())
+swiftc = Path(subprocess.check_output(["xcrun", "--find", "swiftc"], text=True).strip())
+frameworks = developer / "Platforms/MacOSX.platform/Developer/Library/Frameworks"
+sdk = subprocess.check_output(["xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True).strip()
+compiler = [str(swiftc), "-sdk", sdk, "-target", platform.machine() + "-apple-macosx15.0"]
+plugin = swiftc.parent.parent / "lib/swift/host/plugins/testing/libTestingMacros.dylib"
+subprocess.run(["npm", "test"], cwd=root / "PrivateSignIn", check=True)
+with tempfile.TemporaryDirectory(prefix="otto-phone-protocol-") as directory:
+    scratch = Path(directory)
+    sources = [root / "Sources/OttoSecurity" / name for name in
+               ["PrivatePhoneEnvelope.swift", "PrivatePhoneSessionLedger.swift"]]
+    subprocess.run([*compiler, "-swift-version", "6", "-enable-testing",
+                    "-emit-library", "-emit-module", "-module-name", "OttoSecurity",
+                    *map(str, sources), "-emit-module-path", str(scratch / "OttoSecurity.swiftmodule"),
+                    "-o", str(scratch / "libOttoSecurity.dylib")], check=True)
+    runner = scratch / "Runner.swift"
+    runner.write_text("import Testing\n@main struct Runner { static func main() async { "
+                      "let _: Never = await Testing.__swiftPMEntryPoint() } }\n")
+    tests = [root / "Tests/OttoSecurityTests" / name for name in
+             ["PrivatePhoneEnvelopeTests.swift", "PrivatePhoneSessionLedgerTests.swift"]]
+    subprocess.run([*compiler, "-swift-version", "6", "-parse-as-library",
+                    "-load-plugin-library", str(plugin), "-I", str(scratch),
+                    "-L", str(scratch), "-lOttoSecurity", "-F", str(frameworks),
+                    "-framework", "Testing", "-Xlinker", "-rpath", "-Xlinker", str(frameworks),
+                    "-Xlinker", "-rpath", "-Xlinker", str(scratch),
+                    *map(str, tests), str(runner), "-o", str(scratch / "tests")], check=True)
+    environment = os.environ.copy()
+    environment["OTTO_PHONE_INTEROP_TEST"] = "1"
+    subprocess.run([str(scratch / "tests")], env=environment, check=True)

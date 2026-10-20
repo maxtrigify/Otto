@@ -1,0 +1,35 @@
+:root {
+  color-scheme: light dark;
+  --otto-background: transparent;
+  --otto-foreground: #ece8dc;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+body {
+  color: var(--otto-foreground);
+  font-family: "Avenir Next", sans-serif;
+}
+body.interactive { overflow: auto; }
+#diagram {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--otto-background);
+}
+#diagram svg {
+  display: block;
+  max-width: none !important;
+  flex-shrink: 0;
+}
+body.interactive #diagram { cursor: grab; }
+body.interactive.dragging #diagram { cursor: grabbing; user-select: none; }

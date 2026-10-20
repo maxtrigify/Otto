@@ -1,0 +1,14 @@
+#!/bin/zsh
+set -euo pipefail
+# The OAuth client ID is public application identity, not a user credential.
+# User refresh tokens and optional client secrets never enter the app bundle.
+plist_path=${1:?Usage: configure-google-app-client /path/to/Info.plist}
+google_client_id=${OTTO_GOOGLE_CLIENT_ID:-${MUSE_GOOGLE_CLIENT_ID:-}}
+if [[ -z $google_client_id ]]; then
+  exit 0
+fi
+if [[ $google_client_id != *.apps.googleusercontent.com || ${#google_client_id} -gt 512 || $google_client_id == *[[:space:]]* ]]; then
+  print -u2 'OTTO_GOOGLE_CLIENT_ID must be a Google Desktop OAuth client ID.'
+  exit 2
+fi
+/usr/bin/plutil -replace OttoGoogleClientID -string "$google_client_id" "$plist_path"

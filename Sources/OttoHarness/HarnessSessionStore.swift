@@ -1,0 +1,135 @@
+import Foundation
+import OttoModels
+
+public actor HarnessSessionStore {
+  public struct Limits: Equatable, Sendable {
+    public var maximumMessages: Int
+    public var maximumUTF8Bytes: Int
+
+    public init(maximumMessages: Int = 100, maximumUTF8Bytes: Int = 256 * 1_024) {
+      self.maximumMessages = max(2, maximumMessages)
+      self.maximumUTF8Bytes = max(1_024, maximumUTF8Bytes)
+    }
+  }
+
+  public let rootURL: URL
+  public let limits: Limits
+  private let fileManager: FileManager
+
+  public init(
+    rootURL: URL = HarnessSessionStore.defaultRootURL(),
+    limits: Limits = Limits(),
+    fileManager: FileManager = .default
+  ) {
+    self.rootURL = rootURL
+    self.limits = limits
+    self.fileManager = fileManager
+  }
+
+  public static func defaultRootURL() -> URL {
+    if let override = OttoEnvironment.value("HARNESS_SESSIONS_DIR"),
+      !override.isEmpty
+    {
+      return URL(fileURLWithPath: override, isDirectory: true)
+    }
+    let applicationSupport =
+      FileManager.default.urls(
+        for: .applicationSupportDirectory, in: .userDomainMask
+      ).first ?? FileManager.default.homeDirectoryForCurrentUser
+    return
+      applicationSupport
+      .appending(path: "Otto", directoryHint: .isDirectory)
+      .appending(path: "Harness", directoryHint: .isDirectory)
+      .appending(path: "Sessions", directoryHint: .isDirectory)
+  }
+
+  public func loadOrCreate(
+    sessionID: String?, providerID: String, modelID: String
+  ) throws -> HarnessSession {
+    guard let sessionID else {
+      return HarnessSession(providerID: providerID, modelID: modelID)
+    }
+    guard HarnessSession.isOttoID(sessionID) else { throw HarnessError.invalidSessionID }
+    let data = try Data(contentsOf: fileURL(for: sessionID))
+    var session = try decoder().decode(HarnessSession.self, from: data)
+    session.providerID = providerID
+    session.modelID = modelID
+    return session
+  }
+
+  public func save(_ session: HarnessSession) throws {
+    guard HarnessSession.isOttoID(session.id) else { throw HarnessError.invalidSessionID }
+    var bounded = session
+    bounded.messages = boundedMessages(session.messages)
+    let liveIDs = Set(bounded.messages.map(\.id))
+    var archive = session.archivedMessages ?? []
+    var archivedIDs = Set(archive.map(\.id))
+    archive += session.messages.filter {
+      !liveIDs.contains($0.id) && archivedIDs.insert($0.id).inserted
+    }
+    bounded.archivedMessages = archive.isEmpty ? nil : archive
+    bounded.updatedAt = Date()
+    try fileManager.createDirectory(
+      at: rootURL, withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    let destination = fileURL(for: bounded.id)
+    let data = try encoder().encode(bounded)
+    try data.write(to: destination, options: .atomic)
+    try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+  }
+
+  public func load(sessionID: String) throws -> HarnessSession {
+    guard HarnessSession.isOttoID(sessionID) else { throw HarnessError.invalidSessionID }
+    return try decoder().decode(
+      HarnessSession.self, from: Data(contentsOf: fileURL(for: sessionID)))
+  }
+
+  private func fileURL(for sessionID: String) -> URL {
+    rootURL.appending(path: "\(sessionID).json")
+  }
+
+  private func boundedMessages(_ messages: [HarnessMessage]) -> [HarnessMessage] {
+    var result = Array(messages.suffix(limits.maximumMessages))
+    var bytes = result.reduce(0) { $0 + $1.content.utf8.count }
+    while result.count > 1, bytes > limits.maximumUTF8Bytes {
+      bytes -= result.removeFirst().content.utf8.count
+    }
+    // Oversized messages stay in the archive, never silently cut in the durable transcript.
+    if bytes > limits.maximumUTF8Bytes { return [] }
+    return result
+  }
+
+  public func contextSummary(_ session: HarnessSession) -> String {
+    let archive = session.archivedMessages ?? []
+    let constraints = archive.filter { message in
+      message.role == .user
+        && ["must", "constraint", "never", "do not", "decision"].contains {
+          message.content.localizedCaseInsensitiveContains($0)
+        }
+    }
+    let candidates = constraints + Array(archive.suffix(6))
+    var seen = Set<UUID>()
+    let lines = candidates.filter { seen.insert($0.id).inserted }.map {
+      "\($0.role.rawValue): \(String($0.content.prefix(1_000)))"
+    }
+    let uncertain = (session.toolReceipts ?? []).filter {
+      $0.state == "executing" || $0.state == "uncertain"
+    }.map {
+      "Uncertain tool: \($0.name), call \($0.callID). Verify its external result before repeating it."
+    }
+    return String((uncertain + lines).joined(separator: "\n").prefix(8_000))
+  }
+
+  private func encoder() -> JSONEncoder {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    return encoder
+  }
+
+  private func decoder() -> JSONDecoder {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return decoder
+  }
+}

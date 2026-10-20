@@ -1,0 +1,165 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* OttoMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* OttoMobileApp.swift */; };
+		A10000000000000000000003 /* OttoMobileClient in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000004 /* OttoMobileClient */; };
+		A10000000000000000000016 /* OttoMobileAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* OttoMobileAppUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A1000000000000000000001F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000000E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1000000000000000000000A;
+			remoteInfo = OttoMobileApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000002 /* OttoMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OttoMobileApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000006 /* OttoMobileApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OttoMobileApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000015 /* OttoMobileAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OttoMobileAppUITests.swift; sourceTree = "<group>"; };
+		A10000000000000000000017 /* OttoMobileAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OttoMobileAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A10000000000000000000003 /* OttoMobileClient in Frameworks */);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000000000000000000019 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000008 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000002 /* OttoMobileApp.swift */,
+				A10000000000000000000015 /* OttoMobileAppUITests.swift */,
+				A10000000000000000000005 /* Info.plist */,
+				A10000000000000000000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000006 /* OttoMobileApp.app */,
+				A10000000000000000000017 /* OttoMobileAppUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1000000000000000000000A /* OttoMobileApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000B /* Build configuration list */;
+			buildPhases = (
+				A1000000000000000000000C /* Sources */,
+				A10000000000000000000007 /* Frameworks */,
+				A1000000000000000000000D /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = OttoMobileApp;
+			packageProductDependencies = (A10000000000000000000004 /* OttoMobileClient */);
+			productName = OttoMobileApp;
+			productReference = A10000000000000000000006 /* OttoMobileApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A1000000000000000000001B /* OttoMobileAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000001C /* Build configuration list */;
+			buildPhases = (
+				A10000000000000000000018 /* Sources */,
+				A10000000000000000000019 /* Frameworks */,
+				A1000000000000000000001A /* Resources */,
+			);
+			buildRules = ();
+			dependencies = (A10000000000000000000020 /* PBXTargetDependency */);
+			name = OttoMobileAppUITests;
+			productName = OttoMobileAppUITests;
+			productReference = A10000000000000000000017 /* OttoMobileAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1000000000000000000000E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					A1000000000000000000000A = {CreatedOnToolsVersion = 26.3;};
+					A1000000000000000000001B = {CreatedOnToolsVersion = 26.3; TestTargetID = A1000000000000000000000A;};
+				};
+			};
+			buildConfigurationList = A1000000000000000000000F /* Project build configuration list */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A10000000000000000000008;
+			packageReferences = (A10000000000000000000010 /* XCLocalSwiftPackageReference "../.." */);
+			productRefGroup = A10000000000000000000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1000000000000000000000A /* OttoMobileApp */,
+				A1000000000000000000001B /* OttoMobileAppUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1000000000000000000000D /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A1000000000000000000001A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1000000000000000000000C /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001 /* OttoMobileApp.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000018 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000016 /* OttoMobileAppUITests.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10000000000000000000020 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A1000000000000000000000A /* OttoMobileApp */; targetProxy = A1000000000000000000001F /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A10000000000000000000011 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 18.0; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_VERSION = 6.0;}; name = Debug;};
+		A10000000000000000000012 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 18.0; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 6.0;}; name = Release;};
+		A10000000000000000000013 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {APS_ENVIRONMENT = development; CODE_SIGN_ENTITLEMENTS = OttoMobileApp.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 18.0; ONLY_ACTIVE_ARCH = YES; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = io.openotto.mobile.dev; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;}; name = Debug;};
+		A10000000000000000000014 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {APS_ENVIRONMENT = production; CODE_SIGN_ENTITLEMENTS = OttoMobileApp.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 18.0; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = io.openotto.mobile; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; VALIDATE_PRODUCT = YES;}; name = Release;};
+		A1000000000000000000001D /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 18.0; PRODUCT_BUNDLE_IDENTIFIER = io.openotto.mobile.dev.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = OttoMobileApp;}; name = Debug;};
+		A1000000000000000000001E /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 18.0; PRODUCT_BUNDLE_IDENTIFIER = io.openotto.mobile.uitests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = OttoMobileApp;}; name = Release;};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000000B /* Build configuration list */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000013 /* Debug */, A10000000000000000000014 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		A1000000000000000000000F /* Project build configuration list */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000011 /* Debug */, A10000000000000000000012 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		A1000000000000000000001C /* Build configuration list */ = {isa = XCConfigurationList; buildConfigurations = (A1000000000000000000001D /* Debug */, A1000000000000000000001E /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A10000000000000000000010 /* XCLocalSwiftPackageReference "../.." */ = {isa = XCLocalSwiftPackageReference; relativePath = ../..; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000004 /* OttoMobileClient */ = {isa = XCSwiftPackageProductDependency; package = A10000000000000000000010 /* XCLocalSwiftPackageReference "../.." */; productName = OttoMobileClient; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A1000000000000000000000E /* Project object */;
+}

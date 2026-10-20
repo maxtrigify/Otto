@@ -1,0 +1,173 @@
+/* Otto deck engine: slides are 1280×720 web pages, scaled to fit. Tokens come from the deck's
+   theme or brand as CSS variables. Agents compose slides from the classes below. */
+@font-face {
+  font-family: "Inter Otto";
+  src: url("InterVariable.ttf") format("truetype");
+  font-weight: 100 900;
+}
+:root {
+  --bg: #0b0d17; --bg2: #1a1433; --surface: rgba(255,255,255,.06); --text: #f5f3ff;
+  --muted: #a5a3c2; --accent: #ff7a45; --accent2: #ffb86b;
+  --font-display: "Inter Otto", -apple-system, system-ui, sans-serif;
+  --font-body: "Inter Otto", -apple-system, system-ui, sans-serif;
+  --radius: 22px; --ease: cubic-bezier(.2,.8,.2,1);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+body { font-family: var(--font-body); color: var(--text); -webkit-font-smoothing: antialiased; }
+.viewport { position: fixed; inset: 0; overflow: hidden; background: var(--bg); }
+/* Centred on the window at any size, then scaled to fit by deck.js. */
+.stage { width: 1280px; height: 720px; position: absolute; left: 50%; top: 50%;
+  transform-origin: center center; transform: translate(-50%, -50%); }
+.slide { position: absolute; inset: 0; padding: 72px 88px; overflow: hidden;
+  background: radial-gradient(120% 140% at 0% 0%, var(--bg2) 0%, var(--bg) 55%);
+  display: flex; flex-direction: column; justify-content: center; gap: 28px;
+  opacity: 0; visibility: hidden; transition: opacity .6s var(--ease), transform .7s var(--ease);
+  transform: translateX(40px) scale(.985); perspective: 1400px; }
+.slide.active { opacity: 1; visibility: visible; transform: none; }
+.slide.before { transform: translateX(-40px) scale(.985); }
+.static .slide { transition: none; }
+.slide > * { position: relative; z-index: 1; }
+
+/* Typography */
+h1, h2, h3, .huge { font-family: var(--font-display); letter-spacing: -0.035em; line-height: 1.02;
+  font-weight: 760; }
+h1 { font-size: 76px; }
+.huge { font-size: 112px; letter-spacing: -0.045em; }
+h2 { font-size: 54px; }
+h3 { font-size: 30px; letter-spacing: -0.02em; font-weight: 680; line-height: 1.15; }
+p, li { font-size: 26px; line-height: 1.45; }
+.lead { font-size: 32px; line-height: 1.4; color: var(--muted); max-width: 900px; }
+.small { font-size: 19px; }
+.muted { color: var(--muted); }
+.kicker { font-size: 16px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--accent); }
+.gradient-text { background: linear-gradient(100deg, var(--text) 10%, var(--accent) 60%, var(--accent2));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.accent { color: var(--accent); }
+strong { font-weight: 720; }
+
+/* Layout */
+.center { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; height: 100%; }
+.center .lead { margin: 0 auto; }
+.stack { display: flex; flex-direction: column; gap: 24px; }
+.row { display: flex; gap: 28px; align-items: center; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+.split.wide-left { grid-template-columns: 1.4fr 1fr; }
+.grid-2, .grid-3, .grid-4 { display: grid; gap: 22px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.spacer { flex: 1; }
+
+/* Blocks */
+.card { background: var(--surface); border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: var(--radius); padding: 30px 32px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent) inset, 0 24px 60px -30px rgba(0,0,0,.6); }
+.card p { font-size: 21px; color: var(--muted); }
+.glass { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.pill, .badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-radius: 999px; font-size: 17px; font-weight: 600; width: fit-content;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.icon { font-size: 40px; line-height: 1; width: 64px; height: 64px; display: grid; place-items: center;
+  border-radius: 18px; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.list { list-style: none; display: flex; flex-direction: column; gap: 18px; }
+.list li { position: relative; padding-left: 40px; }
+.list li::before { content: ""; position: absolute; left: 4px; top: .55em; width: 14px; height: 14px;
+  border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 60%, transparent); }
+.steps { list-style: none; counter-reset: step; display: grid; gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.steps li { counter-increment: step; position: relative; padding: 70px 24px 24px; font-size: 21px;
+  border-radius: var(--radius); background: var(--surface); }
+.steps li::before { content: counter(step, decimal-leading-zero); position: absolute; top: 20px; left: 24px;
+  font-family: var(--font-display); font-size: 32px; font-weight: 760; color: var(--accent); }
+.quote { font-family: var(--font-display); font-size: 52px; line-height: 1.15; letter-spacing: -0.03em;
+  font-weight: 640; }
+.quote::before { content: "“"; color: var(--accent); }
+.quote::after { content: "”"; color: var(--accent); }
+.cite { font-size: 22px; color: var(--muted); }
+table.compare { width: 100%; border-collapse: collapse; font-size: 22px; }
+table.compare th { text-align: left; font-size: 15px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); padding: 12px 18px; }
+table.compare td { padding: 16px 18px; border-top: 1px solid color-mix(in srgb, var(--text) 12%, transparent); }
+table.compare td.yes { color: var(--accent); font-weight: 700; }
+img { max-width: 100%; display: block; }
+img.cover { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius); }
+img.rounded { border-radius: var(--radius); }
+.logo { position: absolute; top: 34px; right: 44px; height: 30px; z-index: 3; opacity: .9; }
+.brandmark { position: absolute; top: 36px; left: 88px; z-index: 3; font-size: 15px; font-weight: 700;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+
+/* Data */
+.stat { display: flex; flex-direction: column; gap: 6px; }
+.stat .value { font-family: var(--font-display); font-size: 84px; font-weight: 780; letter-spacing: -0.04em;
+  line-height: 1; background: linear-gradient(120deg, var(--text), var(--accent));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+.stat .label { font-size: 20px; color: var(--muted); }
+.progress { height: 14px; border-radius: 99px; background: var(--surface); overflow: hidden; }
+.progress > i { display: block; height: 100%; width: 0; border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 1.4s var(--ease); }
+.chart { width: 100%; height: 360px; position: relative; }
+.chart svg { width: 100%; height: 100%; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 15px; font-family: var(--font-body); }
+.chart .val { fill: var(--text); font-weight: 650; font-size: 16px; }
+.chart .grid line { stroke: color-mix(in srgb, var(--text) 10%, transparent); }
+.chart .bar { transition: height 1.1s var(--ease), y 1.1s var(--ease), width 1.1s var(--ease); }
+.chart .line { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round;
+  transition: stroke-dashoffset 1.6s var(--ease); }
+.chart .arc { fill: none; transition: stroke-dasharray 1.4s var(--ease); }
+.legend { display: flex; gap: 20px; font-size: 16px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 8px; }
+
+/* Backdrops: place <div class="backdrop aurora"></div> first in a slide. */
+.backdrop { position: absolute !important; inset: 0; z-index: 0 !important; pointer-events: none; }
+.backdrop.aurora { background:
+  radial-gradient(40% 50% at 20% 25%, color-mix(in srgb, var(--accent) 45%, transparent), transparent 70%),
+  radial-gradient(45% 55% at 85% 70%, color-mix(in srgb, var(--accent2) 40%, transparent), transparent 70%);
+  filter: blur(40px); animation: drift 14s ease-in-out infinite alternate; }
+.backdrop.mesh { background:
+  radial-gradient(30% 40% at 70% 20%, color-mix(in srgb, var(--accent) 35%, transparent), transparent),
+  radial-gradient(35% 45% at 10% 90%, color-mix(in srgb, var(--accent2) 30%, transparent), transparent),
+  radial-gradient(25% 35% at 95% 95%, color-mix(in srgb, var(--accent) 25%, transparent), transparent); }
+.backdrop.grid { background-image:
+  linear-gradient(color-mix(in srgb, var(--text) 7%, transparent) 1px, transparent 1px),
+  linear-gradient(90deg, color-mix(in srgb, var(--text) 7%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px; mask-image: radial-gradient(80% 70% at 50% 40%, #000, transparent); }
+.backdrop.dots { background-image: radial-gradient(color-mix(in srgb, var(--text) 18%, transparent) 1.5px, transparent 1.5px);
+  background-size: 28px 28px; mask-image: radial-gradient(70% 70% at 70% 30%, #000, transparent); }
+.backdrop.spotlight { background: radial-gradient(60% 80% at 50% -10%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 65%); }
+.backdrop.glow { background: radial-gradient(50% 50% at 50% 50%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%); }
+@keyframes drift { from { transform: translate(-2%, -1%) scale(1); } to { transform: translate(3%, 2%) scale(1.08); } }
+
+/* Motion: data-anim="up|fade|zoom|left|right" (+ data-delay in ms); .stagger animates children. */
+[data-anim], .stagger > * { opacity: 0; transition: opacity .8s var(--ease), transform .9s var(--ease); }
+[data-anim="up"], .stagger > * { transform: translateY(26px); }
+[data-anim="zoom"] { transform: scale(.92); }
+[data-anim="left"] { transform: translateX(-40px); }
+[data-anim="right"] { transform: translateX(40px); }
+.slide.active [data-anim], .slide.active .stagger > * { opacity: 1; transform: none; }
+.static [data-anim], .static .stagger > * { opacity: 1 !important; transform: none !important; transition: none !important; }
+.static .backdrop { animation: none !important; }
+
+/* 3D: .scene3d sets depth; .tilt follows the pointer; .float bobs; .depth-1..3 lift layers. */
+.scene3d { perspective: 1200px; transform-style: preserve-3d; }
+.tilt { transform-style: preserve-3d; transition: transform .4s var(--ease); will-change: transform; }
+.float { animation: float 6s ease-in-out infinite; }
+.depth-1 { transform: translateZ(30px); } .depth-2 { transform: translateZ(60px); } .depth-3 { transform: translateZ(90px); }
+@keyframes float { 0%,100% { transform: translateY(0) rotateX(6deg) rotateY(-8deg); } 50% { transform: translateY(-14px) rotateX(2deg) rotateY(-4deg); } }
+.static .float { animation: none; transform: rotateX(6deg) rotateY(-8deg); }
+.cube { width: 220px; height: 240px; position: relative; filter: drop-shadow(0 30px 40px rgba(0,0,0,.45)); }
+.cube > i { display: none; }
+.cube svg { width: 100%; height: 100%; overflow: visible; }
+.float, .scene3d > * { transform-style: preserve-3d; }
+
+/* Chrome for presenting */
+.progressbar { position: fixed; left: 0; bottom: 0; height: 3px; background: var(--accent); z-index: 10;
+  transition: width .5s var(--ease); }
+.counter { position: fixed; right: 18px; bottom: 12px; z-index: 10; font: 600 12px/1 var(--font-body);
+  color: var(--muted); letter-spacing: .12em; }
+.edit [contenteditable]:hover { outline: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 6px; }
+.edit [contenteditable]:focus { outline: 2px solid var(--accent); outline-offset: 6px; }

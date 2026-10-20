@@ -1,0 +1,43 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+REPO_ROOT="${SCRIPT_DIR:h}"
+DEVICE_NAME="${OTTO_MOBILE_SIMULATOR_NAME:-${MUSE_MOBILE_SIMULATOR_NAME:-Otto Mobile iPhone}}"
+DEVICE_TYPE="${OTTO_MOBILE_SIMULATOR_TYPE:-${MUSE_MOBILE_SIMULATOR_TYPE:-com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro}}"
+TOKEN="${OTTO_MOBILE_HOST_TOKEN:-${MUSE_MOBILE_HOST_TOKEN:-otto-mobile-demo-token-2026-local-only}}"
+HOST_URL="${OTTO_MOBILE_HOST_URL:-${MUSE_MOBILE_HOST_URL:-http://127.0.0.1:7338/}}"
+DERIVED_DATA="${OTTO_MOBILE_DERIVED_DATA:-${MUSE_MOBILE_DERIVED_DATA:-/tmp/otto-mobile-derived-sim}}"
+
+runtime_id="$(xcrun simctl list runtimes | awk '/iOS .* - com.apple.CoreSimulator.SimRuntime.iOS-/{print $NF}' | tail -1)"
+if [[ -z "${runtime_id}" ]]; then
+  print -u2 "No iOS Simulator runtime is installed. Run: xcodebuild -downloadPlatform iOS"
+  exit 1
+fi
+
+device_id="$(xcrun simctl list devices available | awk -F '[()]' -v name="${DEVICE_NAME}" '$0 ~ name {print $2; exit}')"
+if [[ -z "${device_id}" ]]; then
+  device_id="$(xcrun simctl create "${DEVICE_NAME}" "${DEVICE_TYPE}" "${runtime_id}")"
+fi
+
+xcrun simctl boot "${device_id}" >/dev/null 2>&1 || true
+xcrun simctl bootstatus "${device_id}" -b
+
+xcodebuild \
+  -project "${REPO_ROOT}/Apps/OttoMobileApp/OttoMobileApp.xcodeproj" \
+  -scheme OttoMobileApp \
+  -configuration Debug \
+  -destination "platform=iOS Simulator,id=${device_id}" \
+  -derivedDataPath "${DERIVED_DATA}" \
+  build
+
+app_path="${DERIVED_DATA}/Build/Products/Debug-iphonesimulator/OttoMobileApp.app"
+xcrun simctl install "${device_id}" "${app_path}"
+SIMCTL_CHILD_OTTO_MOBILE_DEMO_TOKEN="${TOKEN}" \
+SIMCTL_CHILD_OTTO_MOBILE_DEMO_HOST_URL="${HOST_URL}" \
+SIMCTL_CHILD_OTTO_MOBILE_DEMO_DEVICE_ID="D9212942-8C77-4E2A-BF27-1A36DA8A5134" \
+  xcrun simctl launch --terminate-running-process "${device_id}" io.openotto.mobile.dev
+
+if [[ "${OTTO_MOBILE_SKIP_OPEN:-${MUSE_MOBILE_SKIP_OPEN:-0}}" != "1" ]]; then
+  open -a Simulator
+fi

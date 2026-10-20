@@ -1,0 +1,83 @@
+#!/bin/zsh
+set -euo pipefail
+
+script_dir=${0:A:h}
+repository_root=${script_dir:h}
+worktrees_root=${OTTO_WORKTREES_ROOT:-${MUSE_WORKTREES_ROOT:-${repository_root:h}/Otto-worktrees}}
+# Worktrees created before the rename stay where they are, in the sibling Muse-worktrees/.
+# They are found for removal but never moved.
+legacy_worktrees_root=${repository_root:h}/Muse-worktrees
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/otto-worktree create <task-name> [start-point]
+  scripts/otto-worktree remove <task-name>
+  scripts/otto-worktree list
+
+Creates agent worktrees under ../Otto-worktrees on unique codex/<task-name>
+branches. Existing worktrees in ../Muse-worktrees (from before the rename) are
+still found by remove. Removal refuses dirty worktrees.
+EOF
+}
+
+(( $# > 0 )) || { usage >&2; exit 2; }
+action=$1
+shift
+
+case $action in
+  create)
+    (( $# >= 1 && $# <= 2 )) || { usage >&2; exit 2; }
+    task_name=$1
+    start_point=${2:-HEAD}
+    [[ $task_name == [A-Za-z0-9]* && $task_name != *[^A-Za-z0-9._-]* ]] || {
+      print -u2 "Task name may contain only letters, numbers, dots, underscores, and hyphens."
+      exit 2
+    }
+    branch_name=codex/$task_name
+    worktree_path=$worktrees_root/$task_name
+    [[ ! -e $worktree_path ]] || { print -u2 "Path already exists: $worktree_path"; exit 17; }
+    [[ ! -e $legacy_worktrees_root/$task_name ]] || {
+      print -u2 "A pre-rename worktree already uses this name: $legacy_worktrees_root/$task_name"
+      exit 17
+    }
+    /bin/mkdir -p "$worktrees_root"
+    if /usr/bin/git -C "$repository_root" show-ref --verify --quiet "refs/heads/$branch_name"; then
+      /usr/bin/git -C "$repository_root" worktree add "$worktree_path" "$branch_name"
+    else
+      /usr/bin/git -C "$repository_root" worktree add -b "$branch_name" "$worktree_path" "$start_point"
+    fi
+    print "Created:  $worktree_path"
+    print "Branch:   $branch_name"
+    print "Builds:   isolated automatically by scripts/otto-swift"
+    ;;
+  remove)
+    (( $# == 1 )) || { usage >&2; exit 2; }
+    task_name=$1
+    worktree_path=$worktrees_root/$task_name
+    if [[ ! -d $worktree_path && -d $legacy_worktrees_root/$task_name ]]; then
+      worktree_path=$legacy_worktrees_root/$task_name
+    fi
+    [[ -d $worktree_path ]] || { print -u2 "Worktree not found: $worktree_path"; exit 2; }
+    changes=$(/usr/bin/git -C "$worktree_path" status --porcelain=v1 --untracked-files=normal)
+    [[ -z $changes ]] || {
+      print -u2 "Refusing to remove dirty worktree: $worktree_path"
+      print -u2 -- "$changes"
+      exit 65
+    }
+    branch_name=$(/usr/bin/git -C "$worktree_path" branch --show-current)
+    head_sha=$(/usr/bin/git -C "$worktree_path" rev-parse HEAD)
+    archive_name=archive/worktree/$task_name
+    /usr/bin/git -C "$repository_root" update-ref "refs/heads/$archive_name" "$head_sha"
+    /usr/bin/git -C "$repository_root" worktree remove "$worktree_path"
+    print "Removed:  $worktree_path"
+    print "Archived: $archive_name -> $head_sha"
+    print "Branch retained: ${branch_name:-detached checkout}"
+    ;;
+  list)
+    (( $# == 0 )) || { usage >&2; exit 2; }
+    /usr/bin/git -C "$repository_root" worktree list
+    ;;
+  -h|--help|help) usage ;;
+  *) print -u2 "Unknown action: $action"; usage >&2; exit 2 ;;
+esac

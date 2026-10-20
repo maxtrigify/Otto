@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/probe","session_id":"9f2b1c44-0000-4a5a-bf07-2630a7c3ce83","model":"Composer 2.5","permissionMode":"default"}
+{"type":"result","subtype":"error","duration_ms":812,"is_error":true,"result":"Model request failed: rate limited","session_id":"9f2b1c44-0000-4a5a-bf07-2630a7c3ce83"}

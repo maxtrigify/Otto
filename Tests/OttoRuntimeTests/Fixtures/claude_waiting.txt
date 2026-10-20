@@ -1,0 +1,2 @@
+Allow this command to access the workspace? Permission required.
+I need your input before choosing an authentication provider.

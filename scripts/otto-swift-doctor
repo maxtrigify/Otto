@@ -1,0 +1,58 @@
+#!/bin/zsh
+set -euo pipefail
+
+script_dir=${0:A:h}
+repository_root=${script_dir:h}
+mode=${1:-report}
+
+case $mode in
+  report|--kill-orphans) ;;
+  -h|--help)
+    print "Usage: scripts/otto-swift-doctor [report|--kill-orphans]"
+    exit 0
+    ;;
+  *) print -u2 "Unknown mode: $mode"; exit 2 ;;
+esac
+
+print "Disk space (low space can stall iCloud hydration and corrupt build outputs):"
+/bin/df -h "$repository_root"
+default_state_root=$HOME/Library/Caches/Otto/SwiftPM
+if [[ ! -e $default_state_root && -d $HOME/Library/Caches/Muse/SwiftPM ]]; then
+  default_state_root=$HOME/Library/Caches/Muse/SwiftPM
+fi
+print "Generated build caches: ${OTTO_SWIFT_STATE_ROOT:-${MUSE_SWIFT_STATE_ROOT:-$default_state_root}}"
+print "Remove only completed task build directories after checking their active.lock."
+print "Otto-related SwiftPM dependency processes:"
+matches=$(ps -axo pid=,ppid=,etime=,state=,command= | \
+  /usr/bin/awk -v root="$repository_root" 'index($0, root) && $0 ~ /\/repositories\/|swift-(build|test|package)|\/swift (build|test|package)/')
+
+if [[ -z $matches ]]; then
+  print "  None found."
+  exit 0
+fi
+print -r -- "$matches"
+
+orphans=(${(f)$(print -r -- "$matches" | /usr/bin/awk '$2 == 1 {print $1}')})
+if (( ${#orphans} == 0 )); then
+  print "No orphaned Otto SwiftPM processes found."
+  exit 0
+fi
+
+print "Orphaned process IDs (PPID 1): ${orphans[*]}"
+if [[ $mode != --kill-orphans ]]; then
+  print "Run scripts/otto-swift-doctor --kill-orphans to terminate only these confirmed orphans."
+  exit 1
+fi
+
+print "Terminating confirmed Otto orphans..."
+/bin/kill -TERM "${orphans[@]}" 2>/dev/null || true
+/bin/sleep 2
+survivors=()
+for pid in "${orphans[@]}"; do
+  /bin/kill -0 "$pid" 2>/dev/null && survivors+=("$pid")
+done
+if (( ${#survivors} > 0 )); then
+  print "Force-terminating: ${survivors[*]}"
+  /bin/kill -KILL "${survivors[@]}" 2>/dev/null || true
+fi
+print "Cleanup complete."

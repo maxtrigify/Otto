@@ -1,0 +1,1 @@
+{"name":"otto-photon-bridge","version":"0.1.0","private":true,"type":"module","scripts":{"test":"node --test"},"dependencies":{"spectrum-ts":"12.8.0"}}

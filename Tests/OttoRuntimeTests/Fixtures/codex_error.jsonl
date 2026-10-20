@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"codex-error"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"error","message":"Sandbox initialization failed"}}
+{"type":"turn.failed","message":"Run failed"}

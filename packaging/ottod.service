@@ -1,0 +1,22 @@
+[Unit]
+Description=Otto remote agent daemon
+After=default.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/otto/ottod.env
+ExecStart=%h/.local/bin/ottod serve --token-file %h/.config/otto/token --state-dir %h/.local/share/otto --workspace ${OTTO_WORKSPACE} --socket %t/ottod.sock
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+TasksMax=256
+LimitNOFILE=4096
+UMask=0077
+
+[Install]
+WantedBy=default.target

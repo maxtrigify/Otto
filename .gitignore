@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+.muse/
+.otto/
+DerivedData/
+*.xcuserstate
+.DS_Store
+node_modules/

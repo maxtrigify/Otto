@@ -1,0 +1,165 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_DIR="${0:A:h}"
+REPO_ROOT="${SCRIPT_DIR:h}"
+DEVICE_ID="${OTTO_MOBILE_SIMULATOR_ID:-${MUSE_MOBILE_SIMULATOR_ID:-254D4A5C-3212-41B7-B31D-95928684D317}}"
+PORT="${OTTO_MOBILE_PAIRING_TEST_PORT:-${MUSE_MOBILE_PAIRING_TEST_PORT:-7339}}"
+TEST_CASE="${OTTO_MOBILE_UI_TEST_CASE:-${MUSE_MOBILE_UI_TEST_CASE:-testLivePairingExchangesCredentialAndOpensHome}}"
+RUN_DIRECTORY=$(/usr/bin/mktemp -d /tmp/otto-mobile-pairing-e2e.XXXXXX)
+PAIRING_FILE="$RUN_DIRECTORY/pairing.txt"
+HOST_LOG="$RUN_DIRECTORY/host.log"
+RESULT_BUNDLE="$RUN_DIRECTORY/result.xcresult"
+ATTACHMENTS="$RUN_DIRECTORY/attachments"
+SOURCE_SNAPSHOT="$RUN_DIRECTORY/source"
+
+cleanup() {
+  if [[ -n ${HOST_PID:-} ]] && /bin/kill -0 "$HOST_PID" 2>/dev/null; then
+    /bin/kill "$HOST_PID" 2>/dev/null || true
+    wait "$HOST_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+TASK_FINGERPRINT=$(print -rn -- "$REPO_ROOT" | /usr/bin/shasum -a 256 | /usr/bin/cut -c1-10)
+TASK_ID="${REPO_ROOT:t}-$TASK_FINGERPRINT"
+# Same state root rule as scripts/otto-swift: an existing pre-rename cache is reused.
+STATE_ROOT="$HOME/Library/Caches/Otto/SwiftPM"
+if [[ ! -e $STATE_ROOT && -d $HOME/Library/Caches/Muse/SwiftPM ]]; then
+  STATE_ROOT="$HOME/Library/Caches/Muse/SwiftPM"
+fi
+STATE_ROOT="${OTTO_SWIFT_STATE_ROOT:-${MUSE_SWIFT_STATE_ROOT:-$STATE_ROOT}}"
+BUILD_ROOT="$STATE_ROOT/$TASK_ID/build"
+HOST_BINARY=$(find "$BUILD_ROOT" -type f -path '*/debug/otto-mobile-demo-host' \
+  -perm -111 -print 2>/dev/null | /usr/bin/head -n 1)
+if [[ "${OTTO_MOBILE_SKIP_HOST_BUILD:-${MUSE_MOBILE_SKIP_HOST_BUILD:-0}}" != "1" && ( -z "$HOST_BINARY" \
+  || "$REPO_ROOT/Package.swift" -nt "$HOST_BINARY" \
+  || "$REPO_ROOT/Sources/otto-mobile-demo-host/main.swift" -nt "$HOST_BINARY" ) ]]; then
+  "$REPO_ROOT/scripts/otto-swift" build --product otto-mobile-demo-host
+  HOST_BINARY=$(find "$BUILD_ROOT" -type f -path '*/debug/otto-mobile-demo-host' \
+    -perm -111 -print 2>/dev/null | /usr/bin/head -n 1)
+fi
+[[ -n "$HOST_BINARY" ]] || {
+  print -u2 "The isolated build completed without producing otto-mobile-demo-host."
+  exit 1
+}
+
+export OTTO_MOBILE_HOST_PORT="$PORT"
+export OTTO_MOBILE_PAIRING_QR_FILE="$PAIRING_FILE"
+"$HOST_BINARY" >"$HOST_LOG" 2>&1 &
+HOST_PID=$!
+
+deadline=$((SECONDS + 20))
+while [[ ! -s "$PAIRING_FILE" ]]; do
+  if ! /bin/kill -0 "$HOST_PID" 2>/dev/null; then
+    print -u2 "The mobile demo host exited before producing a pairing code."
+    /bin/cat "$HOST_LOG" >&2
+    exit 1
+  fi
+  (( SECONDS >= deadline )) && {
+    print -u2 "Timed out waiting for a live mobile pairing code."
+    /bin/cat "$HOST_LOG" >&2
+    exit 1
+  }
+  /bin/sleep 0.1
+done
+
+/bin/sleep 0.2
+if ! /bin/kill -0 "$HOST_PID" 2>/dev/null; then
+  print -u2 "The mobile demo host exited after producing its pairing code."
+  /bin/cat "$HOST_LOG" >&2
+  exit 1
+fi
+
+export OTTO_MOBILE_LIVE_PAIRING_QR="$(<"$PAIRING_FILE")"
+export OTTO_MOBILE_UI_HOST_URL="http://127.0.0.1:$PORT/"
+
+if [[ "${OTTO_MOBILE_RESET_APP_INSTALL:-${MUSE_MOBILE_RESET_APP_INSTALL:-0}}" == "1" ]]; then
+  xcrun simctl uninstall "$DEVICE_ID" io.openotto.mobile.dev 2>/dev/null || true
+fi
+
+# Notification authorization survives an ordinary simulator reinstall. This test exercises the
+# real first-run permission prompt, so isolate it from previous UI cases just as production users
+# encounter it after a fresh install.
+if [[ "$TEST_CASE" == "testBackgroundCompletionPostsNativeNotification" ]]; then
+  xcrun simctl uninstall "$DEVICE_ID" io.openotto.mobile.dev 2>/dev/null || true
+fi
+
+/bin/mkdir -p "$SOURCE_SNAPSHOT"
+(
+  cd "$REPO_ROOT"
+  /usr/bin/printf 'Package.swift\0Package.resolved\0scripts/fixtures/OttoMobilePackagePlaceholder.swift\0'
+  find Sources/OttoCommercial Sources/OttoModels Sources/OttoRPCContracts Sources/OttoMobileClient \
+    -type f -name '*.swift' -print0
+  find Apps/OttoMobileApp -type f -print0
+) | /usr/bin/rsync -a --from0 --files-from=- "$REPO_ROOT/" "$SOURCE_SNAPSHOT/"
+
+PLACEHOLDER="$SOURCE_SNAPSHOT/scripts/fixtures/OttoMobilePackagePlaceholder.swift"
+for source_directory in "$REPO_ROOT"/Sources/*; do
+  target_directory="$SOURCE_SNAPSHOT/Sources/${source_directory:t}"
+  [[ -d "$target_directory" ]] && continue
+  /bin/mkdir -p "$target_directory"
+  /usr/bin/ditto "$PLACEHOLDER" "$target_directory/Placeholder.swift"
+done
+for test_directory in "$REPO_ROOT"/Tests/*; do
+  target_directory="$SOURCE_SNAPSHOT/Tests/${test_directory:t}"
+  /bin/mkdir -p "$target_directory"
+  /usr/bin/ditto "$PLACEHOLDER" "$target_directory/Placeholder.swift"
+done
+
+# SwiftPM validates declared resource paths while loading the package graph even though the
+# iPhone target does not build the desktop app or test fixtures. Empty directories are enough;
+# the cloud-backed desktop web bundles themselves are deliberately outside this test closure.
+for resource_directory in \
+  Sources/OttoApp/Resources/Themes \
+  Sources/OttoApp/Resources/Excalidraw \
+  Sources/OttoApp/Resources/DiagramRenderer \
+  Sources/OttoApp/Resources/ProviderLogos \
+  Sources/OttoApp/Resources/PluginLogos \
+  Sources/OttoApp/Resources/GTMGrid \
+  Tests/OttoPersistenceTests/Fixtures \
+  Tests/OttoRuntimeTests/Fixtures
+do
+  /bin/mkdir -p "$SOURCE_SNAPSHOT/$resource_directory"
+done
+
+# Xcode does not consume the package root lockfile for a local package reference.
+# Seed its workspace lock from the same reviewed pins before disabling resolution.
+XCODE_PINS="$SOURCE_SNAPSHOT/Apps/OttoMobileApp/OttoMobileApp.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+/bin/mkdir -p "$XCODE_PINS"
+/bin/cp "$REPO_ROOT/Package.resolved" "$XCODE_PINS/Package.resolved"
+
+xcodebuild \
+  -project "$SOURCE_SNAPSHOT/Apps/OttoMobileApp/OttoMobileApp.xcodeproj" \
+  -scheme OttoMobileApp \
+  -configuration Debug \
+  -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+  -derivedDataPath "${OTTO_MOBILE_DERIVED_DATA:-${MUSE_MOBILE_DERIVED_DATA:-/tmp/otto-mobile-derived-sim}}" \
+  -scmProvider xcode \
+  -disableAutomaticPackageResolution \
+  -onlyUsePackageVersionsFromResolvedFile \
+  -skipPackageUpdates \
+  -resultBundlePath "$RESULT_BUNDLE" \
+  "-only-testing:OttoMobileAppUITests/OttoMobileAppUITests/$TEST_CASE" \
+  "OTTO_MOBILE_LIVE_PAIRING_QR=$OTTO_MOBILE_LIVE_PAIRING_QR" \
+  "OTTO_MOBILE_LIVE_MANAGED_PAIRING_QR=${OTTO_MOBILE_LIVE_MANAGED_PAIRING_QR:-${MUSE_MOBILE_LIVE_MANAGED_PAIRING_QR:-}}" \
+  "OTTO_MOBILE_UI_HOST_URL=$OTTO_MOBILE_UI_HOST_URL" \
+  test
+
+SUMMARY=$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE")
+test_count=$(print -rn -- "$SUMMARY" | /usr/bin/plutil -extract totalTestCount raw -o - -)
+passed_count=$(print -rn -- "$SUMMARY" | /usr/bin/plutil -extract passedTests raw -o - -)
+failed_count=$(print -rn -- "$SUMMARY" | /usr/bin/plutil -extract failedTests raw -o - -)
+skipped_count=$(print -rn -- "$SUMMARY" | /usr/bin/plutil -extract skippedTests raw -o - -)
+[[ "$test_count" == "1" && "$passed_count" == "1" \
+  && "$failed_count" == "0" && "$skipped_count" == "0" ]] || {
+  print -u2 "Expected one passed mobile UI test; got total=$test_count passed=$passed_count failed=$failed_count skipped=$skipped_count."
+  exit 1
+}
+
+xcrun xcresulttool export attachments \
+  --path "$RESULT_BUNDLE" \
+  --output-path "$ATTACHMENTS"
+print "Mobile UI E2E passed: $TEST_CASE"
+print "Result: $RESULT_BUNDLE"
+print "Attachments: $ATTACHMENTS"

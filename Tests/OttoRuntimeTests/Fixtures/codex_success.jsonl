@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"codex-fixture"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"type":"command_execution","command":"swift test"}}
+{"type":"item.completed","item":{"type":"error","message":"An unrelated MCP server requires authentication"}}
+{"type":"item.completed","item":{"type":"file_change","path":"Tests/AuthTests.swift"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Added authentication coverage."}}
+{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":12}}

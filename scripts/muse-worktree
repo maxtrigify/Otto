@@ -1,0 +1,3 @@
+#!/bin/zsh
+# Compatibility wrapper: this script was renamed to otto-worktree.
+exec "${0:A:h}/otto-worktree" "$@"

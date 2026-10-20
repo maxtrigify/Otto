@@ -1,0 +1,261 @@
+#!/bin/zsh
+set -euo pipefail
+
+script_dir=${0:A:h}
+repository_root=${script_dir:h}
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/otto-swift <build|test|run|package|resolve> [arguments...]
+
+Runs SwiftPM with a cache and scratch directory isolated to this worktree.
+Normal commands use Package.resolved and do not update dependencies.
+
+Environment:
+  OTTO_SWIFT_TASK_ID       Override the worktree-derived task identifier.
+  OTTO_SWIFT_TIMEOUT       Timeout in seconds (default: 1200; 0 disables it).
+  OTTO_SWIFT_SOURCE_MODE   snapshot (default for build/test) or checkout.
+  OTTO_SWIFT_STATE_ROOT    State root (default: ~/Library/Caches/Otto/SwiftPM, or the existing
+                           pre-rename ~/Library/Caches/Muse/SwiftPM when only that exists).
+  OTTO_SWIFT_CACHE_LIMIT_MB
+                           Maximum total state size (default: 30720; 0 disables pruning).
+
+The pre-rename MUSE_SWIFT_* names are still read when the OTTO_SWIFT_* one is unset.
+EOF
+}
+
+(( $# > 0 )) || { usage >&2; exit 2; }
+command_name=$1
+shift
+
+case $command_name in
+  build|test|run|package|resolve) ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) print -u2 "Unsupported SwiftPM command: $command_name"; usage >&2; exit 2 ;;
+esac
+
+worktree_name=${repository_root:t}
+path_fingerprint=$(print -rn -- "$repository_root" | /usr/bin/shasum -a 256 | /usr/bin/cut -c1-10)
+default_task_id="${worktree_name}-${path_fingerprint}"
+task_id=${OTTO_SWIFT_TASK_ID:-${MUSE_SWIFT_TASK_ID:-$default_task_id}}
+task_id=${task_id//[^A-Za-z0-9._-]/-}
+[[ -n $task_id ]] || { print -u2 "OTTO_SWIFT_TASK_ID produced an empty identifier."; exit 2; }
+
+default_state_root=$HOME/Library/Caches/Otto/SwiftPM
+legacy_state_root=$HOME/Library/Caches/Muse/SwiftPM
+# Keep using an existing pre-rename cache rather than forcing a cold rebuild. The app moves
+# Caches/Muse to Caches/Otto itself (leaving a symlink); scripts never move caches.
+if [[ ! -e $default_state_root && -d $legacy_state_root ]]; then
+  default_state_root=$legacy_state_root
+fi
+state_root=${OTTO_SWIFT_STATE_ROOT:-${MUSE_SWIFT_STATE_ROOT:-$default_state_root}}
+cache_limit_mb=${OTTO_SWIFT_CACHE_LIMIT_MB:-${MUSE_SWIFT_CACHE_LIMIT_MB:-30720}}
+task_root=$state_root/$task_id
+scratch_path=$task_root/build
+cache_path=$task_root/cache
+log_dir=$task_root/logs
+lock_dir=$task_root/active.lock
+timeout_seconds=${OTTO_SWIFT_TIMEOUT:-${MUSE_SWIFT_TIMEOUT:-1200}}
+
+[[ $timeout_seconds == <-> ]] || { print -u2 "OTTO_SWIFT_TIMEOUT must be a non-negative integer."; exit 2; }
+[[ $cache_limit_mb == <-> ]] || {
+  print -u2 "OTTO_SWIFT_CACHE_LIMIT_MB must be a non-negative integer."
+  exit 2
+}
+/bin/mkdir -p "$task_root" "$log_dir"
+
+if ! /bin/mkdir "$lock_dir" 2>/dev/null; then
+  owner_pid=$(/bin/cat "$lock_dir/pid" 2>/dev/null || true)
+  if [[ $owner_pid == <-> ]] && /bin/kill -0 "$owner_pid" 2>/dev/null; then
+    print -u2 "A SwiftPM command is already active for task '$task_id' (PID $owner_pid)."
+    print -u2 "Use a different worktree/task ID instead of sharing its build directory."
+    exit 75
+  fi
+  print -u2 "Reclaiming stale SwiftPM task lock for '$task_id'."
+  /bin/rm -rf "$lock_dir"
+  /bin/mkdir "$lock_dir"
+fi
+print -r -- $$ > "$lock_dir/pid"
+/usr/bin/touch "$task_root"
+
+child_pid=""
+watchdog_pid=""
+prune_lock="$state_root/.prune.lock"
+prune_lock_owned=0
+cleanup() {
+  local exit_code=$?
+  trap - EXIT INT TERM HUP
+  [[ -n $watchdog_pid ]] && /bin/kill "$watchdog_pid" 2>/dev/null || true
+  if [[ -n $child_pid ]] && /bin/kill -0 "$child_pid" 2>/dev/null; then
+    print -u2 "Stopping SwiftPM process group $child_pid..."
+    /bin/kill -TERM -- -"$child_pid" 2>/dev/null || true
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      /bin/kill -0 "$child_pid" 2>/dev/null || break
+      /bin/sleep 1
+    done
+    /bin/kill -KILL -- -"$child_pid" 2>/dev/null || true
+  fi
+  if (( prune_lock_owned )); then
+    /bin/rm -rf "$prune_lock"
+  fi
+  /bin/rm -rf "$lock_dir"
+  exit $exit_code
+}
+trap cleanup EXIT INT TERM HUP
+
+prune_inactive_task_caches() {
+  (( cache_limit_mb > 0 )) || return 0
+
+  if ! /bin/mkdir "$prune_lock" 2>/dev/null; then
+    local prune_owner prune_lock_mtime now
+    prune_owner=$(/bin/cat "$prune_lock/pid" 2>/dev/null || true)
+    if [[ $prune_owner == <-> ]] && /bin/kill -0 "$prune_owner" 2>/dev/null; then
+      return 0
+    fi
+    prune_lock_mtime=$(/usr/bin/stat -f '%m' "$prune_lock" 2>/dev/null || true)
+    now=$(/bin/date +%s)
+    if [[ $prune_lock_mtime != <-> ]] || (( now - prune_lock_mtime < 60 )); then
+      return 0
+    fi
+    /bin/rm -rf "$prune_lock"
+    /bin/mkdir "$prune_lock" 2>/dev/null || return 0
+  fi
+  prune_lock_owned=1
+  print -r -- $$ > "$prune_lock/pid"
+
+  local limit_kb=$(( cache_limit_mb * 1024 ))
+  local total_kb
+  total_kb=$(/usr/bin/du -sk "$state_root" 2>/dev/null | /usr/bin/awk '{print $1}')
+  [[ $total_kb == <-> ]] || total_kb=0
+
+  if (( total_kb > limit_kb )); then
+    local entry candidate candidate_lock owner_pid candidate_kb
+    local -a candidates
+    candidates=("${(@f)$(
+      for candidate in "$state_root"/*; do
+        [[ -d $candidate && $candidate != $task_root ]] || continue
+        /usr/bin/stat -f '%m|%N' "$candidate"
+      done | /usr/bin/sort -n
+    )}")
+
+    for entry in "${candidates[@]}"; do
+      (( total_kb > limit_kb )) || break
+      candidate=${entry#*|}
+      [[ -d $candidate ]] || continue
+
+      candidate_lock=$candidate/active.lock
+      if [[ -d $candidate_lock ]]; then
+        owner_pid=$(/bin/cat "$candidate_lock/pid" 2>/dev/null || true)
+        if [[ $owner_pid == <-> ]] && /bin/kill -0 "$owner_pid" 2>/dev/null; then
+          continue
+        fi
+      fi
+
+      candidate_kb=$(/usr/bin/du -sk "$candidate" 2>/dev/null | /usr/bin/awk '{print $1}')
+      [[ $candidate_kb == <-> ]] || candidate_kb=0
+      print "Pruning inactive SwiftPM task cache: ${candidate:t} ($(( candidate_kb / 1024 )) MB)"
+      /usr/bin/chflags -R nouchg "$candidate" 2>/dev/null || true
+      /bin/chmod -RN "$candidate" 2>/dev/null || true
+      /bin/chmod -R u+w "$candidate" 2>/dev/null || true
+      if ! /bin/rm -rf "$candidate"; then
+        print -u2 "Could not completely prune SwiftPM task cache: $candidate"
+      fi
+      total_kb=$(/usr/bin/du -sk "$state_root" 2>/dev/null | /usr/bin/awk '{print $1}')
+      [[ $total_kb == <-> ]] || total_kb=0
+    done
+  fi
+
+  /bin/rm -rf "$prune_lock"
+  prune_lock_owned=0
+}
+
+prune_inactive_task_caches
+
+free_kib=$(/bin/df -k "$task_root" | /usr/bin/awk 'NR == 2 {print $4}')
+if [[ $free_kib == <-> ]] && (( free_kib < 2 * 1024 * 1024 )); then
+  print -u2 "Not enough disk space for SwiftPM (less than 2 GiB free)."
+  print -u2 "Free space or remove completed build caches before retrying. Run scripts/otto-swift-doctor."
+  exit 73
+fi
+
+timestamp=$(/bin/date +%Y%m%d-%H%M%S)
+log_path=$log_dir/$timestamp-$command_name.log
+
+source_root=$repository_root
+source_mode=${OTTO_SWIFT_SOURCE_MODE:-${MUSE_SWIFT_SOURCE_MODE:-checkout}}
+if [[ $command_name == build || $command_name == test ]]; then
+  source_mode=${OTTO_SWIFT_SOURCE_MODE:-${MUSE_SWIFT_SOURCE_MODE:-snapshot}}
+fi
+[[ $source_mode == snapshot || $source_mode == checkout ]] || {
+  print -u2 "OTTO_SWIFT_SOURCE_MODE must be snapshot or checkout."; exit 2
+}
+if [[ $source_mode == snapshot ]]; then
+  [[ $command_name == build || $command_name == test ]] || {
+    print -u2 "Source snapshots support build and test only."; exit 2
+  }
+  source_root=$repository_root/.build/swift-source.nosync
+  # The snapshot is inside the worktree, but Git must not discover that ancestor. Otherwise
+  # SwiftPM runs git status over the original iCloud files even with --package-path set.
+  export GIT_CEILING_DIRECTORIES="${source_root:h}${GIT_CEILING_DIRECTORIES:+:$GIT_CEILING_DIRECTORIES}"
+fi
+
+swift_args=(
+  --package-path "$source_root"
+  --scratch-path "$scratch_path"
+  --cache-path "$cache_path"
+  --manifest-cache local
+)
+
+if [[ $command_name == resolve ]]; then
+  swift_invocation=(/usr/bin/swift package "${swift_args[@]}" resolve "$@")
+else
+  swift_args+=(--only-use-versions-from-resolved-file)
+  swift_invocation=(/usr/bin/swift "$command_name" "${swift_args[@]}" "$@")
+fi
+
+if [[ $source_mode == snapshot ]]; then
+  # Stage under the same timeout and process-group cleanup as SwiftPM. No Git metadata is
+  # copied, so SwiftPM cannot stall in git status hydrating the original iCloud checkout.
+  swift_invocation=(/usr/bin/python3 "$script_dir/otto-swift-snapshot.py"
+    "$repository_root" "$source_root" "${swift_invocation[@]}")
+fi
+
+print "Otto Swift task: $task_id"
+print "Scratch path:   $scratch_path"
+print "Log:            $log_path"
+
+# setsid makes the Swift process the leader of a new process group. Cleanup can
+# therefore terminate Git fetchers and compiler children, not just `swift`.
+/usr/bin/perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!"; exec @ARGV or die "exec failed: $!"' -- \
+  "${swift_invocation[@]}" > >(/usr/bin/tee "$log_path") 2>&1 &
+child_pid=$!
+print -r -- "$child_pid" > "$lock_dir/process-group"
+
+if (( timeout_seconds > 0 )); then
+  # Keep the watchdog in one process. A shell subshell plus `sleep` leaves the
+  # sleep orphaned when the wrapper cancels the watchdog, which in turn keeps
+  # command-substitution pipes open until the full timeout elapses.
+  /usr/bin/perl -e '
+    my ($timeout, $child) = @ARGV;
+    sleep $timeout;
+    if (kill 0, $child) {
+      warn "SwiftPM timed out after ${timeout}s; terminating process group $child.\n";
+      kill "TERM", -$child;
+      sleep 5;
+      kill "KILL", -$child if kill 0, $child;
+    }
+  ' "$timeout_seconds" "$child_pid" &
+  watchdog_pid=$!
+fi
+
+set +e
+wait "$child_pid"
+exit_code=$?
+set -e
+child_pid=""
+[[ -n $watchdog_pid ]] && /bin/kill "$watchdog_pid" 2>/dev/null || true
+watchdog_pid=""
+/bin/rm -rf "$lock_dir"
+trap - EXIT INT TERM HUP
+exit $exit_code

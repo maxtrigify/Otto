@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://otto.local/contracts/mobile-chat-v1.schema.json",
+  "title": "Otto Mobile Chat Protocol v1",
+  "type": "object",
+  "required": ["protocolVersion", "methods", "event"],
+  "properties": {
+    "protocolVersion": { "const": 1 },
+    "methods": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "environment.getCapabilities", "bot.list", "team.list",
+          "activity.list", "activity.subscribe", "thread.list",
+          "thread.getSnapshot", "thread.subscribe", "thread.create",
+          "message.send", "run.interrupt", "run.stop", "approval.respond",
+          "attachment.prepareUpload", "attachment.download", "device.list",
+          "device.revoke", "computer.acquire", "computer.input", "computer.handBack"
+        ]
+      }
+    },
+    "event": { "$ref": "#/$defs/hostEvent" }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "hostEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sequence", "timestamp", "type", "schemaVersion"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "timestamp": { "type": "number", "description": "Milliseconds since Unix epoch" },
+        "type": {
+          "enum": [
+            "home.changed", "thread.message", "thread.state", "activity.changed",
+            "approval.requested", "computer.changed"
+          ]
+        },
+        "schemaVersion": { "const": 1 },
+        "threadID": { "$ref": "#/$defs/uuid" },
+        "profileID": { "$ref": "#/$defs/uuid" },
+        "correlationID": { "$ref": "#/$defs/uuid" },
+        "causationID": { "$ref": "#/$defs/uuid" },
+        "payload": { "type": "string", "contentEncoding": "base64" }
+      }
+    }
+  }
+}

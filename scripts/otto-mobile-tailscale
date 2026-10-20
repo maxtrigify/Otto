@@ -1,0 +1,60 @@
+#!/bin/zsh
+set -euo pipefail
+
+MODE="${1:-preflight}"
+BACKEND_PORT="${OTTO_MOBILE_HOST_PORT:-${MUSE_MOBILE_HOST_PORT:-7338}}"
+HTTPS_PORT="${OTTO_MOBILE_TAILSCALE_HTTPS_PORT:-${MUSE_MOBILE_TAILSCALE_HTTPS_PORT:-443}}"
+
+if command -v tailscale >/dev/null 2>&1; then
+  TAILSCALE="$(command -v tailscale)"
+elif [[ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]]; then
+  TAILSCALE=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+else
+  print -u2 "Tailscale is not installed or its CLI is not available."
+  print -u2 "Install and sign in on this Mac and the test iPhone, then rerun this preflight."
+  exit 2
+fi
+
+STATUS="$($TAILSCALE status --json)"
+DNS_NAME="$(print -rn -- "$STATUS" | /usr/bin/plutil -extract Self.DNSName raw -o - -)"
+DNS_NAME="${DNS_NAME%.}"
+[[ -n "$DNS_NAME" ]] || {
+  print -u2 "Tailscale is installed, but this Mac has no tailnet DNS name."
+  exit 3
+}
+
+if [[ "$HTTPS_PORT" == "443" ]]; then
+  PUBLIC_URL="https://$DNS_NAME/"
+else
+  PUBLIC_URL="https://$DNS_NAME:$HTTPS_PORT/"
+fi
+
+case "$MODE" in
+  preflight)
+    print "Tailscale node: $DNS_NAME"
+    print "Otto backend:  http://127.0.0.1:$BACKEND_PORT/"
+    print "Advertise as:  $PUBLIC_URL"
+    print
+    print "Next: scripts/otto-mobile-tailscale configure"
+    ;;
+  configure)
+    "$TAILSCALE" serve --bg --yes --https="$HTTPS_PORT" \
+      "http://127.0.0.1:$BACKEND_PORT"
+    print "Tailscale Serve now forwards $PUBLIC_URL to the loopback-only Otto host."
+    print "Launch Otto with:"
+    print "OTTO_MOBILE_HOST_PUBLIC_URL=$PUBLIC_URL scripts/otto-swift run Otto"
+    ;;
+  verify)
+    BODY="$(/usr/bin/curl --fail --silent --show-error --max-time 10 "${PUBLIC_URL}health")"
+    print -rn -- "$BODY" | /usr/bin/plutil -extract status raw -o - - | /usr/bin/grep -qx ok
+    print "Verified Otto health through Tailscale Serve at ${PUBLIC_URL}health"
+    ;;
+  reset)
+    "$TAILSCALE" serve reset
+    print "Tailscale Serve configuration reset."
+    ;;
+  *)
+    print -u2 "Usage: scripts/otto-mobile-tailscale [preflight|configure|verify|reset]"
+    exit 64
+    ;;
+esac

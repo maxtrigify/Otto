@@ -1,0 +1,14 @@
+{
+  "name": "muse-private-sign-in",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-11",
+  "workers_dev": true,
+  "assets": {"directory": "./dist", "binding": "ASSETS", "run_worker_first": true},
+  "durable_objects": {"bindings": [{"name": "ROOMS", "class_name": "PrivateInputRoom"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["PrivateInputRoom"]}],
+  "ratelimits": [
+    {"name": "IP_LIMIT", "namespace_id": "1001", "simple": {"limit": 30, "period": 60}},
+    {"name": "GLOBAL_LIMIT", "namespace_id": "1002", "simple": {"limit": 600, "period": 60}}
+  ],
+  "observability": {"enabled": false}
+}

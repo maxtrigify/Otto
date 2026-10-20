@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-ottod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux daemon
+        run: swift build -c release --product ottod -Xswiftc -warnings-as-errors
+      - name: Build Linux release signer
+        run: swift build -c release --product otto-release -Xswiftc -warnings-as-errors
+      - name: Smoke Linux daemon
+        run: .build/release/ottod --help
+      - name: Exercise Linux PTY and remote protocol
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v python3 >/dev/null; then
+            apt-get update
+            apt-get install -y --no-install-recommends python3
+          fi
+          test_root=$(mktemp -d /tmp/ottod-protocol.XXXXXX)
+          trap 'rm -rf -- "$test_root"' EXIT
+          install -d -m 700 "$test_root/state" "$test_root/workspace"
+          python3 -c 'import secrets; print(secrets.token_hex(32))' >"$test_root/token"
+          chmod 600 "$test_root/token"
+          .build/release/ottod serve \
+            --token-file "$test_root/token" \
+            --state-dir "$test_root/state" \
+            --workspace "$test_root/workspace" \
+            --socket "$test_root/ottod.sock" \
+            >"$test_root/daemon.out" 2>"$test_root/daemon.err" &
+          daemon_pid=$!
+          trap 'kill "$daemon_pid" 2>/dev/null || true; wait "$daemon_pid" 2>/dev/null || true; rm -rf -- "$test_root"' EXIT
+          for _ in $(seq 1 100); do
+            [[ -S "$test_root/ottod.sock" ]] && break
+            kill -0 "$daemon_pid"
+            sleep 0.05
+          done
+          [[ -S "$test_root/ottod.sock" ]]
+          scripts/test-ottod-protocol.py \
+            --socket "$test_root/ottod.sock" \
+            --token-file "$test_root/token" \
+            --workspace "$test_root/workspace"
+      - name: Verify signed Linux daemon upgrade and rollback
+        run: scripts/test-ottod-upgrade.sh
+      - name: Package Linux daemon
+        run: scripts/package-ottod-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ottod-linux
+          path: |
+            .build/distribution/ottod-*-linux-*.tar.gz
+            .build/distribution/ottod-*-linux-*.tar.gz.sha256
+          if-no-files-found: error
+
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Swift 6.2 toolchain
+        run: |
+          sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+          swift --version
+      - name: Build and test
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_modules="$(
+            swift test list -Xswiftc -warnings-as-errors \
+              | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*Tests\)\..*/\1/p' \
+              | sort -u
+          )"
+          test -n "$test_modules"
+          while IFS= read -r module; do
+            echo "::group::$module"
+            swift test --skip-build --filter "^${module}\\." -Xswiftc -warnings-as-errors
+            echo "::endgroup::"
+          done <<< "$test_modules"
+      - name: Check formatting
+        run: xcrun swift-format lint --strict --recursive Sources Tests Package.swift
+      - name: Build release
+        run: swift build -c release -Xswiftc -warnings-as-errors
+      - name: Package ad-hoc development artifact
+        run: scripts/package-macos.sh
+      - name: Verify development artifact
+        run: scripts/verify-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Otto-development
+          path: |
+            .build/distribution/Otto-*.zip
+            .build/distribution/Otto-*.zip.sha256
+          if-no-files-found: error
+
+  ios-simulator:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode_26.3.app/Contents/Developer
+      - name: Prepare iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_id=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; print(next(r["identifier"] for r in json.load(sys.stdin)["runtimes"] if r["name"].startswith("iOS") and r["isAvailable"]))')
+          device_id=$(xcrun simctl create "Otto CI iPhone" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime_id")
+          xcrun simctl boot "$device_id"
+          xcrun simctl bootstatus "$device_id" -b
+          echo "OTTO_MOBILE_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
+      - name: Build and test live iOS pairing
+        run: scripts/test-mobile-pairing-e2e
+      - name: Test sending and relaunch continuity
+        env:
+          OTTO_MOBILE_UI_TEST_CASE: testSendStreamsAndRelaunchesWithoutDuplicates
+        run: scripts/test-mobile-pairing-e2e
+      - name: Test shared team room
+        env:
+          OTTO_MOBILE_UI_TEST_CASE: testTeamRoomOpensWithoutPrivateMessages
+        run: scripts/test-mobile-pairing-e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: otto-ios-test-results
+          path: /tmp/otto-mobile-pairing-e2e.*/result.xcresult
+          if-no-files-found: warn

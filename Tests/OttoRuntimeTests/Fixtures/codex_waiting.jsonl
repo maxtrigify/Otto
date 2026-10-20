@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"codex-wait"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"approval_request","message":"Allow network access?"}}
+{"type":"item.completed","item":{"type":"user_question","message":"Which environment should I target?"}}
