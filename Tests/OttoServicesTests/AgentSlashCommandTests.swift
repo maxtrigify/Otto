@@ -94,7 +94,7 @@ struct AgentSlashCommandTests {
 }
 
 private func waitUntil(
-  timeout: Duration = .seconds(3),
+  timeout: Duration = .seconds(15),
   condition: @escaping @MainActor () -> Bool
 ) async throws {
   let deadline = ContinuousClock.now + timeout

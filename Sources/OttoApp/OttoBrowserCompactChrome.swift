@@ -192,7 +192,8 @@ struct OttoBrowserTabStrip: View {
     .background(palette.raised, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .overlay(
       RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .strokeBorder(palette.paper.opacity(addressFocused ? 0.18 : 0.1)))
+        .strokeBorder(palette.paper.opacity(addressFocused ? 0.18 : 0.1))
+    )
     .shadow(color: .black.opacity(0.08), radius: 5, y: 2)
   }
 }

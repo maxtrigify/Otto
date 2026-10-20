@@ -79,7 +79,9 @@ let package = Package(
     .target(
       name: "OttoRuntime",
       dependencies: [
-        "OttoModels", "OttoSecurity",
+        "OttoModels",
+        // Keychain-backed secrets are macOS-only; the Linux daemon builds the runtime without them.
+        .target(name: "OttoSecurity", condition: .when(platforms: [.macOS])),
         .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
       ]),
     .target(name: "OttoHarness", dependencies: ["OttoModels", "OttoTools"]),

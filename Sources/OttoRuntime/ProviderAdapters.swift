@@ -1,6 +1,13 @@
 import Foundation
 import OttoModels
-import OttoSecurity
+
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
+#if canImport(OttoSecurity)
+  import OttoSecurity
+#endif
 
 /// Providers without a separate instruction channel receive the memory bootstrap embedded ahead
 /// of the first task prompt. Resumed sessions already carried it on their first turn, so
@@ -561,9 +568,8 @@ public struct OpenAIDirectAdapter: AgentAdapter {
 
   public init(
     executablePath: String? = nil,
-    credentialProvider: @escaping @Sendable (OttoHarnessProvider) async throws -> String? = {
-      try await makeDefaultSecretStore().value(for: $0.credentialKey)
-    }
+    credentialProvider: @escaping @Sendable (OttoHarnessProvider) async throws -> String? =
+      OpenAIDirectAdapter.defaultCredential
   ) {
     self.executablePath = executablePath
     self.credentialProvider = credentialProvider
@@ -577,6 +583,18 @@ public struct OpenAIDirectAdapter: AgentAdapter {
   ) {
     self.executablePath = executablePath
     self.credentialProvider = { _ in try await apiKeyProvider() }
+  }
+
+  /// Reads the provider credential from the default secret store. Platforms without the
+  /// keychain-backed store (the Linux daemon) have no stored credential.
+  @Sendable public static func defaultCredential(for provider: OttoHarnessProvider) async throws
+    -> String?
+  {
+    #if canImport(OttoSecurity)
+      try await makeDefaultSecretStore().value(for: provider.credentialKey)
+    #else
+      nil
+    #endif
   }
 
   public func detectInstallation() async -> InstallationStatus {
@@ -1363,7 +1381,8 @@ public struct OpenCodeAdapter: AgentAdapter {
       else { return nil }
       // --verbose carries names and release dates; plain ids are the fallback for older builds.
       let verbose = Self.parseVerboseModels(output)
-      let models = verbose.isEmpty ? Self.parseModels(output).filter { $0.id.contains("/") } : verbose
+      let models =
+        verbose.isEmpty ? Self.parseModels(output).filter { $0.id.contains("/") } : verbose
       return models.isEmpty ? nil : models
     }
     // Offline, --refresh fails; the existing cache is still better than no catalog.

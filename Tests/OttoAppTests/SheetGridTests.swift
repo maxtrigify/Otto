@@ -222,7 +222,13 @@ struct SheetGridTests {
     #expect(model.raw(CellAddress(column: 0, row: 3)).isEmpty)
   }
 
-  @Test("Selecting a cell redraws fast")
+  @Test(
+    "Selecting a cell redraws fast",
+    .disabled(
+      if: ProcessInfo.processInfo.environment["CI"] == "true",
+      "Frame-time budget needs real hardware; hosted CI runners are virtualised and shared"
+    )
+  )
   func speed() {
     var sheet = Spreadsheet()
     for row in 1...300 {

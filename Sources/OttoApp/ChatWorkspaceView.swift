@@ -1079,12 +1079,10 @@ struct ChatWorkspaceView: View {
         services: services,
         browser: chatBrowserNode,
         ensureBrowser: { _ = ensureChatBrowser() },
-        start: startAssistant
-      ) { browser, chrome in
-        chatBrowserBody(browser, chrome: chrome)
-      } conversation: { nodeID in
-        assistantConversation(nodeID)
-      }
+        start: startAssistant,
+        page: { browser, chrome in chatBrowserBody(browser, chrome: chrome) },
+        conversation: { nodeID in assistantConversation(nodeID) }
+      )
     }
   }
 

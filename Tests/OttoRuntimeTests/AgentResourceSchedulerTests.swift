@@ -101,12 +101,14 @@ struct AgentResourceSchedulerTests {
       permissionMode: .readOnly
     )
 
+    // The first worker must still hold the only slot when the second one is spawned and queued;
+    // on a loaded CI runner that can take well over a second, so give it ample time.
     _ = try await supervisor.spawnOneShot(
-      adapter: DelayedOneShotAdapter(delay: 1), request: request, id: first)
+      adapter: DelayedOneShotAdapter(delay: 5), request: request, id: first)
     try await waitForSchedulerRunning(first, scheduler: scheduler)
     let secondSpawn = Task {
       try await supervisor.spawnOneShot(
-        adapter: DelayedOneShotAdapter(delay: 1), request: request, id: second)
+        adapter: DelayedOneShotAdapter(delay: 3), request: request, id: second)
     }
 
     try await waitForSchedulerQueue(second, scheduler: scheduler)
@@ -166,7 +168,7 @@ private func waitForSchedulerRunning(
 }
 
 private func waitForSchedulerIdle(_ scheduler: AgentResourceScheduler) async throws {
-  let deadline = ContinuousClock.now + .seconds(5)
+  let deadline = ContinuousClock.now + .seconds(15)
   while ContinuousClock.now < deadline {
     let snapshot = await scheduler.snapshot()
     if snapshot.running.isEmpty, snapshot.queued.isEmpty { return }

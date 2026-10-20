@@ -51,7 +51,8 @@ enum ComposerDrafts {
 
   private static let attachmentsDefaultsKey = "otto.composerDraftAttachments"
   private static var attachmentDrafts: [String: [String: [String]]] =
-    UserDefaults.standard.dictionary(forKey: attachmentsDefaultsKey) as? [String: [String: [String]]]
+    UserDefaults.standard.dictionary(forKey: attachmentsDefaultsKey)
+    as? [String: [String: [String]]]
     ?? [:]
   private static var attachmentOrder: [String] = Array(attachmentDrafts.keys)
 

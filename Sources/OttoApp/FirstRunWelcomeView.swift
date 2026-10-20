@@ -47,7 +47,8 @@ struct FirstRunWelcomeView: View {
   }
 
   @State private var step: Step = .welcome
-  @State private var name = FirstRunPreferences.preferredFirstName
+  @State private var name =
+    FirstRunPreferences.preferredFirstName
     ?? NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
   @State private var interests: Set<OnboardingInterest> = [.research]
   @State private var availability: [AgentProviderInfo] = []
@@ -244,8 +245,10 @@ struct FirstRunWelcomeView: View {
 
   private var connectStep: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text(readyProviders.isEmpty && !loadingProviders ? "Connect an agent" : "Your agents are ready")
-        .font(.ottoDisplay(30).weight(.medium))
+      Text(
+        readyProviders.isEmpty && !loadingProviders ? "Connect an agent" : "Your agents are ready"
+      )
+      .font(.ottoDisplay(30).weight(.medium))
       Text(connectLede)
         .font(.ottoDisplay(15))
         .foregroundStyle(palette.muted)
@@ -454,9 +457,11 @@ struct FirstRunWelcomeView: View {
     HStack(spacing: 14) {
       switch step {
       case .welcome:
-        Label("Everything stays on this Mac unless you choose a cloud service.", systemImage: "lock")
-          .font(.ottoDisplay(11))
-          .foregroundStyle(palette.muted)
+        Label(
+          "Everything stays on this Mac unless you choose a cloud service.", systemImage: "lock"
+        )
+        .font(.ottoDisplay(11))
+        .foregroundStyle(palette.muted)
         Spacer()
         primaryButton("Get started") { go(.aboutYou) }
       case .aboutYou:

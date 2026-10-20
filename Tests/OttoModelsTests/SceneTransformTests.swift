@@ -198,17 +198,19 @@ struct CanvasCommandTests {
 
   @Test("Layouts are distinct and restore exact freeform geometry")
   func layoutGeometryRestoration() {
-    let nodes = (0..<4).map { index in
-      OttoNode(
+    let nodes: [OttoNode] = (0..<4).map { (index: Int) -> OttoNode in
+      let offset = Double(index)
+      let frame = WorldRect(
+        x: offset * 113,
+        y: offset * -71,
+        width: 300 + offset,
+        height: 200 + offset
+      )
+      return OttoNode(
         kind: .terminal,
         displayName: "Terminal \(index)",
         subtitle: "ZSH",
-        frame: WorldRect(
-          x: Double(index * 113),
-          y: Double(index * -71),
-          width: 300 + Double(index),
-          height: 200 + Double(index)
-        ),
+        frame: frame,
         zIndex: index
       )
     }
