@@ -151,7 +151,8 @@ struct AgentConversationBody: View {
     .background(palette.workspaceSurface)
   }
 
-  var body: some View {
+  // Split out of `body` so every Swift toolchain can type-check the view in reasonable time.
+  private var conversationWithInspector: some View {
     conversationLayout
       .overlay(alignment: .trailing) {
         if inspectedResponse != nil, isStageMode || hidesSurfaceBar {
@@ -163,46 +164,54 @@ struct AgentConversationBody: View {
             .shadow(color: .black.opacity(0.08), radius: 16, x: -6)
         }
       }
-      .sheet(
-        isPresented: Binding(
-          get: {
-            exploredResponse != nil
-              || (inspectedResponse != nil && !isStageMode && !hidesSurfaceBar)
-          },
-          set: {
-            if !$0 {
-              exploredResponse = nil
-              closeArtifactInspector()
-            }
-          }
-        )
-      ) {
-        Group {
-          if let entry = exploredResponse {
-            VStack(spacing: 0) {
-              HStack {
-                Text("Visual explanation").font(.ottoDisplay(15).weight(.semibold))
-                Spacer()
-                Button("Done") { exploredResponse = nil }.keyboardShortcut(.cancelAction)
-              }.padding(20)
-              Divider()
-              ScrollView {
-                MarkdownMessageView(
-                  text: entry.text, scale: 1.2, palette: palette,
-                  assetDirectory: URL(fileURLWithPath: resolvedFilePath(".")),
-                  presentedBlocks: AssistantResponsePresentation(entry.text).preview,
-                  resultScope: entry.id.uuidString
-                ).padding(24)
-              }
-            }
-          } else {
-            artifactInspector
+      .sheet(isPresented: inspectorSheetPresented) { inspectorSheet }
+  }
+
+  private var inspectorSheetPresented: Binding<Bool> {
+    Binding(
+      get: {
+        exploredResponse != nil
+          || (inspectedResponse != nil && !isStageMode && !hidesSurfaceBar)
+      },
+      set: {
+        if !$0 {
+          exploredResponse = nil
+          closeArtifactInspector()
+        }
+      }
+    )
+  }
+
+  @ViewBuilder private var inspectorSheet: some View {
+    Group {
+      if let entry = exploredResponse {
+        VStack(spacing: 0) {
+          HStack {
+            Text("Visual explanation").font(.ottoDisplay(15).weight(.semibold))
+            Spacer()
+            Button("Done") { exploredResponse = nil }.keyboardShortcut(.cancelAction)
+          }.padding(20)
+          Divider()
+          ScrollView {
+            MarkdownMessageView(
+              text: entry.text, scale: 1.2, palette: palette,
+              assetDirectory: URL(fileURLWithPath: resolvedFilePath(".")),
+              presentedBlocks: AssistantResponsePresentation(entry.text).preview,
+              resultScope: entry.id.uuidString
+            ).padding(24)
           }
         }
-        .frame(minWidth: 760, idealWidth: 1000, minHeight: 560, idealHeight: 720)
-        .background(palette.workspaceSurface)
-        .environment(\.ottoPalette, palette)
+      } else {
+        artifactInspector
       }
+    }
+    .frame(minWidth: 760, idealWidth: 1000, minHeight: 560, idealHeight: 720)
+    .background(palette.workspaceSurface)
+    .environment(\.ottoPalette, palette)
+  }
+
+  var body: some View {
+    conversationWithInspector
       .ottoToast(
         $toastNotice,
         scale: scale,
@@ -1965,8 +1974,10 @@ struct AgentConversationBody: View {
     if !pending.isEmpty {
       VStack(alignment: .leading, spacing: 6 * scale) {
         HStack {
-          Text("\(pending.count) queued\(messageQueue.paused.contains(node.id) ? " · Paused" : " · Sends after this run")")
-            .font(.system(size: max(10, 11 * scale), weight: .medium))
+          Text(
+            "\(pending.count) queued\(messageQueue.paused.contains(node.id) ? " · Paused" : " · Sends after this run")"
+          )
+          .font(.system(size: max(10, 11 * scale), weight: .medium))
           Spacer()
           if messageQueue.paused.contains(node.id) {
             Button("Resume queue") { messageQueue.resume(node.id) }
@@ -1981,7 +1992,9 @@ struct AgentConversationBody: View {
                 Text(message.text).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 Button {
                   messageQueue.remove(agentID: node.id, messageID: message.id)
-                } label: { Image(systemName: "xmark") }
+                } label: {
+                  Image(systemName: "xmark")
+                }
                 .buttonStyle(.plain)
                 .help("Remove queued message")
                 .accessibilityLabel("Remove queued message")
@@ -1989,7 +2002,9 @@ struct AgentConversationBody: View {
             }
           }
         }
-        .frame(maxHeight: min(CGFloat(pending.count) * 36 * scale, 144 * scale))
+        .frame(
+          maxHeight: min(CGFloat(pending.count) * (36 as CGFloat) * scale, (144 as CGFloat) * scale)
+        )
         if let error = messageQueue.errors[node.id] {
           Text(error).foregroundStyle(palette.amber)
         }

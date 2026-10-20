@@ -584,7 +584,7 @@ struct AutomationsView: View {
     return services.providerAccounts.accounts.first { $0.id == id }?.name
   }
 
-  static func firstLine(of text: String) -> String {
+  nonisolated static func firstLine(of text: String) -> String {
     text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
   }
 

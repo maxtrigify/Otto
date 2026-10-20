@@ -1,5 +1,8 @@
-import Darwin
 import Foundation
+
+#if canImport(Darwin)
+  import Darwin
+#endif
 
 /// Host-only policy foundation. Do not expose administration or submission as agent tools.
 /// The caller must authenticate the human/device and derive identity from the host session.
