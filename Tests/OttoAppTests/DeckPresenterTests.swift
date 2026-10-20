@@ -22,6 +22,18 @@ struct DeckPresenterTests {
     return try #require(await web.evaluateJavaScript("OttoDeck.current()") as? Int)
   }
 
+  /// Key handling is applied by the deck's web view asynchronously; a busy CI runner can take
+  /// longer than a fixed delay, so poll until the slide settles (bounded).
+  private func settledSlide(_ expected: Int) async throws -> Int {
+    let deadline = ContinuousClock.now + .seconds(5)
+    var slide = try await current()
+    while slide != expected, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(50))
+      slide = try await current()
+    }
+    return slide
+  }
+
   @Test("Arrows, Space, Page keys, keypad numbers and Esc all work while presenting")
   func keys() async throws {
     _ = NSApplication.shared
@@ -35,19 +47,15 @@ struct DeckPresenterTests {
     #expect(DeckPresenter.windowTakesKeyboard)
     #expect(DeckPresenter.handle(key(124)))  // →
     #expect(DeckPresenter.handle(key(49, " ")))  // Space
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(try await current() == 2)
+    #expect(try await settledSlide(2) == 2)
     #expect(DeckPresenter.handle(key(116)))  // Page Up (presenter remotes)
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(try await current() == 1)
+    #expect(try await settledSlide(1) == 1)
     // Typing 5 on the keypad then Enter jumps to slide 5.
     #expect(DeckPresenter.handle(key(87, "5")))
     #expect(DeckPresenter.handle(key(76)))
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(try await current() == 4)
+    #expect(try await settledSlide(4) == 4)
     #expect(DeckPresenter.handle(key(115)))  // Home
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(try await current() == 0)
+    #expect(try await settledSlide(0) == 0)
     #expect(DeckPresenter.handle(key(53)))  // Esc
     #expect(!DeckPresenter.isPresenting)
   }
