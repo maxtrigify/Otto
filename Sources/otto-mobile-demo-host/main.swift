@@ -21,7 +21,9 @@ private actor DemoPairingHandler: OttoHostPairingHandling {
   private let baseURL: URL
   private let offerID = UUID()
   private let code = String(Int.random(in: 100_000...999_999))
-  private let expiresAt = Date.now.addingTimeInterval(300)
+  // The e2e script starts this host before xcodebuild compiles the iPhone app and UI tests. A cold
+  // CI build takes longer than five minutes, so the demo offer must outlive it.
+  private let expiresAt = Date.now.addingTimeInterval(30 * 60)
   private let fingerprint = String(repeating: "d", count: 64)
   private let scopes = Set(OttoRPCScope.allCases)
   private var exchanged = false
