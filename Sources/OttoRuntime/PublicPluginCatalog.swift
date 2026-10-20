@@ -1,6 +1,10 @@
 import Foundation
 import OttoModels
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 /// Public metadata only. These feeds describe packages, not account entitlements or OAuth state.
 public struct PublicMarketplacePlugin: Equatable, Sendable, Identifiable {
   public let id: String

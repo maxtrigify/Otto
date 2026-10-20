@@ -68,7 +68,7 @@ struct ConversationRenderPolicyTests {
       contentsOf: repository.appending(path: "Sources/OttoApp/MarkdownMessageView.swift"),
       encoding: .utf8
     )
-    #expect(conversation.contains("content.modifier(StableTranscriptSelectionModifier())"))
+    #expect(conversation.contains("content().modifier(StableTranscriptSelectionModifier())"))
     #expect(conversation.contains("content.textSelection(.enabled)"))
     // Message action bars and disclosure buttons remain click targets under the inherited
     // transcript selection environment.

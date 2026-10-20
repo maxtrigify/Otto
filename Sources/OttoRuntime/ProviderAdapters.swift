@@ -1,6 +1,10 @@
 import Foundation
 import OttoModels
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 #if canImport(OttoSecurity)
   import OttoSecurity
 #endif

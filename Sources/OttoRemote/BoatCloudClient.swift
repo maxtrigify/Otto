@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 public struct BoatSandbox: Codable, Identifiable, Equatable, Sendable {
   public let id: String
   public let name: String
