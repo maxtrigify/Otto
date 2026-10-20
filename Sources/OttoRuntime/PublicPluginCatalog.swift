@@ -64,17 +64,28 @@ public enum PublicPluginCatalog {
     configuration.urlCredentialStorage = nil
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
-    let (bytes, response) = try await session.bytes(from: url)
-    guard let http = response as? HTTPURLResponse, http.statusCode == 200,
-      acceptsResponse(request: url, response: response.url),
-      response.expectedContentLength <= 4_194_304
-    else { throw CatalogError.unavailable }
-    var data = Data()
-    for try await byte in bytes {
-      guard data.count < 4_194_304 else { throw CatalogError.tooLarge }
-      data.append(byte)
-    }
-    return data
+    #if canImport(FoundationNetworking)
+      // swift-corelibs-foundation has no streaming `bytes(from:)`; bound the buffered body instead.
+      let (data, response) = try await session.data(from: url)
+      guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+        acceptsResponse(request: url, response: response.url),
+        response.expectedContentLength <= 4_194_304
+      else { throw CatalogError.unavailable }
+      guard data.count <= 4_194_304 else { throw CatalogError.tooLarge }
+      return data
+    #else
+      let (bytes, response) = try await session.bytes(from: url)
+      guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+        acceptsResponse(request: url, response: response.url),
+        response.expectedContentLength <= 4_194_304
+      else { throw CatalogError.unavailable }
+      var data = Data()
+      for try await byte in bytes {
+        guard data.count < 4_194_304 else { throw CatalogError.tooLarge }
+        data.append(byte)
+      }
+      return data
+    #endif
   }
 
   static func acceptsResponse(request: URL, response: URL?) -> Bool {

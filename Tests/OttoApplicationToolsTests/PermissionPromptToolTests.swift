@@ -28,6 +28,17 @@ private struct ConfirmedActionTool: OttoTool {
   }
 }
 
+/// The MCP bridge is synchronous and blocks until the control socket answers, exactly like
+/// otto-mcp's stdio loop. Running it on a Swift concurrency thread can starve the small cooperative
+/// pool of a CI runner, so the actor that must answer never runs. Park it on its own thread.
+private func onDedicatedThread<T: Sendable>(
+  _ body: @escaping @Sendable () throws -> T
+) async throws -> T {
+  try await withCheckedThrowingContinuation { continuation in
+    Thread.detachNewThread { continuation.resume(with: Result { try body() }) }
+  }
+}
+
 private actor BrowserActionCounter {
   private(set) var calls = 0
   func record() { calls += 1 }
@@ -77,11 +88,13 @@ struct PermissionPromptToolTests {
     let bridge = MCPBridge(
       client: ControlClient(socketPath: server.socketPath, token: token),
       isCancelled: { cancellation.isCancelled })
-    let pendingResponse = Task.detached {
-      try bridge.handle(
-        MCPRequest(
-          id: .number(1), method: "tools/call",
-          params: .object(["name": .string("browser.click"), "arguments": .object([:])])))
+    let pendingResponse = Task {
+      try await onDedicatedThread {
+        try bridge.handle(
+          MCPRequest(
+            id: .number(1), method: "tools/call",
+            params: .object(["name": .string("browser.click"), "arguments": .object([:])])))
+      }
     }
     if cancel {
       try await waitForState(.waitingPermission, id: agentID, supervisor: supervisor)
@@ -263,7 +276,7 @@ struct PermissionPromptToolTests {
     // The bridge call is intentionally synchronous and blocking, exactly like otto-mcp's stdio
     // loop; it must stay parked well past the default ten-second socket timeout window's
     // semantics and only return once the approval lands.
-    let response = Task.detached { try bridge.handle(request) }
+    let response = Task { try await onDedicatedThread { try bridge.handle(request) } }
     try await waitForState(.waitingPermission, id: agentID, supervisor: supervisor)
     try await supervisor.resolvePermission(agentID: agentID, approved: true)
 
@@ -318,7 +331,7 @@ struct PermissionPromptToolTests {
       ])
     )
 
-    let response = Task.detached { try bridge.handle(request) }
+    let response = Task { try await onDedicatedThread { try bridge.handle(request) } }
     try await waitForState(.waitingPermission, id: agentID, supervisor: supervisor)
     #expect(
       try await supervisor.snapshot(agentID: agentID).attentionReason?
