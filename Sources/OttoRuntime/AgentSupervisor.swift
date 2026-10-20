@@ -547,9 +547,13 @@ public actor AgentSupervisor {
     id: UUID = UUID(),
     canvasID: UUID? = nil
   ) async throws -> UUID {
+    // Turn context can make the submitted prompt many lines long. The mock only uses the first
+    // line, but the rest must still be drained: a canonical-mode PTY holds about 1 KB of unread
+    // input, and the supervisor's write would otherwise stall until it reports transportClosed.
     let script = """
       printf 'OTTO_STATUS:IDLE\\r\\n'
       IFS= read -r prompt
+      stty -icanon min 0 time 2 2>/dev/null && cat >/dev/null
       printf 'OTTO_STATUS:WORKING\\r\\n'
       printf 'Working on: %s\\r\\n' "$prompt"
       sleep 0.05
