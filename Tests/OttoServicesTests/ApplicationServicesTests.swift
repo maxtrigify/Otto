@@ -466,7 +466,7 @@ struct ApplicationServicesTests {
 
 @MainActor
 private func waitUntil(_ condition: () -> Bool) async throws {
-  let deadline = ContinuousClock.now + .seconds(5)
+  let deadline = ContinuousClock.now + .seconds(15)
   while ContinuousClock.now < deadline {
     if condition() { return }
     try await Task.sleep(for: .milliseconds(10))

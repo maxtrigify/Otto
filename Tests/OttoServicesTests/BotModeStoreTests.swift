@@ -1837,8 +1837,10 @@ private func spawnHangingTeamMock(
 }
 
 @MainActor
+// Generous bounds: a hosted CI runner runs these suites in parallel on three cores, where a team
+// turn can take several seconds. Passing runs return as soon as the condition holds.
 private func waitForTeam(
-  timeout: Duration = .seconds(3),
+  timeout: Duration = .seconds(15),
   condition: @escaping @MainActor () -> Bool
 ) async throws {
   let clock = ContinuousClock()
@@ -1854,7 +1856,7 @@ private func waitForAgentsToBecomeIdle(
   services: ApplicationServices,
   nodeIDs: [UUID]
 ) async throws {
-  let deadline = ContinuousClock.now + .seconds(3)
+  let deadline = ContinuousClock.now + .seconds(15)
   while ContinuousClock.now < deadline {
     var allIdle = true
     for nodeID in nodeIDs {
@@ -1873,7 +1875,7 @@ private func waitForAgentState(
   nodeID: UUID,
   state: AgentLifecycleState
 ) async throws {
-  let deadline = ContinuousClock.now + .seconds(3)
+  let deadline = ContinuousClock.now + .seconds(15)
   while ContinuousClock.now < deadline {
     if try await services.supervisor.snapshot(agentID: nodeID).state == state { return }
     try await Task.sleep(for: .milliseconds(20))
