@@ -250,7 +250,10 @@ public enum SpreadsheetFormula {
     for span in spans(in: raw) {
       guard let sheet = span.sheet, sheet.name.caseInsensitiveCompare(old) == .orderedSame
       else { continue }
-      output += raw[cursor..<sheet.range.lowerBound] + sheetPrefix(new) + "!"
+      // Separate appends: older Swift compilers find the chained `+` ambiguous here.
+      output += raw[cursor..<sheet.range.lowerBound]
+      output += sheetPrefix(new)
+      output += "!"
       cursor = sheet.range.upperBound
     }
     output += raw[cursor...]
