@@ -760,7 +760,8 @@ struct ProviderAdapterTests {
     ]
     #expect(AgentModelCatalog.matching(models, query: "").count == 3)
     #expect(AgentModelCatalog.matching(models, query: "OPUS").map(\.id) == [models[0].id])
-    #expect(AgentModelCatalog.matching(models, query: "gpt6 openrouter").map(\.id) == [models[2].id])
+    #expect(
+      AgentModelCatalog.matching(models, query: "gpt6 openrouter").map(\.id) == [models[2].id])
     #expect(AgentModelCatalog.matching(models, query: "astra").count == 2)
     #expect(AgentModelCatalog.matching(models, query: "gemini").isEmpty)
   }

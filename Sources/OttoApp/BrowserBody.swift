@@ -1804,12 +1804,14 @@ struct BrowserAgentCursorShape: View {
       .padding(.vertical, 2)
       .background(.white, in: Capsule())
       .overlay(
-          Capsule().stroke(
-            LinearGradient(
-              colors: [Color(red: 0.38, green: 0.86, blue: 0.95), Color(red: 0.30, green: 0.55, blue: 1.0)],
-              startPoint: .leading, endPoint: .trailing),
-            lineWidth: 1.5)
-        )
+        Capsule().stroke(
+          LinearGradient(
+            colors: [
+              Color(red: 0.38, green: 0.86, blue: 0.95), Color(red: 0.30, green: 0.55, blue: 1.0),
+            ],
+            startPoint: .leading, endPoint: .trailing),
+          lineWidth: 1.5)
+      )
       .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
       .offset(x: BrowserAgentCursor.tip.x + 16, y: BrowserAgentCursor.tip.y + 20)
     }
@@ -1830,10 +1832,13 @@ struct BrowserAgentCursorShape: View {
 
   private var arrow: some View {
     let shape = AgentArrow()
-    return shape
+    return
+      shape
       .fill(
         LinearGradient(
-          colors: [Color(red: 0.38, green: 0.86, blue: 0.95), Color(red: 0.30, green: 0.55, blue: 1.0)],
+          colors: [
+            Color(red: 0.38, green: 0.86, blue: 0.95), Color(red: 0.30, green: 0.55, blue: 1.0),
+          ],
           startPoint: .topLeading, endPoint: .bottomTrailing)
       )
       .overlay(shape.stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineJoin: .round)))
@@ -1950,4 +1955,3 @@ private func isLocalBrowserURL(_ value: String) -> Bool {
 private func displayedBrowserAddress(_ value: String) -> String {
   value == BrowserDefaults.blankURL || BrowserDefaults.isStartURL(value) ? "" : value
 }
-

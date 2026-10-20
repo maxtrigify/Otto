@@ -220,7 +220,8 @@ struct WorkspaceView: View {
         withAnimation(motion.enter(.moderate)) { showingPersonalHome = true }
       }
     }
-    .onReceive(NotificationCenter.default.publisher(for: .ottoOpenCompletedConversation)) { notification in
+    .onReceive(NotificationCenter.default.publisher(for: .ottoOpenCompletedConversation)) {
+      notification in
       if let nodeID = notification.object as? UUID { openHomeAgent(nodeID) }
     }
     .onChange(of: services.botNavigationRequest) { _, request in

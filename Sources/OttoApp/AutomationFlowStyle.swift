@@ -429,9 +429,10 @@ enum AutomationModels {
 
   /// Turns a model id like "claude-opus-5-5" or "gpt-6-sol" into "Opus 5.5" / "GPT-6 Sol".
   static func prettify(_ id: String) -> String {
-    var parts =
-      id.split(separator: "/").last.map(String.init)?.split(separator: "-")
-      .map(String.init) ?? [id]
+    // Split into steps so the Xcode 26 type checker used by CI stays fast.
+    let lastComponent: String? = id.split(separator: "/").last.map(String.init)
+    var parts: [String] =
+      lastComponent.map { $0.split(separator: "-").map(String.init) } ?? [id]
     if parts.first == "claude" { parts.removeFirst() }
     guard !parts.isEmpty else { return id }
     var words: [String] = []
@@ -454,7 +455,8 @@ enum AutomationModels {
       } else if ["gpt", "gpt5", "o3", "k2"].contains(part.lowercased()) {
         words.append(part.uppercased())
       } else {
-        words.append(part.prefix(1).uppercased() + part.dropFirst())
+        let rest = String(part.dropFirst())
+        words.append(part.prefix(1).uppercased() + rest)
       }
       index += 1
     }

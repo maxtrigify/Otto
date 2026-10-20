@@ -163,10 +163,13 @@ public enum BrowserProfileImporter {
         guard directory != "Guest Profile", directory != "System Profile" else { return nil }
         let bookmarks = profile.appending(path: "Bookmarks")
         // Chromium moved the cookie store into Network/ in version 96; Dia still uses the root.
-        let cookies = [profile.appending(path: "Network/Cookies"), profile.appending(path: "Cookies")]
-          .first { fileManager.fileExists(atPath: $0.path) }
+        let cookies = [
+          profile.appending(path: "Network/Cookies"), profile.appending(path: "Cookies"),
+        ]
+        .first { fileManager.fileExists(atPath: $0.path) }
         guard fileManager.fileExists(atPath: bookmarks.path) || cookies != nil else { return nil }
-        let name = names[directory].flatMap { $0.isEmpty ? nil : $0 }
+        let name =
+          names[directory].flatMap { $0.isEmpty ? nil : $0 }
           ?? friendlyProfileName(directory)
         return (directory, name, bookmarks, cookies)
       }

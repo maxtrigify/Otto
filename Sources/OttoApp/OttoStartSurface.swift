@@ -39,7 +39,8 @@ struct OttoStartSurface: View {
           .scaleEffect(hop ? 1.08 : 1, anchor: .bottom)
           .animation(
             reduceMotion ? nil : .easeInOut(duration: 2.4).repeatForever(autoreverses: true),
-            value: floating)
+            value: floating
+          )
           .onAppear { floating = true }
 
         VStack(alignment: .leading, spacing: 0) {
@@ -53,21 +54,21 @@ struct OttoStartSurface: View {
               prompt: Text("Ask Otto, search, or enter an address…")
                 .foregroundStyle(palette.muted)
             )
-              .textFieldStyle(.plain)
-              .font(.ottoDisplay(16))
-              .foregroundStyle(palette.paper)
-              .focused($focused)
-              .onSubmit { run(choices) }
-              .onKeyPress(.downArrow) {
-                guard !choices.isEmpty else { return .ignored }
-                highlighted = min(highlighted + 1, choices.count - 1)
-                return .handled
-              }
-              .onKeyPress(.upArrow) {
-                guard !choices.isEmpty else { return .ignored }
-                highlighted = max(highlighted - 1, 0)
-                return .handled
-              }
+            .textFieldStyle(.plain)
+            .font(.ottoDisplay(16))
+            .foregroundStyle(palette.paper)
+            .focused($focused)
+            .onSubmit { run(choices) }
+            .onKeyPress(.downArrow) {
+              guard !choices.isEmpty else { return .ignored }
+              highlighted = min(highlighted + 1, choices.count - 1)
+              return .handled
+            }
+            .onKeyPress(.upArrow) {
+              guard !choices.isEmpty else { return .ignored }
+              highlighted = max(highlighted - 1, 0)
+              return .handled
+            }
           }
           .padding(.horizontal, 16)
           .frame(height: 52)
@@ -89,7 +90,9 @@ struct OttoStartSurface: View {
               .font(.ottoDisplay(11))
               .foregroundStyle(palette.muted.opacity(0.8))
             Spacer(minLength: 8)
-            Button { run(choices) } label: {
+            Button {
+              run(choices)
+            } label: {
               HStack(spacing: 6) {
                 Text(primaryLabel(choices))
                 Image(systemName: "return")
@@ -112,7 +115,8 @@ struct OttoStartSurface: View {
         .background(palette.raised, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
           RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .strokeBorder(palette.paper.opacity(0.1)))
+            .strokeBorder(palette.paper.opacity(0.1))
+        )
         .shadow(color: .black.opacity(0.14), radius: 22, y: 10)
       }
       .padding(32)

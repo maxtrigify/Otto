@@ -1,6 +1,7 @@
 import Foundation
 import OttoRuntime
 import Testing
+
 @testable import OttoApp
 
 struct CompletionNotificationsTests {
@@ -8,7 +9,8 @@ struct CompletionNotificationsTests {
     var filter = CompletionEventFilter()
     let node = UUID()
     let run = UUID()
-    let accepted1 = !filter.accept(OttoEvent(type: .agentStatusChanged, nodeID: node, state: .done, runID: run))
+    let accepted1 = !filter.accept(
+      OttoEvent(type: .agentStatusChanged, nodeID: node, state: .done, runID: run))
     #expect(accepted1)
     let accepted2 = !filter.accept(OttoEvent(type: .agentOutputAppended, nodeID: node, runID: run))
     #expect(accepted2)
@@ -30,7 +32,10 @@ struct CompletionNotificationsTests {
     let suite = "CompletionNotificationsTests.\(UUID())"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
-    for key in [CompletionNotifications.enabledKey, CompletionNotifications.botsKey, CompletionNotifications.sessionsKey] {
+    for key in [
+      CompletionNotifications.enabledKey, CompletionNotifications.botsKey,
+      CompletionNotifications.sessionsKey,
+    ] {
       #expect(CompletionNotifications.enabled(key, defaults: defaults))
       defaults.set(false, forKey: key)
       #expect(!CompletionNotifications.enabled(key, defaults: defaults))

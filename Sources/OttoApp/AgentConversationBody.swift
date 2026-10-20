@@ -211,6 +211,18 @@ struct AgentConversationBody: View {
   }
 
   var body: some View {
+    conversationWithDrafts
+      // Wake up when the bridge expires; reply arrival itself re-renders via the transcript.
+      .task(id: replyBridgeDeadline) {
+        guard let deadline = replyBridgeDeadline else { return }
+        try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow) + 0.1))
+        replyBridgeDeadline = nil
+      }
+  }
+
+  // The modifier chain is split across several properties so every Swift toolchain (including the
+  // Xcode 26 one used by CI) can type-check it in reasonable time.
+  private var conversationWithLinks: some View {
     conversationWithInspector
       .ottoToast(
         $toastNotice,
@@ -225,6 +237,10 @@ struct AgentConversationBody: View {
           handleLink(url)
         }
       )
+  }
+
+  private var conversationWithFocus: some View {
+    conversationWithLinks
       // A spawned or clicked agent should be ready to type into immediately — no extra click on
       // the composer. Focus follows card selection, and re-arms once the runtime accepts input.
       .onAppear { focusComposerIfPrimary() }
@@ -242,6 +258,10 @@ struct AgentConversationBody: View {
         autoLaunchLiveSession()
       }
       .onChange(of: snapshot?.state) { _, _ in autoLaunchLiveSession() }
+  }
+
+  private var conversationWithRevert: some View {
+    conversationWithFocus
       .confirmationDialog(
         "Revert the last turn?", isPresented: $showingRevertConfirmation,
         titleVisibility: .visible
@@ -261,6 +281,10 @@ struct AgentConversationBody: View {
         replyBridgeDeadline =
           !working && lastTurnAwaitsReply ? Date.now.addingTimeInterval(12) : nil
       }
+  }
+
+  private var conversationWithDrafts: some View {
+    conversationWithRevert
       .onChange(of: transcript.count) { _, count in
         if count < visibleTranscriptLimit {
           visibleTranscriptLimit = max(ConversationRenderPolicy.initialRowLimit, count)
@@ -293,12 +317,6 @@ struct AgentConversationBody: View {
       }
       .onChange(of: draftAttachments) { _, attachments in
         ComposerDrafts.saveAttachments(attachments, for: ComposerDrafts.agentKey(node.id))
-      }
-      // Wake up when the bridge expires; reply arrival itself re-renders via the transcript.
-      .task(id: replyBridgeDeadline) {
-        guard let deadline = replyBridgeDeadline else { return }
-        try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow) + 0.1))
-        replyBridgeDeadline = nil
       }
   }
 

@@ -30,14 +30,16 @@ if [[ ! -e $STATE_ROOT && -d $HOME/Library/Caches/Muse/SwiftPM ]]; then
 fi
 STATE_ROOT="${OTTO_SWIFT_STATE_ROOT:-${MUSE_SWIFT_STATE_ROOT:-$STATE_ROOT}}"
 BUILD_ROOT="$STATE_ROOT/$TASK_ID/build"
+# `find` fails on a fresh machine (CI) where the build root does not exist yet; with pipefail that
+# must not abort the script before the host is built.
 HOST_BINARY=$(find "$BUILD_ROOT" -type f -path '*/debug/otto-mobile-demo-host' \
-  -perm -111 -print 2>/dev/null | /usr/bin/head -n 1)
+  -perm -111 -print 2>/dev/null | /usr/bin/head -n 1 || true)
 if [[ "${OTTO_MOBILE_SKIP_HOST_BUILD:-${MUSE_MOBILE_SKIP_HOST_BUILD:-0}}" != "1" && ( -z "$HOST_BINARY" \
   || "$REPO_ROOT/Package.swift" -nt "$HOST_BINARY" \
   || "$REPO_ROOT/Sources/otto-mobile-demo-host/main.swift" -nt "$HOST_BINARY" ) ]]; then
   "$REPO_ROOT/scripts/otto-swift" build --product otto-mobile-demo-host
   HOST_BINARY=$(find "$BUILD_ROOT" -type f -path '*/debug/otto-mobile-demo-host' \
-    -perm -111 -print 2>/dev/null | /usr/bin/head -n 1)
+    -perm -111 -print 2>/dev/null | /usr/bin/head -n 1 || true)
 fi
 [[ -n "$HOST_BINARY" ]] || {
   print -u2 "The isolated build completed without producing otto-mobile-demo-host."

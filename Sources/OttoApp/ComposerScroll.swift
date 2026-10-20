@@ -11,7 +11,11 @@ private struct ComposerScroll: ViewModifier {
     ScrollView(.vertical) {
       content
         .fixedSize(horizontal: false, vertical: true)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        .onGeometryChange(for: CGFloat.self) {
+          $0.size.height
+        } action: {
+          contentHeight = $0
+        }
     }
     .scrollBounceBehavior(.basedOnSize)
     .scrollIndicators(contentHeight > maxHeight ? .visible : .hidden)

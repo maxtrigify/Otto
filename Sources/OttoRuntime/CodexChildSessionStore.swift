@@ -18,17 +18,19 @@ actor CodexChildSessionStore {
     formatter.dateFormat = "yyyy/MM/dd"
     let days = Set([formatter.string(from: since), formatter.string(from: now)])
     let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
-    let files = days.flatMap { day in
+    let listed: [URL] = days.flatMap { day -> [URL] in
       (try? FileManager.default.contentsOfDirectory(
         at: root.appending(path: day), includingPropertiesForKeys: Array(keys))) ?? []
-    }.filter { $0.pathExtension == "jsonl" }
+    }
+    let candidates: [(URL, Date, Int)] = listed.filter { $0.pathExtension == "jsonl" }
       .compactMap { url -> (URL, Date, Int)? in
         guard let info = try? url.resourceValues(forKeys: keys),
           let date = info.contentModificationDate,
           date >= since.addingTimeInterval(-5)
         else { return nil }
         return (url, date, info.fileSize ?? 0)
-      }.sorted { $0.1 > $1.1 }.prefix(128)
+      }
+    let files = candidates.sorted { $0.1 > $1.1 }.prefix(128)
     var result: [AgentChildRun] = []
     for (url, date, size) in files {
       if let hit = cache[url], hit.0 == date, hit.1 == size {

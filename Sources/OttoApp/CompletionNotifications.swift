@@ -46,8 +46,10 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
     let center = UNUserNotificationCenter.current()
     let settings = await center.notificationSettings()
     if Self.enabled(Self.enabledKey), settings.authorizationStatus == .notDetermined {
-      do { _ = try await center.requestAuthorization(options: [.alert, .sound]) }
-      catch { permissionStatus = error.localizedDescription; return }
+      do { _ = try await center.requestAuthorization(options: [.alert, .sound]) } catch {
+        permissionStatus = error.localizedDescription
+        return
+      }
     }
     await refreshPermission()
   }
@@ -56,13 +58,15 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
     let settings = await UNUserNotificationCenter.current().notificationSettings()
     switch settings.authorizationStatus {
     case .authorized, .provisional, .ephemeral: permissionStatus = "Notifications allowed by macOS."
-    case .denied: permissionStatus = "Notifications are blocked in macOS. Enable them in System Settings."
+    case .denied:
+      permissionStatus = "Notifications are blocked in macOS. Enable them in System Settings."
     case .notDetermined: permissionStatus = "macOS permission has not been granted yet."
     @unknown default: permissionStatus = "Check notification permissions in System Settings."
     }
   }
 
-  private func consume(_ event: OttoEvent, services: ApplicationServices, store: CanvasStore) async {
+  private func consume(_ event: OttoEvent, services: ApplicationServices, store: CanvasStore) async
+  {
     guard event.type == .agentRunCompleted || event.type == .agentRunFailed,
       let nodeID = event.nodeID,
       let node = store.snapshot.canvases.lazy.flatMap(\.nodes).first(where: { $0.id == nodeID }),
@@ -77,7 +81,10 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
     let content = UNMutableNotificationContent()
     let failed = event.type == .agentRunFailed
     content.title = "\(node.displayName) \(failed ? "needs attention" : "finished")"
-    content.body = failed ? "Work could not finish. Open the conversation to review." : "Your work is ready. Open the conversation to view the result."
+    content.body =
+      failed
+      ? "Work could not finish. Open the conversation to review."
+      : "Your work is ready. Open the conversation to view the result."
     content.threadIdentifier = nodeID.uuidString
     content.userInfo = ["nodeID": nodeID.uuidString]
     if Self.enabled(Self.soundKey) { content.sound = .default }
@@ -132,7 +139,9 @@ struct CompletionNotificationSettingsView: View {
       Section("macOS permission") {
         Text(notifications.permissionStatus).foregroundStyle(.secondary)
         Button("Open Notification Settings") {
-          if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+          if let url = URL(
+            string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+          {
             NSWorkspace.shared.open(url)
           }
         }
@@ -142,7 +151,8 @@ struct CompletionNotificationSettingsView: View {
     .frame(width: 540, height: 380)
     .task { await notifications.refreshPermission() }
     .onChange(of: enabled) { _, _ in Task { await notifications.requestPermissionIfEnabled() } }
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification))
+    { _ in
       Task { await notifications.refreshPermission() }
     }
   }
@@ -155,7 +165,8 @@ struct CompletionEventFilter {
 
   mutating func accept(_ event: OttoEvent) -> Bool {
     guard event.type == .agentRunCompleted || event.type == .agentRunFailed,
-      let nodeID = event.nodeID else { return false }
+      let nodeID = event.nodeID
+    else { return false }
     let key = "\(nodeID):\(event.runID ?? event.id)"
     guard seen.insert(key).inserted else { return false }
     order.append(key)

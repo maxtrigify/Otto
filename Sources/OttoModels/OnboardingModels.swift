@@ -242,8 +242,7 @@ public struct GettingStartedItem: Identifiable, Sendable, Equatable {
 }
 
 public enum GettingStartedProgress {
-  public static func items(_ state: GettingStartedState, botName: String?) -> [GettingStartedItem]
-  {
+  public static func items(_ state: GettingStartedState, botName: String?) -> [GettingStartedItem] {
     [
       GettingStartedItem(
         id: .aboutYou, title: "Tell Otto about you", detail: nil,
