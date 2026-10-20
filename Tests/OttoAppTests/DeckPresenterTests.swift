@@ -22,6 +22,17 @@ struct DeckPresenterTests {
     return try #require(await web.evaluateJavaScript("OttoDeck.current()") as? Int)
   }
 
+  private func waitForDeckScript() async throws {
+    let web = try #require(DeckPresenter.webView)
+    let deadline = ContinuousClock.now + .seconds(20)
+    while ContinuousClock.now < deadline {
+      let ready = try? await web.evaluateJavaScript("typeof OttoDeck !== 'undefined'") as? Bool
+      if ready == true { return }
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    Issue.record("The deck page never loaded")
+  }
+
   /// Key handling is applied by the deck's web view asynchronously; a busy CI runner can take
   /// longer than a fixed delay, so poll until the slide settles (bounded).
   private func settledSlide(_ expected: Int) async throws -> Int {
@@ -41,7 +52,9 @@ struct DeckPresenterTests {
       slides: (1...5).map { Slide(title: "Slide \($0)", layout: .bullets) })
     DeckPresenter.present(deck, from: 0, title: "Test", onScreen: false)
     defer { DeckPresenter.close() }
-    try await Task.sleep(for: .milliseconds(1_200))
+    // The deck page loads asynchronously (slowly on a CI runner); keys sent before its script
+    // exists would be lost, so wait for it (bounded) rather than sleeping a fixed time.
+    try await waitForDeckScript()
     #expect(DeckPresenter.isPresenting)
     // Plain borderless windows refuse the keyboard; this one must accept it.
     #expect(DeckPresenter.windowTakesKeyboard)
