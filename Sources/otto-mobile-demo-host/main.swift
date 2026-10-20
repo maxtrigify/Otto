@@ -440,7 +440,9 @@ private enum OttoMobileDemoHost {
             kind: .runStarted,
             content: RunEventContent(runID: runID, state: .working)
           ))
-        try? await Task.sleep(for: .seconds(2))
+        // Keep the run in flight long enough for a slow CI simulator to find and tap its
+        // Interrupt control; the UI tests still allow ten seconds for the reply.
+        try? await Task.sleep(for: .seconds(8))
         let reply = ThreadMessage(
           role: .assistant,
           text:
