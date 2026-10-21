@@ -61,7 +61,19 @@ public final class MessagingStore {
   public init(url: URL) throws {
     self.url = url
     if FileManager.default.fileExists(atPath: url.path) {
-      contents = try JSONDecoder().decode(Contents.self, from: Data(contentsOf: url))
+      do {
+        contents = try JSONDecoder().decode(Contents.self, from: Data(contentsOf: url))
+      } catch CocoaError.fileReadNoPermission {
+        // Builds before 0.2.1 saved this file with complete-unless-open protection, which macOS 27
+        // never lets any process read again. Set it aside (never delete) and start fresh; the
+        // person pairs messaging again.
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(
+          of: ":", with: "-")
+        let aside = url.deletingLastPathComponent()
+          .appendingPathComponent("state.unreadable-\(stamp).json")
+        try FileManager.default.moveItem(at: url, to: aside)
+        contents = Contents()
+      }
     } else {
       contents = Contents()
     }
@@ -202,7 +214,9 @@ public final class MessagingStore {
       at: url.deletingLastPathComponent(),
       withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     let data = try JSONEncoder().encode(next)
-    try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+    // 0600 permissions protect this file. Data-protection classes are not used: on macOS 27 a file
+    // written with complete-unless-open protection can no longer be read back.
+    try data.write(to: url, options: [.atomic])
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     contents = next
   }
