@@ -15,6 +15,7 @@ struct OttoApp: App {
   @StateObject private var voice: VoiceController
   @StateObject private var uiState = WorkspaceUIState()
   @StateObject private var updates = AppUpdateController()
+  @AppStorage(OttoBuddyPreferences.enabledKey) private var buddyEnabled = false
 
   init() {
     // The Muse → Otto rename moves app folders and imports preferences. It must finish before
@@ -188,6 +189,9 @@ struct OttoApp: App {
           NotificationCenter.default.post(name: .ottoStartHomeTour, object: nil)
         }
       }
+      CommandGroup(after: .windowArrangement) {
+        Toggle("Show Otto on Screen", isOn: $buddyEnabled)
+      }
       CommandGroup(replacing: .help) {
         Button("Send Feedback…") { uiState.showsFeedback = true }
       }
@@ -203,6 +207,8 @@ struct OttoApp: App {
           .tabItem { Label("Appearance", systemImage: "textformat.size") }
         CompletionNotificationSettingsView()
           .tabItem { Label("Notifications", systemImage: "bell") }
+        OttoBuddySettingsView()
+          .tabItem { Label("Otto on Screen", systemImage: "eyes") }
         AgentDefaultsSettingsView()
           .tabItem { Label("Agents", systemImage: "sparkles") }
         ModelProviderSettingsView()
@@ -258,6 +264,7 @@ struct OttoApp: App {
         ProviderModelCatalogStore.shared.configure(
           accounts: services.providerAccounts, projects: services.conversationProjects)
         CompletionNotifications.shared.start(services: services, store: store)
+        OttoBuddyController.shared.start(services: services, store: store)
         await services.start()
         services.websiteAccounts.onOpenLogin = { id in
           PrivateWebsiteLoginWindows.shared.open(id, service: services.websiteAccounts)

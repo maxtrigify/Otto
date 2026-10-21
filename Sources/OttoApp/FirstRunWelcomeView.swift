@@ -57,6 +57,7 @@ struct FirstRunWelcomeView: View {
   @State private var starterName = OnboardingInterest.research.starter.name
   @State private var hiring = false
   @State private var errorMessage: String?
+  @AppStorage(OttoBuddyPreferences.enabledKey) private var ottoOnScreen = false
 
   /// `startStep` and `knownProviders` let snapshot tests render a step without a live runtime.
   init(
@@ -405,7 +406,34 @@ struct FirstRunWelcomeView: View {
         }
       }
       .padding(.top, 8)
+      ottoOnScreenOffer.padding(.top, 18)
     }
+  }
+
+  /// Otto on screen is opt-in: offered once here, and later from Settings or Getting started.
+  private var ottoOnScreenOffer: some View {
+    HStack(alignment: .center, spacing: 14) {
+      if let image = OttoBuddyPose.waving.image {
+        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: 58)
+      }
+      VStack(alignment: .leading, spacing: 3) {
+        Text("Want me to hang out on your screen?").font(.ottoDisplay(15).weight(.semibold))
+        Text(
+          "I’ll stay over every app, take quick questions and tell you when work is done. Click me for shortcuts or press \(OttoBuddyPreferences.summonShortcut)."
+        )
+        .font(.ottoDisplay(12))
+        .foregroundStyle(palette.muted)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 8)
+      Toggle("Otto on screen", isOn: $ottoOnScreen)
+        .toggleStyle(.switch)
+        .labelsHidden()
+        .accessibilityIdentifier("onboarding.otto-on-screen")
+    }
+    .padding(14)
+    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16))
+    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(palette.paper.opacity(0.08)))
   }
 
   private func detailRow(_ label: String, _ value: String) -> some View {

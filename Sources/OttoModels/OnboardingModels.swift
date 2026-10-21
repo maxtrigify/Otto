@@ -217,21 +217,23 @@ public struct GettingStartedState: Sendable, Equatable {
   public var hasGivenTask: Bool
   public var hasUsedVoiceCommand: Bool
   public var hasMorningBrief: Bool
+  public var hasMetOttoOnScreen: Bool
 
   public init(
     hasPreferredName: Bool, hasBot: Bool, hasGivenTask: Bool, hasUsedVoiceCommand: Bool,
-    hasMorningBrief: Bool
+    hasMorningBrief: Bool, hasMetOttoOnScreen: Bool = false
   ) {
     self.hasPreferredName = hasPreferredName
     self.hasBot = hasBot
     self.hasGivenTask = hasGivenTask
     self.hasUsedVoiceCommand = hasUsedVoiceCommand
     self.hasMorningBrief = hasMorningBrief
+    self.hasMetOttoOnScreen = hasMetOttoOnScreen
   }
 }
 
 public enum GettingStartedItemID: String, Sendable, CaseIterable {
-  case aboutYou, hireAgent, firstTask, voiceCommand, morningBrief
+  case aboutYou, hireAgent, firstTask, voiceCommand, morningBrief, ottoOnScreen
 }
 
 public struct GettingStartedItem: Identifiable, Sendable, Equatable {
@@ -258,6 +260,10 @@ public enum GettingStartedProgress {
       GettingStartedItem(
         id: .morningBrief, title: "Set up your morning brief",
         detail: "Your day, ready when you open Otto", isComplete: state.hasMorningBrief),
+      GettingStartedItem(
+        id: .ottoOnScreen, title: "Put Otto on your screen",
+        detail: "He stays over every app and says when work is done",
+        isComplete: state.hasMetOttoOnScreen),
     ]
   }
 }

@@ -76,7 +76,9 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
     guard completions.accept(event) else { return }
     let isBot = services.botRoster().contains { $0.nodeID == nodeID }
     guard Self.enabled(Self.enabledKey), Self.enabled(isBot ? Self.botsKey : Self.sessionsKey),
-      !(NSApp.isActive && visibleConversations.values.contains(nodeID))
+      !(NSApp.isActive && visibleConversations.values.contains(nodeID)),
+      // Otto on screen says it himself; one announcement is enough.
+      !OttoBuddyController.shared.replacesCompletionBanners
     else { return }
     let content = UNMutableNotificationContent()
     let failed = event.type == .agentRunFailed
@@ -133,8 +135,10 @@ struct CompletionNotificationSettingsView: View {
         Toggle("Bots", isOn: $bots).disabled(!enabled)
         Toggle("Sessions", isOn: $sessions).disabled(!enabled)
         Toggle("Play a sound", isOn: $sound).disabled(!enabled)
-        Text("Shows a banner when work finishes or fails, unless you’re viewing that conversation.")
-          .font(.callout).foregroundStyle(.secondary)
+        Text(
+          "Shows a banner when work finishes or fails, unless you’re viewing that conversation. While Otto is on screen and speaking up, he tells you instead."
+        )
+        .font(.callout).foregroundStyle(.secondary)
       }
       Section("macOS permission") {
         Text(notifications.permissionStatus).foregroundStyle(.secondary)

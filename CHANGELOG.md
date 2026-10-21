@@ -4,6 +4,26 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.2 — 2026-10-21
+
+### New
+
+- **Otto on your screen.** Turn on Settings › Otto on Screen and Otto stays with you over every app. He strolls along the top of the Dock, you can pick him up and drop him anywhere (even on top of a window, where he'll walk along and ride with it), and he naps when nothing's happening. Click him, or press ⌥⌘O from any app, to ask a quick question, ask about what's on your screen, or jump back to your last chat. Answers come back in his speech bubble and are kept in Chat. He tells you when work finishes, fails or needs your approval, with Approve and Deny right there, instead of the usual banners. He's off unless you turn him on.
+- **Send feedback from inside Otto.** Help › Send Feedback… (or the speech-bubble button in the Chat sidebar) reports a bug or an idea, with an optional screenshot of Otto's window. Reports are posted publicly on Otto's GitHub, and the form says so before you send.
+- **Terminals you can actually use.** When an agent opens a terminal, it now shows up in Chat where you can see it and type into it, and Otto tells you when one is waiting for your input.
+- **See how your memory connects.** Memory opens on a map of what Otto remembers and how it links together: people, projects, tags and sources. Search, filter, zoom and pan with your trackpad or mouse.
+- **Browser passwords.** The Browser can save sign-ins to your macOS Keychain and fill them in next time.
+- **Browser history and familiar shortcuts.** The address bar suggests pages you've visited before, and the usual shortcuts work: ⌘T new tab, ⇧⌘T reopen closed tab, ⌘L address bar, ⌃Tab next tab, ⌘[ and ⌘] back and forward. ⌘B (or ⇧⌘B from anywhere) takes you to the Browser, while ⌘B still makes text bold when you're editing a document.
+
+### Changes
+
+- **A tidier command palette.** ⌘F now focuses on getting around Otto as it is today.
+- **Marketplace is hidden for now** while it's finished. Your existing connections keep working.
+
+### Fixes
+
+- **Missing chats after the rename are back.** If some sessions, such as dashboard updates, went missing after Muse became Otto, Otto now brings their links back the next time it opens, without touching anything you already have.
+
 ## 0.2.1 — 2026-10-21
 
 ### Fixes

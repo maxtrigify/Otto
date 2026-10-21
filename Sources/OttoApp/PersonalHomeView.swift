@@ -36,6 +36,7 @@ struct PersonalHomeView: View {
   @AppStorage(FirstRunPreferences.gettingStartedDismissed) private var gettingStartedDismissed =
     false
   @AppStorage(FirstRunPreferences.starterBotID) private var starterBotID = ""
+  @AppStorage(OttoBuddyPreferences.everShownKey) private var ottoOnScreenShown = false
   @AppStorage(FirstRunPreferences.voiceCommandUsed) private var voiceCommandUsed = false
 
   /// Home takes its colours from the active theme, exactly like Chat, so the two screens look
@@ -601,7 +602,8 @@ struct PersonalHomeView: View {
         hasBot: !roster.isEmpty,
         hasGivenTask: !activity.items.isEmpty || !services.runHistory.isEmpty,
         hasUsedVoiceCommand: voiceCommandUsed,
-        hasMorningBrief: profile.briefRoutineID != nil),
+        hasMorningBrief: profile.briefRoutineID != nil,
+        hasMetOttoOnScreen: ottoOnScreenShown),
       botName: starterBot?.profile.name)
   }
 
@@ -684,6 +686,10 @@ struct PersonalHomeView: View {
             starterBot.map { .spawnProfile(profileID: $0.profile.id) }
               ?? .spawnProvider(provider: AgentProvider.claudeCode.rawValue))
         }
+      )
+    case .ottoOnScreen:
+      return (
+        "Turn on", { UserDefaults.standard.set(true, forKey: OttoBuddyPreferences.enabledKey) }
       )
     case .aboutYou, .voiceCommand: return nil
     }

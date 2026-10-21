@@ -24,6 +24,13 @@ struct ShortcutsSettingsView: View {
         Shortcut(keys: "⌘W", action: "Close the active browser tab, or the window elsewhere")
       ]),
     ShortcutGroup(
+      title: "Otto on screen",
+      shortcuts: [
+        Shortcut(
+          keys: OttoBuddyPreferences.summonShortcut,
+          action: "From any app: open Otto’s quick menu (while he’s on screen)")
+      ]),
+    ShortcutGroup(
       title: "Command palette",
       shortcuts: [
         Shortcut(keys: "⌘F", action: "Open the command palette"),
