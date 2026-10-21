@@ -4,6 +4,12 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.1 — 2026-10-21
+
+### Fixes
+
+- **Messaging works again on macOS 27.** On macOS 27, Otto could save its iMessage connection in a way the system then refused to let it read back, so messaging stopped starting. It now saves normally. If your messaging was affected, open Settings › Messaging and pair again; the old file is kept aside, not deleted.
+
 ## 0.2.0 — 2026-10-20
 
 ### Muse is now Otto
