@@ -4,7 +4,6 @@ import OttoApplicationTools
 import OttoControl
 import OttoCore
 import OttoModels
-import OttoRecipes
 import OttoRuntime
 import OttoTools
 import OttoWorktrees
@@ -100,12 +99,9 @@ struct ApplicationControlPlaneTests {
         context: context
       )
     }
-    await #expect(throws: ToolRegistryError.interactionDenied(.switchVisibleCanvas)) {
+    await #expect(throws: ToolRegistryError.unknownTool("canvas.switch")) {
       try await registry.call(
-        name: "canvas.switch",
-        input: try JSONValue.encode(CanvasIDInput(canvasID: background.id)),
-        context: context
-      )
+        name: "canvas.switch", input: .object([:]), context: context)
     }
     #expect(await store.snapshot.activeCanvasID == foreground.id)
   }
@@ -744,42 +740,8 @@ struct ApplicationControlPlaneTests {
     #expect(!final.transcript.contains { $0.text.contains("/skills") })
   }
 
-  @Test("Canvas tools create, list, rename, and switch through shared state")
-  func canvasLifecycle() async throws {
-    let first = OttoCanvas(name: "First")
-    let store = await CanvasStore(
-      snapshot: WorkspaceSnapshot(canvases: [first], activeCanvasID: first.id))
-    let registry = ToolRegistry()
-    try await ApplicationToolBootstrap.register(
-      in: registry, store: store, supervisor: AgentSupervisor())
-    let context = ToolContext(actorID: "canvas-e2e", scopes: [.canvasRead, .canvasWrite])
 
-    let created = try await registry.call(
-      name: "canvas.create",
-      input: try JSONValue.encode(CanvasCreateInput(name: "Second")),
-      context: context
-    ).decode(CanvasSummary.self)
-    _ = try await registry.call(
-      name: "canvas.rename",
-      input: try JSONValue.encode(CanvasRenameInput(name: "Delivery")),
-      context: context
-    )
-    let switched = try await registry.call(
-      name: "canvas.switch",
-      input: try JSONValue.encode(CanvasIDInput(canvasID: first.id)),
-      context: context
-    ).decode(CanvasSummary.self)
-    let listed = try await registry.call(
-      name: "canvas.list", input: .object([:]), context: context
-    ).decode([CanvasSummary].self)
-
-    #expect(created.name == "Second")
-    #expect(switched.id == first.id)
-    #expect(listed.map(\.name) == ["First", "Delivery"])
-    #expect(listed.first?.active == true)
-  }
-
-  @Test("Node and stage catalogue shares one deterministic state path")
+  @Test("Resource catalogue shares one deterministic state path")
   func spatialCatalogue() async throws {
     let canvas = OttoCanvas(name: "Catalogue")
     let store = await CanvasStore(
@@ -821,19 +783,6 @@ struct ApplicationControlPlaneTests {
     #expect(
       await store.activeCanvas.nodes.first(where: { $0.id == second.id })?
         .effectivePresentationMode == .compact)
-
-    let staged = try await registry.call(
-      name: "layout.stage",
-      input: try JSONValue.encode(LayoutStageInput(nodeID: second.id)),
-      context: context
-    ).decode(MutationOutput.self)
-    #expect(await store.activeCanvas.layoutMode == .stage)
-    #expect(await store.activeCanvas.selectedNodeID == second.id)
-    #expect(
-      await store.activeCanvas.nodes.first(where: { $0.id == second.id })?
-        .effectivePresentationMode.isExpanded == true)
-    #expect(await store.activeCanvas.nodes.first(where: { $0.id == second.id })?.frame.width == 760)
-    #expect(Set(staged.affectedNodeIDs) == [first.id, second.id])
 
     await #expect(throws: ToolRegistryError.self) {
       try await registry.call(
@@ -1173,65 +1122,6 @@ struct ApplicationControlPlaneTests {
       })
   }
 
-  @Test("Recipe tools persist and reproduce exact node configuration")
-  func recipeLifecycle() async throws {
-    let canvas = OttoCanvas(name: "Recipe source")
-    let store = await CanvasStore(
-      snapshot: WorkspaceSnapshot(canvases: [canvas], activeCanvasID: canvas.id))
-    let recipes = RecipeStore()
-    let registry = ToolRegistry()
-    try await ApplicationToolBootstrap.register(
-      in: registry,
-      store: store,
-      supervisor: AgentSupervisor(),
-      recipes: recipes
-    )
-    let context = ToolContext(
-      actorID: "recipe-e2e",
-      scopes: [.canvasRead, .canvasWrite]
-    )
-    let receipt = await store.dispatch(
-      .createNode(kind: .browser, at: WorldPoint(x: 125, y: -75)))
-    let nodeID = try #require(receipt.affectedNodeIDs.first)
-    _ = await store.dispatch(.setLayout(.columns))
-    _ = await store.dispatch(.moveNode(id: nodeID, to: WorldPoint(x: 125, y: -75)))
-    _ = await store.dispatch(.resizeNode(id: nodeID, width: 680, height: 420))
-    _ = await store.dispatch(.renameNode(id: nodeID, name: "Launch Preview"))
-    _ = await store.dispatch(
-      .setNodeContent(id: nodeID, content: .browser(url: "https://example.com/review")))
-    _ = await store.dispatch(.setTheme("nocturne"))
-
-    let saved = try await registry.call(
-      name: "recipe.save",
-      input: try JSONValue.encode(
-        RecipeSaveInput(id: "launch-review", name: "Launch review", description: "Preview")),
-      context: context
-    ).decode(RecipeSummary.self)
-    #expect(saved.version == 1)
-    #expect(saved.nodeCount == 1)
-
-    _ = await store.dispatch(.closeAll)
-    let booted = try await registry.call(
-      name: "recipe.boot",
-      input: try JSONValue.encode(RecipeBootInput(id: "launch-review")),
-      context: context
-    ).decode(RecipeBootOutput.self)
-    #expect(booted.nodeIDs.count == 1)
-    let recreated = try #require(await store.activeCanvas.nodes.first)
-    #expect(recreated.displayName == "Launch Preview")
-    #expect(recreated.frame == WorldRect(x: 125, y: -75, width: 680, height: 420))
-    #expect(recreated.content == .browser(url: "https://example.com/review"))
-    // "nocturne" is a legacy alias; the store canonicalizes it to "ringfall".
-    #expect(await store.activeCanvas.themeID == "ringfall")
-    #expect(await store.activeCanvas.layoutMode == .columns)
-
-    let listed = try await registry.call(
-      name: "recipe.list",
-      input: .object([:]),
-      context: context
-    ).decode([RecipeSummary].self)
-    #expect(listed.map(\.id) == ["launch-review"])
-  }
 
   @Test("Editing agent launches in an isolated worktree with safe diff and cleanup")
   func isolatedAgentWorktree() async throws {

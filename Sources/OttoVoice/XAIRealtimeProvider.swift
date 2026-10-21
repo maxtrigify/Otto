@@ -149,7 +149,7 @@ public actor XAIRealtimeProvider: StreamingVoiceProvider, VoicePreviewProvider {
             result.responseInstruction
               ?? (result.isError
                 ? "The action did not happen. Do not retry it or promise to proceed. State one short failure and wait for a new user request."
-                : "The action succeeded. If it was a routine visible canvas action, say nothing. Otherwise give only the useful result in one short sentence.")
+                : "The action succeeded. If it was a routine visible app action, say nothing. Otherwise give only the useful result in one short sentence.")
           ),
         ]))
       try await sendJSON([

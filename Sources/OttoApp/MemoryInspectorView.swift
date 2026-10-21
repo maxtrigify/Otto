@@ -2,10 +2,8 @@ import OttoMemory
 import OttoServices
 import SwiftUI
 
-/// Phase 6.4 — the user's window into layered memory: budget meters, the review inbox for
-/// compact-memory proposals, proposed Project Brain records awaiting promotion, and the compact
-/// stores themselves. Correction, confirmation, archive, and deletion are user acts; this is
-/// where they happen.
+/// Memory is automatic; the default view makes its recorded connections explorable.
+/// Curation remains an optional, explicit user action in Manage.
 struct MemoryInspectorView: View {
   @Environment(\.ottoPalette) private var palette
   @Environment(\.dismiss) private var dismiss
@@ -20,53 +18,81 @@ struct MemoryInspectorView: View {
   @State private var projectMemories: [MemoryRecord] = []
   @State private var botMemories: [MemoryRecord] = []
   @State private var notice: String?
+  @State private var showingManage = false
+  @State private var graphRecords: [MemoryRecord] = []
+  @State private var loadingRecords = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      HStack {
-        Text("MEMORY")
-          .font(.ottoMono(10, weight: .black))
-          .tracking(2)
-          .foregroundStyle(palette.signal)
-        Spacer()
-        Button("Refresh") { reload() }
-        Button("Done") { dismiss() }
-          .keyboardShortcut(.defaultAction)
-      }
-      .padding(18)
-      Divider().overlay(palette.paper.opacity(0.08))
-
-      ScrollView {
-        VStack(alignment: .leading, spacing: 22) {
-          if let notice {
-            Text(notice)
-              .font(.ottoMono(9))
-              .foregroundStyle(palette.amber)
-          }
-          budgetSection
-          if !proposals.isEmpty { inboxSection }
-          if !brainProposals.isEmpty { brainProposalSection }
-          projectBrainSection
-          botMemorySection
-          compactSection(
-            title: "USER CONTEXT · DEVICE-LOCAL",
-            entries: personalEntries,
-            store: services.personalMemory
-          )
-          compactSection(
-            title: "OPERATING MEMORY · WORKSPACE",
-            entries: operatingEntries,
-            store: services.operatingMemory
-          )
+      HStack(spacing: 18) {
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Memory").font(.ottoDisplay(24).weight(.semibold)).foregroundStyle(palette.paper)
+          Text("Memory runs automatically. Explore what connects.")
+            .font(.ottoDisplay(11)).foregroundStyle(palette.muted)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Spacer()
+        Picker("Memory view", selection: $showingManage) {
+          Text("Explore").tag(false)
+          Text("Manage").tag(true)
+        }
+        .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+        if loadingRecords { ProgressView().controlSize(.small) }
+        Button { notice = nil; reload() } label: { Image(systemName: "arrow.clockwise") }
+          .disabled(loadingRecords).help("Refresh memory").accessibilityLabel("Refresh memory")
+        Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+      }
+      .padding(20)
+      Divider().overlay(palette.paper.opacity(0.08))
+      if let notice, !showingManage {
+        Text(notice).font(.ottoDisplay(11)).foregroundStyle(palette.amber).padding(12)
+      }
+      ZStack {
+        MemoryGraphView(
+          records: graphRecords, personal: personalEntries, operating: operatingEntries,
+          botNames: Dictionary(uniqueKeysWithValues: Set(graphRecords.compactMap(\.profileID)).map {
+            ($0, services.agentProfiles.profile(id: $0)?.name ?? "Unnamed bot")
+          }))
+          .opacity(showingManage ? 0 : 1)
+          .allowsHitTesting(!showingManage)
+          .disabled(showingManage)
+          .accessibilityHidden(showingManage)
+        if showingManage { managementContent }
       }
     }
-    .frame(width: 640, height: 560)
+    .frame(width: 1040, height: 710)
     .background(palette.surface)
     .task { reload() }
   }
+
+  private var managementContent: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 22) {
+        if let notice {
+          Text(notice)
+            .font(.ottoMono(9))
+            .foregroundStyle(palette.amber)
+        }
+        budgetSection
+        if !proposals.isEmpty { inboxSection }
+        if !brainProposals.isEmpty { brainProposalSection }
+        projectBrainSection
+        botMemorySection
+        compactSection(
+          title: "USER CONTEXT · DEVICE-LOCAL",
+          entries: personalEntries,
+          store: services.personalMemory
+        )
+        compactSection(
+          title: "OPERATING MEMORY · WORKSPACE",
+          entries: operatingEntries,
+          store: services.operatingMemory
+        )
+      }
+      .padding(18)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
 
   private var budgetSection: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -290,13 +316,18 @@ struct MemoryInspectorView: View {
 
   private func reload() {
     Task {
+      loadingRecords = true
+      defer { loadingRecords = false }
       personalEntries = await services.personalMemory.entries()
       operatingEntries = await services.operatingMemory.entries()
       personalUsage = await services.personalMemory.usage()
       operatingUsage = await services.operatingMemory.usage()
       proposals = await services.memoryInbox.proposals()
       if let brain = services.brain {
-        let all = (try? await brain.allRecords()) ?? []
+        let all: [MemoryRecord]
+        do { all = try await brain.allRecords() }
+        catch { notice = "Could not refresh project memory: \(error.localizedDescription)"; return }
+        graphRecords = all
         brainProposals = all.filter { $0.confidence != .confirmed && $0.isAvailable() }
         projectMemories = all.filter {
           $0.isAvailable() && [.project, .canvas].contains($0.scope)

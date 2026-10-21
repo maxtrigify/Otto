@@ -318,6 +318,18 @@
       try send(data)
     }
 
+    /// Whether the terminal currently echoes typed characters. Programs turn echo off while they
+    /// read a password or secret (`read -s`), so Otto can say typing is hidden there. Reading the
+    /// line discipline never consumes input; a closed transport reports echo on.
+    public var echoesInput: Bool {
+      stateLock.withLock {
+        guard !isClosed else { return true }
+        var attributes = termios()
+        guard tcgetattr(masterFileDescriptor, &attributes) == 0 else { return true }
+        return (attributes.c_lflag & tcflag_t(ECHO)) != 0
+      }
+    }
+
     public func resize(columns: UInt16, rows: UInt16) throws {
       let unchanged = try stateLock.withLock {
         guard !isClosed else { throw RuntimeError.transportClosed }

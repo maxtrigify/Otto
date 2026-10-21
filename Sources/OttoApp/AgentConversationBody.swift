@@ -68,6 +68,9 @@ struct AgentConversationBody: View {
   let openBrowser: (String) -> Void
   /// Bots the composer can @mention. Empty hides suggestions.
   var mentionProfiles: [AgentProfile] = []
+  /// Terminals this conversation started that are waiting on the person.
+  var waitingTerminals: [ChatTerminalNotice] = []
+  var openTerminal: (UUID) -> Void = { _ in }
 
   @State private var input = ""
   @State private var selectedRunID: UUID?
@@ -600,6 +603,12 @@ struct AgentConversationBody: View {
           }
           if selectedRunID == nil, let children = snapshot?.childRuns, !children.isEmpty {
             AgentChildrenPanel(children: children, parentName: "Agent").id("agent-children")
+          }
+          if selectedRunID == nil {
+            ForEach(waitingTerminals) { notice in
+              TerminalWaitingCard(notice: notice) { openTerminal(notice.id) }
+                .id("terminal-waiting-\(notice.id.uuidString)")
+            }
           }
           if showsWorkingRow {
             workingRow.id("agent-working")

@@ -34,8 +34,8 @@ enum OttoMotion {
   /// Colour, weight, and stroke changes.
   static var tint: Animation { .easeOut(duration: 0.08) }
 
-  /// The same tiers for web surfaces the app hosts (widgets, bundled apps), as CSS custom
-  /// properties, so an agent-authored widget can move at the app's pace.
+  /// The same tiers for web surfaces the app hosts (browser previews, bundled apps), as CSS custom
+  /// properties, so an agent-authored web preview can move at the app's pace.
   static let cssTokens = """
     :root{--otto-motion-fast:80ms;--otto-motion-fast-exit:60ms;\
     --otto-motion-moderate:160ms;--otto-motion-moderate-exit:120ms;\

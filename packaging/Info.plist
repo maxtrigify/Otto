@@ -4,6 +4,8 @@
 <dict>
 	<key>OttoPrivatePhoneURL</key>
 	<string>https://muse-private-sign-in.muse-private.workers.dev</string>
+	<key>OttoFeedbackURL</key>
+	<string>https://feedback.openotto.io/v1/feedback</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>

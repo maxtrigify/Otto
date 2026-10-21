@@ -836,7 +836,7 @@ public struct ReportCompleteTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "report.complete",
     description:
-      "Registers a structured completion report in the Project Brain outputs, including the one-sentence plain-language summary. Returns the record citation and its workspace-relative path for opening on the canvas.",
+      "Registers a structured completion report in the Project Brain outputs, including the one-sentence plain-language summary. Returns the record citation and its workspace-relative path for accessing as a file.",
     inputSchema: .objectSchema(
       properties: [
         "objective": .stringSchema(description: "What the run set out to do"),

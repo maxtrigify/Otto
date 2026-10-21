@@ -191,10 +191,10 @@ public actor OpenAIVoiceTaskPlanner: VoiceTaskPlanning {
       self-contained and end with concrete acceptance evidence. Select only one of these installed
       providers: \(providerList.joined(separator: ", ")). Prefer Codex for implementation and
       repository work, Claude Code for a second independent implementation/review stream or for
-      any task that coordinates, messages, or reads other canvas agents (Claude Code always has
-      the otto canvas tools), and Hermes only for bounded external research — Hermes may run
-      remotely without canvas access and must never be chosen to coordinate canvas agents.
-      The context lists the agents already open on the canvas (nodes with kind "agent",
+      any task that coordinates, messages, or reads other Otto agents (Claude Code always has
+      the otto workspace tools), and Hermes only for bounded external research — Hermes may run
+      remotely without workspace access and must never be chosen to coordinate local Otto agents.
+      The context lists the agents in the workspace (nodes with kind "agent",
       including their id, name, provider, and status). When the objective names one of them or
       an existing idle agent of the right provider already fits the task, set existingAgentID
       to that node's id and set provider to that agent's provider instead of creating a

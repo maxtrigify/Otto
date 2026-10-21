@@ -33,16 +33,10 @@ struct WorkspaceView: View {
   @State private var homeDraft = ""
   @State private var homeProvider: AgentProvider = .codex
   @State private var homeConversationTarget: HomeConversationTarget = .newSession
-  @State private var showingAgentLauncher = false
+  @State private var conversationError: String?
   @State private var showingHireBot = false
   @State private var showingCreateTeam = false
-  @State private var showingCustomAgentCreator = false
-  @State private var showingAgentManager = false
-  @State private var createsAgentAfterManagerDismiss = false
-  @State private var agentProfileLaunchError: String?
   @State private var agentLaunchPoint = WorldPoint(x: 0, y: 0)
-  @State private var showingMediaLauncher = false
-  @State private var mediaLaunchPoint = WorldPoint(x: 0, y: 0)
   @AppStorage("otto.onboarding.completed") private var onboardingCompleted = false
   @AppStorage(OttoPreferenceKey.fontScale) private var fontScaleRaw = OttoFontScale.standard
     .rawValue
@@ -142,13 +136,13 @@ struct WorkspaceView: View {
     } message: {
       Text(store.persistenceError ?? "Unknown database error")
     }
-    .alert("Could not open custom agent", isPresented: agentProfileErrorBinding) {
-      Button("Dismiss", role: .cancel) { agentProfileLaunchError = nil }
+    .alert("Conversation error", isPresented: Binding(
+      get: { conversationError != nil },
+      set: { if !$0 { conversationError = nil } }
+    )) {
+      Button("Dismiss", role: .cancel) { conversationError = nil }
     } message: {
-      Text(agentProfileLaunchError ?? "Unknown custom-agent launch error")
-    }
-    .sheet(isPresented: $showingAgentLauncher) {
-      AgentLaunchSheet(services: services, point: agentLaunchPoint)
+      Text(conversationError ?? "Could not open the conversation")
     }
     .sheet(isPresented: $showingHireBot) {
       HireBotSheet(services: services, hired: openHiredBot)
@@ -158,30 +152,8 @@ struct WorkspaceView: View {
       CreateTeamSheet(services: services) { _ in }
         .environment(\.ottoPalette, palette)
     }
-    .sheet(isPresented: $showingCustomAgentCreator) {
-      CustomAgentCreationView(services: services, point: agentLaunchPoint)
-    }
-    .sheet(isPresented: $showingAgentManager, onDismiss: finishAgentManagerDismissal) {
-      AgentManagerView(
-        services: services,
-        createAgent: {
-          createsAgentAfterManagerDismiss = true
-          showingAgentManager = false
-        },
-        openAgent: { profile, forceNew in
-          showingAgentManager = false
-          openAgentProfile(profile, forceNew: forceNew)
-        }
-      )
-    }
-    .sheet(isPresented: $showingMediaLauncher) {
-      MediaLaunchSheet(services: services, point: mediaLaunchPoint)
-    }
     .sheet(isPresented: $uiState.showsMemoryInspector) {
       MemoryInspectorView(services: services)
-    }
-    .sheet(isPresented: $uiState.showsWidgetManager) {
-      WidgetManagerView(store: store, services: services)
     }
     .sheet(isPresented: $showingBoatCloud) {
       VStack {
@@ -195,8 +167,19 @@ struct WorkspaceView: View {
     .sheet(isPresented: $uiState.showsRoutineManager) {
       RoutineManagerView(store: store, services: services)
     }
+    .sheet(isPresented: $uiState.showsFeedback) {
+      FeedbackSheet { uiState.showsFeedback = false }
+        .environment(\.ottoPalette, palette)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .ottoSendFeedback)) { _ in
+      uiState.showsFeedback = true
+    }
     .onAppear {
       if !onboardingCompleted { showingOnboarding = true }
+      openRequestedBrowser()
+    }
+    .onChange(of: uiState.requestsBrowser) { _, requested in
+      if requested { openRequestedBrowser() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .ottoReplayVoiceOnboarding)) { _ in
       showingTour = false
@@ -261,7 +244,6 @@ struct WorkspaceView: View {
       brief: services.dailyBrief, draft: $homeDraft, provider: $homeProvider,
       conversationTarget: $homeConversationTarget,
       openMarkdown: openHomeMarkdown,
-      openNode: openHomeNode,
       openBot: { profile in
         showingPersonalHome = false
         agentLaunchPoint = nextPlacementPoint()
@@ -338,22 +320,13 @@ struct WorkspaceView: View {
         } catch {
           await services.recordConversationSendFailure(agentID: id, prompt: prompt, error: error)
           openHomeAgent(id)
-          agentProfileLaunchError = error.localizedDescription
+          conversationError = error.localizedDescription
           return
         }
         openHomeAgent(id)
       }
     )
     .ignoresSafeArea(.container, edges: .top)
-  }
-
-  /// Pinned widgets and other non-conversation nodes open the Widgets library in Chat.
-  private func openHomeNode(_ id: UUID) {
-    var navigation = store.snapshot.chatNavigation
-    navigation.destination = .widgets
-    store.updateChatNavigation(navigation)
-    store.setWorkspaceSurface(.chat)
-    showingPersonalHome = false
   }
 
   /// A note opens in the user's own editor.
@@ -374,7 +347,8 @@ struct WorkspaceView: View {
         symbol: "bubble.left.and.bubble.right", keywords: "chat conversations bots teams sessions",
         perform: { openChatDestination(.conversation) }),
       PaletteQuickAction(
-        id: "go.documents", title: "Documents", subtitle: "Documents, spreadsheets and presentations",
+        id: "go.documents", title: "Documents",
+        subtitle: "Documents, spreadsheets and presentations",
         symbol: "doc.richtext", keywords: "documents spreadsheets presentations slides sheets",
         perform: { openChatDestination(.documents) }),
       PaletteQuickAction(
@@ -397,6 +371,12 @@ struct WorkspaceView: View {
         id: "go.settings", title: "Settings", subtitle: "Connections, appearance and preferences",
         symbol: "gearshape", keywords: "settings preferences accounts connections appearance",
         perform: { openSettings() }),
+      PaletteQuickAction(
+        id: "help.feedback", title: "Send feedback",
+        subtitle: "Report a bug or suggest an idea on GitHub",
+        symbol: "bubble.left.and.exclamationmark.bubble.right",
+        keywords: "feedback bug report idea suggestion problem help github",
+        perform: { uiState.showsFeedback = true }),
       PaletteQuickAction(
         id: "go.files", title: "Files & notes", subtitle: "Notes and media",
         symbol: "doc.text", keywords: "files notes documents media",
@@ -433,6 +413,13 @@ struct WorkspaceView: View {
     return jumps
   }
 
+  private func openRequestedBrowser() {
+    guard uiState.requestsBrowser else { return }
+    uiState.requestsBrowser = false
+    uiState.showsCommandPalette = false
+    openChatDestination(.browser)
+  }
+
   private func openChatDestination(_ destination: ChatSurfaceDestination) {
     var navigation = store.snapshot.chatNavigation
     navigation.destination = destination
@@ -445,6 +432,13 @@ struct WorkspaceView: View {
     guard let canvas = store.snapshot.canvases.first(where: { $0.nodes.contains { $0.id == id } }),
       let node = canvas.nodes.first(where: { $0.id == id })
     else { return }
+    if node.kind == .terminal {
+      // A waiting terminal in "Needs you": Chat opens it beside its conversation, or in Terminals.
+      services.revealTerminal(id)
+      store.setWorkspaceSurface(.chat)
+      showingPersonalHome = false
+      return
+    }
     if let profileID = node.agentDefinition?.profileID,
       services.botRoster().contains(where: { $0.profile.id == profileID })
     {
@@ -512,7 +506,7 @@ struct WorkspaceView: View {
             store.snapshot.chatNavigation, profileID: profile.id, nodeID: nodeID))
         store.dispatch(.focusNode(nodeID))
       } catch {
-        agentProfileLaunchError = error.localizedDescription
+        conversationError = error.localizedDescription
       }
     }
   }
@@ -598,14 +592,7 @@ struct WorkspaceView: View {
     Binding(get: { store.persistenceError != nil }, set: { _ in })
   }
 
-  private var agentProfileErrorBinding: Binding<Bool> {
-    Binding(
-      get: { agentProfileLaunchError != nil },
-      set: { if !$0 { agentProfileLaunchError = nil } }
-    )
-  }
-
-  /// Current app actions; legacy canvas creation lives outside the command menu.
+  /// Current app navigation and conversation actions.
   private var paletteQuickActions: [PaletteQuickAction] {
     let actions = [
       PaletteQuickAction(
@@ -695,38 +682,14 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "memory.inspector",
-        title: "Memory inspector",
-        subtitle: "Review proposals, budgets, and the Project Brain",
+        title: "Memory",
+        subtitle: "Explore memories and their connections",
         symbol: "brain",
-        keywords: "memory brain inspector review proposals budget knowledge",
+        keywords: "memory brain graph connections sources entities topics inspector manage knowledge",
         perform: { uiState.showsMemoryInspector = true }
       ),
     ]
     return jumpActions + actions
-  }
-
-  private func openAgentProfile(_ profile: AgentProfile, forceNew: Bool = false) {
-    let point = nextPlacementPoint()
-    Task {
-      do {
-        _ = try await services.openAgentProfile(profile, at: point, forceNew: forceNew)
-      } catch {
-        agentProfileLaunchError = error.localizedDescription
-      }
-    }
-  }
-
-  private func createCustomAgent() {
-    agentLaunchPoint = nextPlacementPoint()
-    showingCustomAgentCreator = true
-  }
-
-  /// SwiftUI cannot reliably replace one sheet with another during the first sheet's dismissal
-  /// transaction. Wait for the manager to finish closing before presenting the creator.
-  private func finishAgentManagerDismissal() {
-    guard createsAgentAfterManagerDismiss else { return }
-    createsAgentAfterManagerDismiss = false
-    createCustomAgent()
   }
 
   private func quickLaunchAgent(_ provider: AgentProvider) {
@@ -766,399 +729,4 @@ struct WorkspaceView: View {
     )
   }
 
-  private func createNode(_ kind: NodeKind) {
-    let point = nextPlacementPoint()
-    if kind == .agent {
-      agentLaunchPoint = point
-      showingAgentLauncher = true
-      return
-    }
-    if kind == .media {
-      mediaLaunchPoint = point
-      showingMediaLauncher = true
-      return
-    }
-    if kind == .terminal {
-      Task { try? await services.openTerminal(at: point) }
-      return
-    }
-    if kind == .markdown {
-      createNote(.blank)
-      return
-    }
-    if kind == .widget {
-      createWidget(at: point)
-      return
-    }
-    store.dispatch(
-      .createNode(
-        kind: kind,
-        at: point
-      ))
-  }
-
-  private func createWidget(at point: WorldPoint) {
-    let canvas = store.activeCanvas
-    Task {
-      let packagePath = "Widgets/\(UUID().uuidString.lowercased())"
-      do {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let manifestData = try encoder.encode(WidgetScaffold.manifest)
-        guard let manifestText = String(data: manifestData, encoding: .utf8) else { return }
-        try await services.documents.replace(
-          relativePath: "\(packagePath)/widget.json", text: manifestText + "\n")
-        try await services.documents.replace(
-          relativePath: "\(packagePath)/index.html", text: WidgetScaffold.html + "\n")
-        let receipt = store.dispatch(
-          .createNode(kind: .widget, at: point), targetCanvasID: canvas.id)
-        guard let nodeID = receipt.affectedNodeIDs.first else { return }
-        store.dispatch(
-          .setNodeContent(
-            id: nodeID, content: .widget(packagePath: packagePath, state: "{}")),
-          targetCanvasID: canvas.id
-        )
-        store.dispatch(
-          .renameNode(id: nodeID, name: WidgetScaffold.manifest.name),
-          targetCanvasID: canvas.id
-        )
-      } catch {
-        _ = store.dispatch(.createNode(kind: .widget, at: point), targetCanvasID: canvas.id)
-      }
-    }
-  }
-
-  private func createNote(_ template: CanvasNoteTemplate) {
-    let canvas = store.activeCanvas
-    let point = nextPlacementPoint()
-    Task {
-      do {
-        let note = try await services.documents.createCanvasNote(
-          canvasID: canvas.id,
-          canvasName: canvas.name,
-          template: template
-        )
-        let text = try await services.documents.read(relativePath: note.relativePath)
-        let receipt = store.dispatch(
-          .createNode(kind: .markdown, at: point),
-          targetCanvasID: canvas.id
-        )
-        guard let nodeID = receipt.affectedNodeIDs.first else { return }
-        store.dispatch(
-          .setNodeContent(
-            id: nodeID,
-            content: .markdown(relativePath: note.relativePath, text: text)
-          ),
-          targetCanvasID: canvas.id
-        )
-      } catch {
-        // A pathless note remains recoverable in canvas persistence if disk creation fails.
-        _ = store.dispatch(.createNode(kind: .markdown, at: point), targetCanvasID: canvas.id)
-      }
-    }
-  }
-}
-
-private struct MediaLaunchSheet: View {
-  @Environment(\.dismiss) private var dismiss
-  @Environment(\.ottoPalette) private var palette
-  @ObservedObject var services: ApplicationServices
-  let point: WorldPoint
-  @State private var source = ""
-  @State private var opening = false
-  @State private var errorMessage: String?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("OPEN MEDIA")
-        .font(.ottoMono(10, weight: .black))
-        .tracking(2)
-        .foregroundStyle(palette.signal)
-      Text("Enter an HTTP(S) audio URL or a path inside this workspace.")
-        .font(.ottoDisplay(17))
-        .foregroundStyle(palette.paper)
-      TextField("https://… or audio/file.mp3", text: $source)
-        .textFieldStyle(.roundedBorder)
-      if let errorMessage {
-        Text(errorMessage).font(.ottoMono(9)).foregroundStyle(palette.red)
-      }
-      HStack {
-        Button("Cancel") { dismiss() }
-        Spacer()
-        Button(opening ? "Opening…" : "Open") { open() }
-          .disabled(opening || source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-          .keyboardShortcut(.defaultAction)
-      }
-    }
-    .padding(24)
-    .frame(width: 500)
-    .background(palette.surface)
-  }
-
-  private func open() {
-    opening = true
-    Task {
-      do {
-        try await services.openMedia(source: source, at: point)
-        dismiss()
-      } catch {
-        errorMessage = error.localizedDescription
-        opening = false
-      }
-    }
-  }
-}
-
-private struct AgentLaunchSheet: View {
-  @Environment(\.ottoPalette) private var palette
-  @Environment(\.dismiss) private var dismiss
-  @ObservedObject var services: ApplicationServices
-  let point: WorldPoint
-  @State private var provider = AgentProvider.codex
-  @State private var displayName = ""
-  @State private var workingDirectory = ""
-  @State private var prompt = ""
-  @State private var executionStrategy = AgentExecutionStrategy.direct
-  @State private var permissionMode = AgentPermissionMode.workspaceWrite
-  @AppStorage(OttoPreferenceKey.claudePermissionMode) private var claudePermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.codexPermissionMode) private var codexPermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.cursorPermissionMode) private var cursorPermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.kimiPermissionMode) private var kimiPermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.openCodePermissionMode) private var openCodePermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.grokPermissionMode) private var grokPermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.hermesPermissionMode) private var hermesPermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @AppStorage(OttoPreferenceKey.shellPermissionMode) private var shellPermission =
-    AgentPermissionMode.workspaceWrite.rawValue
-  @State private var isolatedWorktree = false
-  @State private var availability: [AgentProviderInfo] = []
-  @State private var scanningProviders = false
-  @State private var launching = false
-  @State private var errorMessage: String?
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 18) {
-      Text("LAUNCH AGENT")
-        .font(.ottoMono(10, weight: .black))
-        .tracking(2)
-        .foregroundStyle(palette.signal)
-      Text("Open a focused agent chat, with the full provider terminal one click away.")
-        .font(.ottoDisplay(18))
-        .foregroundStyle(palette.paper)
-
-      HStack(alignment: .firstTextBaseline, spacing: 10) {
-        Picker("Provider", selection: $provider) {
-          ForEach(AgentProvider.allCases, id: \.self) { provider in
-            Text(providerLabel(provider)).tag(provider)
-          }
-        }
-        .onChange(of: provider) { _, provider in
-          applyPermissionDefault()
-          if !executionStrategy.isSupported(by: provider) { executionStrategy = .direct }
-        }
-        Button {
-          Task { await loadProviders(autoSelect: false) }
-        } label: {
-          Label(scanningProviders ? "Scanning…" : "Rescan", systemImage: "arrow.clockwise")
-        }
-        .disabled(scanningProviders)
-        .accessibilityLabel("Rescan installed agent providers")
-      }
-      TextField("Agent name", text: $displayName)
-        .textFieldStyle(.roundedBorder)
-      HStack(spacing: 8) {
-        TextField("Working directory", text: $workingDirectory)
-          .textFieldStyle(.roundedBorder)
-        Button("Choose…") { chooseWorkingDirectory() }
-      }
-      .disabled(isRemoteHermes)
-      if isRemoteHermes {
-        Text("Hermes will use the remote working directory configured in Settings › Agents.")
-          .font(.ottoMono(9))
-          .foregroundStyle(palette.paper.opacity(0.58))
-      }
-      if provider == .claudeCode || provider == .codex {
-        Picker("Execution", selection: $executionStrategy) {
-          ForEach(
-            AgentExecutionStrategy.allCases.filter { $0.isSupported(by: provider) },
-            id: \.self
-          ) { strategy in
-            Text(executionStrategyLabel(strategy)).tag(strategy)
-          }
-        }
-        Text(executionStrategyHelp)
-          .font(.ottoMono(9))
-          .foregroundStyle(palette.paper.opacity(0.58))
-      }
-      Picker("Permissions", selection: $permissionMode) {
-        ForEach(AgentPermissionMode.allCases, id: \.self) { mode in
-          Text(permissionLabel(mode)).tag(mode)
-        }
-      }
-      if provider == .kimi, permissionMode == .readOnly {
-        Text(
-          "Kimi has no read-only chat mode: its non-interactive runs always auto-approve tool "
-            + "calls. Read only applies to Kimi's terminal, which opens in plan mode."
-        )
-        .font(.ottoMono(9))
-        .foregroundStyle(palette.paper.opacity(0.58))
-      }
-      Toggle("Isolated Git worktree", isOn: $isolatedWorktree)
-        .toggleStyle(.ottoSwitch)
-        .disabled(permissionMode == .readOnly || isRemoteHermes)
-        .onChange(of: permissionMode) { _, mode in
-          if mode == .readOnly { isolatedWorktree = false }
-        }
-      TextEditor(text: $prompt)
-        .font(.ottoMono(11))
-        .frame(minHeight: 110)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.white.opacity(0.12)))
-      Text("Add a first prompt to begin immediately, or leave it blank and start in chat.")
-        .font(.ottoMono(9))
-        .foregroundStyle(palette.paper.opacity(0.58))
-
-      if let errorMessage {
-        Text(errorMessage).font(.ottoMono(9)).foregroundStyle(palette.red)
-      }
-      HStack {
-        Button("Cancel") { dismiss() }
-        Spacer()
-        Button(launching ? "Launching…" : "Launch") { launch() }
-          .disabled(
-            launching
-              || availability.first(where: { $0.provider == provider })?.installed != true
-          )
-          .keyboardShortcut(.defaultAction)
-      }
-    }
-    .padding(24)
-    .frame(width: 520)
-    .background(palette.surface)
-    .task {
-      applyPermissionDefault()
-      if workingDirectory.isEmpty { workingDirectory = services.defaultWorkspacePath }
-      await loadProviders(autoSelect: true)
-    }
-  }
-
-  private func applyPermissionDefault() {
-    let raw: String
-    switch provider {
-    case .claudeCode: raw = claudePermission
-    case .codex: raw = codexPermission
-    case .openAI: raw = codexPermission
-    case .hermes: raw = hermesPermission
-    case .cursor: raw = cursorPermission
-    case .kimi: raw = kimiPermission
-    case .openCode: raw = openCodePermission
-    case .grok: raw = grokPermission
-    case .shell: raw = shellPermission
-    }
-    permissionMode = AgentPermissionMode(rawValue: raw) ?? .workspaceWrite
-  }
-
-  private var isRemoteHermes: Bool {
-    provider == .hermes && HermesConnectionConfiguration.load().mode == .remote
-  }
-
-  private func launch() {
-    launching = true
-    errorMessage = nil
-    Task {
-      do {
-        try await services.spawnAgent(
-          provider: provider,
-          displayName: normalizedDisplayName,
-          prompt: initialPrompt,
-          workingDirectory: workingDirectory,
-          at: point,
-          executionStrategy: executionStrategy,
-          permissionMode: permissionMode,
-          isolatedWorktree: isolatedWorktree
-        )
-        dismiss()
-      } catch {
-        errorMessage = error.localizedDescription
-        launching = false
-      }
-    }
-  }
-
-  private var initialPrompt: String? {
-    PromptSubmission.verbatimText(from: prompt)
-  }
-
-  private func loadProviders(autoSelect: Bool) async {
-    scanningProviders = true
-    defer { scanningProviders = false }
-    do {
-      availability = try await services.providerAvailability()
-      errorMessage = nil
-      if autoSelect,
-        availability.first(where: { $0.provider == provider })?.installed != true,
-        let installed = availability.first(where: \.installed)
-      {
-        provider = installed.provider
-        applyPermissionDefault()
-      }
-    } catch {
-      errorMessage = error.localizedDescription
-    }
-  }
-
-  private var normalizedDisplayName: String? {
-    let value = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return value.isEmpty ? nil : value
-  }
-
-  private func chooseWorkingDirectory() {
-    let panel = NSOpenPanel()
-    panel.canChooseDirectories = true
-    panel.canChooseFiles = false
-    panel.allowsMultipleSelection = false
-    panel.prompt = "Choose"
-    if !workingDirectory.isEmpty {
-      panel.directoryURL = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-    }
-    if panel.runModal() == .OK, let url = panel.url { workingDirectory = url.path }
-  }
-
-  private func providerLabel(_ provider: AgentProvider) -> String {
-    let info = availability.first { $0.provider == provider }
-    if info?.installed == true { return "\(provider.rawValue) · \(info?.version ?? "installed")" }
-    return "\(provider.rawValue) · not installed"
-  }
-
-  private func permissionLabel(_ mode: AgentPermissionMode) -> String {
-    switch mode {
-    case .readOnly: "Read only"
-    case .workspaceWrite: "Ask to approve (workspace write)"
-    case .unrestricted: "Bypass all permissions"
-    }
-  }
-
-  private func executionStrategyLabel(_ strategy: AgentExecutionStrategy) -> String {
-    switch strategy {
-    case .direct: "Direct"
-    case .delegated: "Delegate to subagents"
-    case .scriptedWorkflow: "Claude dynamic workflow"
-    }
-  }
-
-  private var executionStrategyHelp: String {
-    switch executionStrategy {
-    case .direct:
-      "The main agent handles each prompt itself."
-    case .delegated:
-      "The agent may split independent work across its native subagents."
-    case .scriptedWorkflow:
-      "Claude runs a phased, resumable workflow for large fan-out tasks."
-    }
-  }
 }

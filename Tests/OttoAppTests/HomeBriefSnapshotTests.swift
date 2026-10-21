@@ -42,7 +42,7 @@ struct HomeBriefSnapshotTests {
         let view = PersonalHomeView(
           store: canvas, services: services, activity: services.botActivity,
           brief: services.dailyBrief, draft: .constant(""), provider: .constant(.claudeCode),
-          conversationTarget: .constant(.newSession), openMarkdown: { _ in }, openNode: { _ in },
+          conversationTarget: .constant(.newSession), openMarkdown: { _ in },
           openBot: { _ in }, openAgent: { _ in }, openCloud: {},
           openLibrary: { _ in }, hireBot: {}, submit: { _, _, _ in })
         try render(view, size: size, to: "\(output)/\(profile.name)-\(name).png")
@@ -57,7 +57,7 @@ struct HomeBriefSnapshotTests {
         PersonalHomeView(
           store: canvas, services: services, activity: services.botActivity,
           brief: services.dailyBrief, draft: .constant(""), provider: .constant(.claudeCode),
-          conversationTarget: .constant(.newSession), openMarkdown: { _ in }, openNode: { _ in },
+          conversationTarget: .constant(.newSession), openMarkdown: { _ in },
           openBot: { _ in }, openAgent: { _ in }, openCloud: {},
           openLibrary: { _ in }, hireBot: {}, submit: { _, _, _ in })
       }
@@ -71,7 +71,7 @@ struct HomeBriefSnapshotTests {
     let quiet = PersonalHomeView(
       store: canvas, services: services, activity: services.botActivity,
       brief: services.dailyBrief, draft: .constant(""), provider: .constant(.claudeCode),
-      conversationTarget: .constant(.newSession), openMarkdown: { _ in }, openNode: { _ in },
+      conversationTarget: .constant(.newSession), openMarkdown: { _ in },
       openBot: { _ in }, openAgent: { _ in }, openCloud: {},
       openLibrary: { _ in }, hireBot: {}, submit: { _, _, _ in })
     try render(quiet, size: CGSize(width: 1440, height: 1100), to: "\(output)/empty.png")
@@ -137,7 +137,7 @@ struct HomeBriefSnapshotTests {
           store: canvas, services: services, activity: services.botActivity,
           brief: services.dailyBrief, draft: .constant("hello, can you prep my 11:00?"),
           provider: .constant(.claudeCode),
-          conversationTarget: .constant(.newSession), openMarkdown: { _ in }, openNode: { _ in },
+          conversationTarget: .constant(.newSession), openMarkdown: { _ in },
           openBot: { _ in }, openAgent: { _ in }, openCloud: {},
           openLibrary: { _ in }, hireBot: {}, submit: { _, _, _ in })
       }
@@ -525,7 +525,7 @@ struct HomeBriefSnapshotTests {
         PersonalHomeView(
           store: canvas, services: services, activity: services.botActivity,
           brief: services.dailyBrief, draft: .constant(""), provider: .constant(.claudeCode),
-          conversationTarget: .constant(.newSession), openMarkdown: { _ in }, openNode: { _ in },
+          conversationTarget: .constant(.newSession), openMarkdown: { _ in },
           openBot: { _ in }, openAgent: { _ in }, openCloud: {},
           openLibrary: { _ in }, hireBot: {}, submit: { _, _, _ in })
       }

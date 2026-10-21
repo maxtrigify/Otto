@@ -16,6 +16,8 @@ struct EmulatedTerminalView: NSViewRepresentable {
   let replayExistingOutput: Bool
   let send: (Data) -> Void
   let resize: (UInt16, UInt16) -> Void
+  /// Changing this puts keyboard focus in the terminal, so typing and paste go to the process.
+  var focusToken: Int = 0
 
   func makeCoordinator() -> Coordinator {
     Coordinator(
@@ -31,7 +33,7 @@ struct EmulatedTerminalView: NSViewRepresentable {
     view.optionAsMetaKey = true
     view.allowMouseReporting = true
     view.changeScrollback(10_000)
-    view.setAccessibilityLabel("Interactive terminal output")
+    view.setAccessibilityLabel("Interactive terminal. Click to type or paste.")
     let scale = OttoFontScale(rawValue: fontScaleRaw) ?? .standard
     context.coordinator.applyAppearance(
       fontSize: 11 * scale.multiplier,
@@ -60,6 +62,14 @@ struct EmulatedTerminalView: NSViewRepresentable {
       sessionKey: sessionKey,
       in: view
     )
+    if focusToken != context.coordinator.appliedFocusToken {
+      context.coordinator.appliedFocusToken = focusToken
+      // The view may not be in a window yet on the update that reveals it.
+      DispatchQueue.main.async { [weak view] in
+        guard let view, let window = view.window else { return }
+        window.makeFirstResponder(view)
+      }
+    }
   }
 
   static func dismantleNSView(_ view: TerminalView, coordinator: Coordinator) {
@@ -70,6 +80,7 @@ struct EmulatedTerminalView: NSViewRepresentable {
     var send: (Data) -> Void
     var resize: (UInt16, UInt16) -> Void
     var replayExistingOutput: Bool
+    var appliedFocusToken = 0
     private var renderedSessionKey: String?
     private var renderedEndOffset = 0
     private var refreshedSessionKey: String?

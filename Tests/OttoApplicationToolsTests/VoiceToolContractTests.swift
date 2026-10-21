@@ -98,7 +98,6 @@ struct VoiceToolContractTests {
     let expected: Set<String> = [
       "node.create", "node.list", "node.get", "node.focus", "node.expand",
       "node.close", "node.close_all",
-      "canvas.get", "canvas.list", "canvas.create", "canvas.switch", "canvas.rename",
       "agent.spawn", "agent.send_prompt", "agent.send_input", "agent.get_status",
       "agent.get_output", "agent.get_result", "agent.interrupt", "agent.stop", "agent.resume",
       "terminal.open", "terminal.run", "terminal.send_input", "terminal.send_bytes",
@@ -107,17 +106,25 @@ struct VoiceToolContractTests {
       "browser.get_state", "browser.refresh", "browser.back",
       "browser.forward", "browser.inspect", "browser.click", "browser.type", "browser.scroll",
       "browser.screenshot", "browser.open_external",
-      "surface.set", "layout.stage",
+      "surface.set",
       "media.open", "media.play", "media.pause", "media.stop", "media.set_volume", "media.seek",
-      "theme.list", "theme.set", "recipe.list", "recipe.save", "recipe.boot",
+      "theme.list", "theme.set",
       "event.wait", "diagnostics.run",
     ]
 
     #expect(expected.isSubset(of: names))
     let retired: Set<String> = [
-      "node.move", "node.resize", "canvas.set_viewport", "canvas.fit_all",
+      "canvas.get", "canvas.list", "canvas.create", "canvas.switch", "canvas.rename",
+      "widget.create", "widget.open", "widget.list", "widget.refresh", "widget.update",
+      "widget.close", "widget.delete", "widget.set_data", "widget.logs", "widget.get",
+      "whiteboard.get", "whiteboard.create_shapes", "whiteboard.delete_shapes",
+      "whiteboard.clear", "whiteboard.fit", "recipe.list", "recipe.save", "recipe.boot",
+      "layout.stage", "node.move", "node.resize", "canvas.set_viewport", "canvas.fit_all",
       "layout.organize", "layout.set", "layout.set_snap",
     ]
     #expect(retired.isDisjoint(with: names))
+    #expect(!names.contains { name in
+      ["canvas.", "widget.", "whiteboard.", "recipe.", "layout."].contains { name.hasPrefix($0) }
+    })
   }
 }

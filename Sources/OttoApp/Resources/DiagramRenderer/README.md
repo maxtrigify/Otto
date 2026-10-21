@@ -8,4 +8,4 @@
 - License: MIT; see `LICENSE` in this directory.
 
 The renderer is deliberately vendored as a dedicated resource. Do not import the hashed Mermaid
-chunks inside the Excalidraw build; they are private build output and do not provide a stable API.
+private build chunks; they do not provide a stable API.

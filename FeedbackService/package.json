@@ -1,0 +1,13 @@
+{
+  "name": "otto-feedback",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "dev": "wrangler dev --ip 127.0.0.1 --port 8792",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.131.0"
+  }
+}

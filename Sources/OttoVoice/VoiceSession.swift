@@ -1144,14 +1144,14 @@ public actor VoiceSession {
     if queryNames.contains(leaf) { return nil }
 
     let visibleMutationPrefixes = [
-      "canvas.", "node.", "layout.", "document.", "browser.", "recipe.", "recording.",
+      "node.", "document.", "browser.", "recording.",
     ]
     if visibleMutationPrefixes.contains(where: { toolName.hasPrefix($0) })
       || toolName == "agent.spawn" || toolName == "agent.spawn_mock"
     {
       return """
         Do not speak or acknowledge success. The user can already see the completed action on the \
-        canvas.
+        app.
         """
     }
     return nil

@@ -70,7 +70,7 @@ public struct ProcessLaunchSpec: Sendable, Equatable {
   public var environment: [String: String]
   /// Prefixes removed from Otto's inherited environment before explicit launch values are
   /// applied. Provider CLIs use parent-only variables (for example `CODEX_THREAD_ID`) to bind a
-  /// child invocation to the caller's conversation, which must never leak between canvas agents.
+  /// child invocation to the caller's conversation, which must never leak between workspace sessions.
   public var inheritedEnvironmentPrefixesToRemove: [String]
   public var workingDirectory: String
   public var columns: UInt16

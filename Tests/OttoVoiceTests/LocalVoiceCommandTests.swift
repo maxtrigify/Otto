@@ -21,7 +21,7 @@ struct LocalVoiceCommandTests {
     #expect(
       try await router.execute("Tell Chase to go to sleep")
         == .unrecognized(
-          "Command not recognized. Try create a terminal, open a URL, switch canvas, open or close a named widget, focus or close an exact node name, or prompt an exact agent name."
+          "Command not recognized. Try opening a URL, starting a terminal, opening a session, or prompting an exact agent name."
         )
     )
   }
@@ -104,61 +104,7 @@ struct LocalVoiceCommandTests {
     #expect(!fixture.store.activeCanvas.nodes.contains { $0.id == terminal.id })
   }
 
-  @Test("Voice can find, open, and close installed widgets")
-  @MainActor
-  func widgetCommands() async throws {
-    let fixture = try await Fixture()
-    _ = try await fixture.registry.call(
-      name: "widget.create",
-      input: .object([
-        "name": .string("Voice Stats"),
-        "view": .string("number"),
-        "data": .string("{\"value\": 9}"),
-        "x": .number(0),
-        "y": .number(0),
-      ]),
-      context: fixture.context
-    )
-    #expect(fixture.store.activeCanvas.nodes.contains { $0.displayName == "Voice Stats" })
 
-    let closed = try await fixture.router.execute("Close the Voice Stats widget")
-    #expect(closed == .completed(toolName: "widget.close", confirmation: "Closed Voice Stats"))
-    #expect(!fixture.store.activeCanvas.nodes.contains { $0.displayName == "Voice Stats" })
-
-    let listed = try await fixture.registry.call(
-      name: "widget.list", input: .object([:]), context: fixture.context)
-    let widgetList = try listed.decode(WidgetListOutput.self)
-    #expect(widgetList.widgets.first?.isOpen == false)
-
-    let opened = try await fixture.router.execute("Find widget Voice Stats")
-    #expect(opened == .completed(toolName: "widget.open", confirmation: "Opened Voice Stats"))
-    #expect(fixture.store.activeCanvas.nodes.contains { $0.displayName == "Voice Stats" })
-  }
-
-  @Test("Canvas switching requires one exact spoken name")
-  @MainActor
-  func switchCanvas() async throws {
-    let fixture = try await Fixture(canvasName: "Ideas")
-    let ideasID = fixture.store.activeCanvas.id
-    fixture.store.dispatch(.createCanvas(name: "Launch Plan"))
-    let launchID = fixture.store.activeCanvas.id
-    #expect(ideasID != launchID)
-    await fixture.refreshContext()
-
-    let switched = try await fixture.router.execute("Switch to Ideas")
-    #expect(switched == .completed(toolName: "canvas.switch", confirmation: "Switched to Ideas"))
-    #expect(fixture.store.activeCanvas.id == ideasID)
-
-    let missing = try await fixture.router.execute("Switch to Imaginary")
-    #expect(missing == .clarification("I cannot find a canvas named Imaginary."))
-    #expect(fixture.store.activeCanvas.id == ideasID)
-
-    let created = try await fixture.router.execute("Create a canvas named Research")
-    #expect(
-      created == .completed(toolName: "canvas.create", confirmation: "Created canvas Research")
-    )
-    #expect(fixture.store.activeCanvas.name == "Research")
-  }
 
   @Test("Ambiguous and destructive phrases never guess a target")
   @MainActor

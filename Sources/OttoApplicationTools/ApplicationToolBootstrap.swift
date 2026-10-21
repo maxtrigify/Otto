@@ -5,7 +5,6 @@ import OttoDocuments
 import OttoMedia
 import OttoMemory
 import OttoModels
-import OttoRecipes
 import OttoRuntime
 import OttoTools
 import OttoWorktrees
@@ -22,7 +21,6 @@ public enum ApplicationToolBootstrap {
     documents: WorkspaceDocumentStore? = nil,
     browserRuntime: BrowserRuntime = BrowserRuntime(),
     mediaRuntime: MediaRuntime = MediaRuntime(),
-    recipes: RecipeStore = RecipeStore(),
     workspacePath: String = FileManager.default.currentDirectoryPath,
     canvasRecorder: CanvasRecorder? = nil,
     worktrees: GitWorktreeManager? = nil,
@@ -37,40 +35,16 @@ public enum ApplicationToolBootstrap {
     personalMemory: CompactMemoryStore? = nil,
     operatingMemory: CompactMemoryStore? = nil,
     memoryInbox: CompactMemoryInbox? = nil,
-    widgetRunner: WidgetJobRunner? = nil,
     subagentResolver: BotSubagentResolver? = nil,
     accountBoundary: AgentAccountBoundary? = nil
   ) async throws {
     let worktreeManager = worktrees ?? GitWorktreeManager(repositoryPath: workspacePath)
     let orchestration = orchestration ?? .live(workspacePath: workspacePath)
-    let workspaceDocuments = documents ?? WorkspaceDocumentStore(rootPath: workspacePath)
-    let widgetRunner = widgetRunner ?? WidgetJobRunner(store: store, documents: workspaceDocuments)
-    try await registry.register(CanvasGetTool(store: store))
-    try await registry.register(CanvasListTool(store: store))
-    try await registry.register(CanvasCreateTool(store: store))
-    try await registry.register(CanvasSwitchTool(store: store))
-    try await registry.register(CanvasRenameTool(store: store))
     try await registry.register(NodeListTool(store: store))
     try await registry.register(NodeGetTool(store: store))
     try await registry.register(NodeFocusTool(store: store))
     try await registry.register(NodeExpandTool(store: store))
     try await registry.register(NodeCreateTool(store: store))
-    try await registry.register(
-      WidgetCreateTool(store: store, documents: workspaceDocuments, runner: widgetRunner))
-    try await registry.register(WidgetGetTool(store: store, documents: workspaceDocuments))
-    try await registry.register(WidgetUpdateTool(store: store, documents: workspaceDocuments))
-    try await registry.register(WidgetRefreshTool(store: store, runner: widgetRunner))
-    try await registry.register(WidgetSetDataTool(store: store, runner: widgetRunner))
-    try await registry.register(WidgetLogsTool(store: store, runner: widgetRunner))
-    try await registry.register(WidgetListTool(store: store, documents: workspaceDocuments))
-    try await registry.register(WidgetOpenTool(store: store, documents: workspaceDocuments))
-    try await registry.register(WidgetCloseTool(store: store, documents: workspaceDocuments))
-    try await registry.register(WidgetDeleteTool(store: store, documents: workspaceDocuments))
-    try await registry.register(WhiteboardGetTool(store: store))
-    try await registry.register(WhiteboardCreateShapesTool(store: store))
-    try await registry.register(WhiteboardDeleteShapesTool(store: store))
-    try await registry.register(WhiteboardClearTool(store: store))
-    try await registry.register(WhiteboardFitTool(store: store))
     try await registry.register(NodeCloseTool(store: store, supervisor: supervisor))
     try await registry.register(NodeCloseAllTool(store: store, supervisor: supervisor))
     try await registry.register(AgentSpawnMockTool(store: store, supervisor: supervisor))
@@ -270,7 +244,6 @@ public enum ApplicationToolBootstrap {
     try await registry.register(
       BrowserOpenExternalTool(opener: externalOpener ?? defaultExternalOpener))
     try await registry.register(WorkspaceSurfaceSetTool(store: store))
-    try await registry.register(LayoutStageTool(store: store))
     try await registry.register(ThemeListTool())
     try await registry.register(ThemeSetTool(store: store))
     try await registry.register(ThemeSetFontScaleTool())
@@ -296,9 +269,6 @@ public enum ApplicationToolBootstrap {
         RecordingStopTool(recorder: canvasRecorder, store: store, mediaRuntime: mediaRuntime))
       try await registry.register(RecordingStatusTool(recorder: canvasRecorder))
     }
-    try await registry.register(RecipeListTool(recipes: recipes))
-    try await registry.register(RecipeSaveTool(store: store, recipes: recipes))
-    try await registry.register(RecipeBootTool(store: store, recipes: recipes))
     try await registry.register(EventWaitTool(bus: supervisor.eventBus))
     try await registry.register(DiagnosticsRunTool(workspacePath: workspacePath))
     try await registry.register(

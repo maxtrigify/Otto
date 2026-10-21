@@ -293,12 +293,12 @@ public enum ChatSidebarList: String, Codable, Sendable {
 public enum ChatSurfaceDestination: String, Codable, CaseIterable, Identifiable, Sendable {
   case conversation = "Chat"
   case activity = "Activity"
-  case widgets = "Widgets"
   case files = "Files & notes"
   case routines = "Routines"
   case dashboards = "Dashboards"
   case documents = "Documents"
   case browser = "Browser"
+  case terminals = "Terminals"
 
   /// A place added by a newer Otto (or Otto Dev) falls back to the conversation. Failing here
   /// fails the whole workspace snapshot, which used to let the next save wipe every session.

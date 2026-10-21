@@ -134,6 +134,11 @@ struct ChatWorkspaceView: View {
     }
   }
   @State private var workTabs: [UUID: [WorkTab]] = [:]
+  /// Terminals already seen, so only ones started after Chat appeared open the work panel.
+  @State private var knownTerminalIDs: Set<UUID>?
+  @State private var selectedPlaceTerminalID: UUID?
+  /// Bumped to put keyboard focus in a terminal when it is revealed.
+  @State private var terminalFocusTokens: [UUID: Int] = [:]
   @State private var selectedWorkTabIDs: [UUID: UUID] = [:]
   @State private var sideChatAgentIDs: [UUID: UUID] = [:]
   @State private var creatingSideChatFor: UUID?
@@ -212,19 +217,23 @@ struct ChatWorkspaceView: View {
     var title: String
     var browserID: UUID?
     var filePath: String?
+    /// A terminal an agent started with terminal.run / terminal.open, rather than the agent's own.
+    var terminalID: UUID?
 
     init(
       id: UUID = UUID(),
       surface: WorkSurface,
       title: String? = nil,
       browserID: UUID? = nil,
-      filePath: String? = nil
+      filePath: String? = nil,
+      terminalID: UUID? = nil
     ) {
       self.id = id
       self.surface = surface
       self.title = title ?? surface.title
       self.browserID = browserID
       self.filePath = filePath
+      self.terminalID = terminalID
     }
   }
 
@@ -392,7 +401,17 @@ struct ChatWorkspaceView: View {
       if sessionCanvasID == nil { sessionCanvasID = store.activeCanvas.id }
       repairSelection()
       restoreAgentBrowserAssociations()
+      restoreAgentTerminalAssociations()
       applyBotNavigation(services.botNavigationRequest)
+      if let request = services.terminalRevealRequest,
+        Date().timeIntervalSince(request.createdAt) < 5
+      {
+        applyTerminalReveal(request)
+      }
+    }
+    .onChange(of: terminalNodes.map(\.id)) { _, _ in noteNewTerminals() }
+    .onChange(of: services.terminalRevealRequest) { _, request in
+      if let request { applyTerminalReveal(request) }
     }
     .onChange(of: services.botNavigationRequest) { _, request in
       applyBotNavigation(request)
@@ -656,6 +675,12 @@ struct ChatWorkspaceView: View {
           .routines, symbol: "clock", count: services.routines.routines.count)
         destinationRow(
           .browser, symbol: "globe", count: chatBrowserNode?.browserSession?.tabs.count ?? 0)
+        if !terminalNodes.isEmpty {
+          destinationRow(
+            .terminals, symbol: "terminal",
+            count: terminalNodes.count { terminalStatus($0).isLive },
+            attention: terminalNodes.contains { terminalStatus($0).isWaiting })
+        }
         destinationRow(
           .dashboards, symbol: "chart.bar.xaxis", count: services.homeCards.dashboards.count)
         destinationRow(
@@ -853,6 +878,18 @@ struct ChatWorkspaceView: View {
       .buttonStyle(.ottoChrome(cornerRadius: 6))
       .help("Open settings")
       .accessibilityLabel("Open settings")
+      Button {
+        NotificationCenter.default.post(name: .ottoSendFeedback, object: nil)
+      } label: {
+        Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
+          .font(.system(size: 11))
+          .foregroundStyle(palette.muted)
+          .frame(width: 26, height: 26)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.ottoChrome(cornerRadius: 6))
+      .help("Send feedback")
+      .accessibilityLabel("Send feedback")
       Spacer(minLength: 4)
       HStack(spacing: 5) {
         Circle()
@@ -1019,7 +1056,7 @@ struct ChatWorkspaceView: View {
     .frame(width: 218)
     // A floating menu needs its own opaque plate. `paneSurface` is a 14% tint meant for
     // panes that sit on the window acrylic; over the transcript it let the conversation
-    // read straight through the provider list, so match the canvas create flyout instead.
+    // read straight through the provider list, so match the session provider picker instead.
     .background(palette.raised.opacity(0.94))
   }
 
@@ -1047,13 +1084,6 @@ struct ChatWorkspaceView: View {
       }
     case .activity:
       activityInbox
-    case .widgets:
-      resourceBrowser(
-        title: "Widgets",
-        subtitle: "Every widget in this workspace",
-        symbol: "bolt",
-        items: libraryItems(kinds: [.widget])
-      )
     case .files:
       resourceBrowser(
         title: "Files & notes",
@@ -1083,7 +1113,256 @@ struct ChatWorkspaceView: View {
         page: { browser, chrome in chatBrowserBody(browser, chrome: chrome) },
         conversation: { nodeID in assistantConversation(nodeID) }
       )
+    case .terminals:
+      terminalsPlace
     }
+  }
+
+  // MARK: Terminals
+
+  /// Every terminal in the workspace, newest first. Terminals started by agents live on whatever
+  /// canvas the agent used; Chat lists them all, like sessions.
+  private var terminalNodes: [OttoNode] {
+    store.snapshot.canvases.flatMap(\.nodes)
+      .filter { $0.kind == .terminal }
+      .sorted { $0.createdAt > $1.createdAt }
+  }
+
+  private func terminalSnapshot(_ id: UUID) -> AgentRuntimeSnapshot? {
+    services.fleetStore.snapshot(for: id)
+  }
+
+  private func terminalStatus(_ node: OttoNode) -> ChatTerminalStatus {
+    // The node status is what the store publishes, so it drives re-rendering; the snapshot adds
+    // whether typing is hidden and the exit code.
+    let snapshot = terminalSnapshot(node.id)
+    if node.status == .waiting {
+      return .waiting(
+        hiddenInput: snapshot?.attentionToken == TerminalInputWaitDetector.hiddenInputToken)
+    }
+    return ChatTerminalStatus.resolve(snapshot, fallback: node.status)
+  }
+
+  private func terminalIsWaiting(_ id: UUID) -> Bool {
+    terminalNodes.first { $0.id == id }.map { terminalStatus($0).isWaiting } ?? false
+  }
+
+  private func terminalCommand(_ node: OttoNode) -> String? {
+    // terminal.run keeps the command as the subtitle; bare shells keep the "ZSH · LOCAL" label.
+    node.subtitle.isEmpty || node.subtitle.hasSuffix("· LOCAL") ? nil : node.subtitle
+  }
+
+  private func terminalOwner(_ node: OttoNode) -> OttoNode? {
+    guard let ownerID = node.parentAgentID else { return nil }
+    return allAgentNodes.first { $0.id == ownerID }
+  }
+
+  /// The owner's conversation can be shown in Chat: a listed session or a hired bot's channel.
+  private func ownerIsVisibleInChat(_ owner: OttoNode) -> Bool {
+    sessionAgents.contains { $0.id == owner.id } || roster.contains { $0.nodeID == owner.id }
+  }
+
+  private func waitingTerminalNotices(owner ownerID: UUID) -> [ChatTerminalNotice] {
+    terminalNodes.filter { $0.parentAgentID == ownerID }.compactMap { node in
+      guard case .waiting(let hidden) = terminalStatus(node) else { return nil }
+      let reason =
+        terminalSnapshot(node.id)?.attentionReason
+        ?? services.attentionItems.first { $0.nodeID == node.id }?.reason
+      return ChatTerminalNotice(
+        id: node.id, title: node.displayName, prompt: reason, hiddenInput: hidden)
+    }
+  }
+
+  private func restoreAgentTerminalAssociations() {
+    for terminal in terminalNodes.reversed() {
+      guard let ownerID = terminal.parentAgentID,
+        !(workTabs[ownerID] ?? []).contains(where: { $0.terminalID == terminal.id })
+      else { continue }
+      workTabs[ownerID, default: []].append(
+        WorkTab(surface: .terminal, title: terminal.displayName, terminalID: terminal.id))
+    }
+    if knownTerminalIDs == nil { knownTerminalIDs = Set(terminalNodes.map(\.id)) }
+  }
+
+  /// A terminal an agent just started opens in that conversation's work panel, once. Background
+  /// conversations get the tab without the panel stealing the screen; the Terminals place and
+  /// the "Needs you" signals cover them.
+  private func noteNewTerminals() {
+    let current = terminalNodes
+    guard let known = knownTerminalIDs else {
+      knownTerminalIDs = Set(current.map(\.id))
+      return
+    }
+    let fresh = current.filter { !known.contains($0.id) }
+    knownTerminalIDs = Set(current.map(\.id))
+    for terminal in fresh.reversed() {
+      guard let ownerID = terminal.parentAgentID else { continue }
+      let tab: WorkTab
+      if let existing = workTabs[ownerID]?.first(where: { $0.terminalID == terminal.id }) {
+        tab = existing
+      } else {
+        tab = WorkTab(surface: .terminal, title: terminal.displayName, terminalID: terminal.id)
+        workTabs[ownerID, default: []].append(tab)
+      }
+      selectedWorkTabIDs[ownerID] = tab.id
+      guard destination == .conversation, selectedAgent?.id == ownerID else { continue }
+      withAnimation(.easeOut(duration: 0.16)) {
+        showingWorkPanel = true
+        showingAgentDetails = false
+        showingEnvironment = false
+      }
+    }
+  }
+
+  /// Brings a terminal forward and puts the cursor in it: in its conversation's work panel when
+  /// that conversation is in Chat, otherwise in the Terminals place.
+  private func applyTerminalReveal(_ request: TerminalRevealRequest) {
+    guard let terminal = terminalNodes.first(where: { $0.id == request.terminalID }) else {
+      return
+    }
+    terminalFocusTokens[terminal.id, default: 0] += 1
+    guard let owner = terminalOwner(terminal), ownerIsVisibleInChat(owner),
+      let canvasID = store.canvasID(containing: owner.id)
+    else {
+      selectedPlaceTerminalID = terminal.id
+      destination = .terminals
+      return
+    }
+    if let profileID = owner.agentDefinition?.profileID,
+      roster.contains(where: { $0.profile.id == profileID && $0.nodeID == owner.id })
+    {
+      navigation = chatNavigationSelectingHiredBot(
+        navigation, profileID: profileID, nodeID: owner.id)
+    } else {
+      destination = .conversation
+      sessionCanvasID = canvasID
+      sidebarList = .sessions
+      selectedTeamID = nil
+      selectedProfileID = nil
+      selectedSessionID = owner.id
+      selectedAgentID = owner.id
+    }
+    let tab: WorkTab
+    if let existing = workTabs[owner.id]?.first(where: { $0.terminalID == terminal.id }) {
+      tab = existing
+    } else {
+      tab = WorkTab(surface: .terminal, title: terminal.displayName, terminalID: terminal.id)
+      workTabs[owner.id, default: []].append(tab)
+    }
+    selectedWorkTabIDs[owner.id] = tab.id
+    withAnimation(.easeOut(duration: 0.16)) {
+      showingWorkPanel = true
+      showingAgentDetails = false
+      showingEnvironment = false
+    }
+  }
+
+  @ViewBuilder private func workOwnedTerminal(_ terminalID: UUID, owner: OttoNode) -> some View {
+    if let terminal = terminalNodes.first(where: { $0.id == terminalID }) {
+      terminalPane(terminal, showsOwner: false)
+    } else {
+      VStack(spacing: 8) {
+        Image(systemName: "terminal").font(.system(size: 22, weight: .light))
+        Text("This terminal was closed.").font(.ottoDisplay(13))
+      }
+      .foregroundStyle(palette.muted)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  private func terminalPane(_ terminal: OttoNode, showsOwner: Bool) -> some View {
+    let owner = terminalOwner(terminal)
+    let canOpenOwner = showsOwner && owner.map(ownerIsVisibleInChat) == true
+    return ChatAgentSnapshotHost(model: services.fleetStore.model(for: terminal.id)) { snapshot in
+      ChatTerminalPane(
+        title: terminal.displayName,
+        command: terminalCommand(terminal),
+        ownerName: showsOwner ? owner?.displayName : nil,
+        snapshot: snapshot,
+        fallbackStatus: terminal.status,
+        sessionKey: "chat-terminal-\(terminal.id.uuidString)",
+        focusToken: terminalFocusTokens[terminal.id] ?? 0,
+        send: { data in
+          Task { try? await services.sendTerminalBytes(terminalID: terminal.id, data: data) }
+        },
+        resize: { columns, rows in
+          Task {
+            try? await services.resizeTerminal(
+              terminalID: terminal.id, columns: columns, rows: rows)
+          }
+        },
+        stop: { Task { try? await services.stop(agentID: terminal.id) } },
+        openConversation: canOpenOwner
+          ? { services.revealTerminal(terminal.id) } : nil,
+        // In a conversation's work panel the tab's close button is enough.
+        remove: showsOwner
+          ? {
+            if selectedPlaceTerminalID == terminal.id { selectedPlaceTerminalID = nil }
+            Task { try? await services.closeNode(nodeID: terminal.id) }
+          } : nil
+      )
+    }
+    .id(terminal.id)
+  }
+
+  private func terminalListDetail(_ terminal: OttoNode) -> String {
+    let status = terminalStatus(terminal)
+    if let owner = terminalOwner(terminal) {
+      return "\(status.label) · \(owner.displayName)"
+    }
+    return status.label
+  }
+
+  /// Every terminal in one place, including ones started from conversations that are not open.
+  private var terminalsPlace: some View {
+    let terminals = terminalNodes
+    let selected =
+      terminals.first { $0.id == selectedPlaceTerminalID }
+      ?? terminals.first { terminalStatus($0).isWaiting } ?? terminals.first
+    return HStack(spacing: 0) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text("TERMINALS")
+          .font(.ottoMicro).tracking(1.6)
+          .foregroundStyle(palette.muted)
+          .padding(.horizontal, 10)
+          .padding(.top, 14)
+          .padding(.bottom, 4)
+        ScrollView {
+          VStack(spacing: 2) {
+            ForEach(terminals) { terminal in
+              Button {
+                selectedPlaceTerminalID = terminal.id
+              } label: {
+                ChatTerminalListRow(
+                  title: terminal.displayName,
+                  detail: terminalListDetail(terminal),
+                  status: terminalStatus(terminal),
+                  selected: selected?.id == terminal.id)
+              }
+              .buttonStyle(.plain)
+            }
+          }
+        }
+        .ottoScrollChrome(showsThumb: false)
+      }
+      .padding(.horizontal, 8)
+      .frame(width: 250)
+      Rectangle().fill(palette.paper.opacity(0.06)).frame(width: 1)
+      if let selected {
+        terminalPane(selected, showsOwner: true)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        VStack(spacing: 8) {
+          Image(systemName: "terminal").font(.system(size: 26, weight: .light))
+          Text("No terminals yet").font(.ottoDisplay(14))
+          Text("When an agent runs a command or a setup script, it shows up here.")
+            .font(.ottoDisplay(12))
+        }
+        .foregroundStyle(palette.muted)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+    .background(palette.paneSurface)
   }
 
   // MARK: Browser place
@@ -1688,7 +1967,9 @@ struct ChatWorkspaceView: View {
             )
           }
         },
-        mentionProfiles: mentionableProfiles
+        mentionProfiles: mentionableProfiles,
+        waitingTerminals: waitingTerminalNotices(owner: node.id),
+        openTerminal: { services.revealTerminal($0) }
       )
       .id(node.id)
     }
@@ -1856,7 +2137,12 @@ struct ChatWorkspaceView: View {
         Group {
           switch tab.surface {
           case .review: workReview(for: node)
-          case .terminal: workTerminal(for: node)
+          case .terminal:
+            if let terminalID = tab.terminalID {
+              workOwnedTerminal(terminalID, owner: node)
+            } else {
+              workTerminal(for: node)
+            }
           case .browser: workBrowser(for: node, tab: tab)
           case .files: workFiles(for: node, tab: tab)
           case .sideChat: workSideChat(for: node)
@@ -1906,6 +2192,10 @@ struct ChatWorkspaceView: View {
                     OttoWeightStableText(
                       displayTitle(for: tab), size: 12, active: selected,
                       activeColor: palette.paper, restingColor: palette.muted)
+                    if let terminalID = tab.terminalID, terminalIsWaiting(terminalID) {
+                      Circle().fill(palette.amber).frame(width: 6, height: 6)
+                        .accessibilityLabel("Waiting for you")
+                    }
                   }
                 }
                 .buttonStyle(.plain)
@@ -1986,6 +2276,9 @@ struct ChatWorkspaceView: View {
   }
 
   private func displayTitle(for tab: WorkTab) -> String {
+    if let terminalID = tab.terminalID {
+      return terminalNodes.first { $0.id == terminalID }?.displayName ?? tab.title
+    }
     guard let browserID = tab.browserID,
       let browser = store.snapshot.canvases.flatMap(\.nodes).first(where: { $0.id == browserID }),
       let activeTab = browser.browserSession?.activeTab
@@ -3370,7 +3663,7 @@ struct ChatWorkspaceView: View {
   }
 
   private func destinationRow(
-    _ target: ChatSurfaceDestination, symbol: String, count: Int
+    _ target: ChatSurfaceDestination, symbol: String, count: Int, attention: Bool = false
   ) -> some View {
     let active = destination == target
     return Button {
@@ -3385,7 +3678,12 @@ struct ChatWorkspaceView: View {
           target.title, size: 13, active: active,
           activeColor: palette.paper, restingColor: palette.paper.opacity(0.78))
         Spacer(minLength: 4)
-        if count > 0 {
+        if attention {
+          Text("NEEDS YOU")
+            .font(.ottoMicro).tracking(1.2)
+            .foregroundStyle(palette.amber)
+          Circle().fill(palette.amber).frame(width: 6, height: 6)
+        } else if count > 0 {
           Text("\(count)")
             .font(.ottoMicro)
             .foregroundStyle(palette.muted)
@@ -3657,7 +3955,6 @@ struct ChatWorkspaceView: View {
     switch kind {
     case .markdown: "NOTE"
     case .media: "MEDIA"
-    case .widget: "WIDGET"
     default: "ITEM"
     }
   }
@@ -3994,7 +4291,6 @@ struct ChatWorkspaceView: View {
 
   private func resourceSymbol(_ kind: NodeKind) -> String {
     switch kind {
-    case .widget: "bolt"
     case .markdown: "doc.text"
     case .media: "play.rectangle"
     default: "square.stack.3d.up"

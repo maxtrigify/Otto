@@ -21,7 +21,7 @@ struct ShortcutsSettingsView: View {
     ShortcutGroup(
       title: "Window",
       shortcuts: [
-        Shortcut(keys: "⌘W", action: "Close the window")
+        Shortcut(keys: "⌘W", action: "Close the active browser tab, or the window elsewhere")
       ]),
     ShortcutGroup(
       title: "Command palette",
@@ -34,7 +34,13 @@ struct ShortcutsSettingsView: View {
     ShortcutGroup(
       title: "Browser",
       shortcuts: [
-        Shortcut(keys: "⌃T", action: "Open a blank tab in the selected browser"),
+        Shortcut(keys: "⌘B", action: "Go to Browser (Bold while editing document text)"),
+        Shortcut(keys: "⌘T / ⌃T", action: "Open a blank tab in the selected browser"),
+        Shortcut(keys: "⌘L", action: "Select the browser address or new-tab search box"),
+        Shortcut(keys: "⇧⌘T", action: "Reopen the most recently closed tab"),
+        Shortcut(keys: "⌘R", action: "Reload the active page"),
+        Shortcut(keys: "⌃Tab / ⇧⌃Tab", action: "Go to the next / previous browser tab"),
+        Shortcut(keys: "⌘[ / ⌘]", action: "Go back / forward"),
         Shortcut(keys: "Mouse back / forward", action: "Navigate the active tab's history"),
         Shortcut(keys: "Swipe left / right", action: "Navigate with a Magic Mouse or trackpad"),
       ]),

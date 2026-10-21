@@ -7,10 +7,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct HomePinnedCards: View {
-  @ObservedObject var store: CanvasStore
   @ObservedObject var services: ApplicationServices
   let openMarkdown: (String) -> Void
-  let openNode: (UUID) -> Void
   /// Nil for the workspace's first profile, which owns the pins saved before profiles existed.
   var profileID: UUID? = nil
   @Environment(\.ottoPalette) private var palette
@@ -19,8 +17,8 @@ struct HomePinnedCards: View {
   @State private var filePicker: NSOpenPanel?
   @State private var error: String?
 
-  private var widgets: [OttoNode] {
-    store.snapshot.canvases.flatMap(\.nodes).filter { $0.kind == .widget }
+  private var visiblePins: [HomePin] {
+    pins.visiblePins
   }
 
   var body: some View {
@@ -30,27 +28,20 @@ struct HomePinnedCards: View {
           .foregroundStyle(palette.paper)
           .shadow(color: palette.textHalo, radius: 6)
         Spacer()
-        if !pins.pins.isEmpty {
+        if !visiblePins.isEmpty {
           Button(customizing ? "Done" : "Customize") { customizing.toggle() }
             .accessibilityLabel("Customize Home cards")
         }
         Menu {
           Button("Pin Markdown file…", action: chooseMarkdown)
-          if !widgets.isEmpty {
-            Section("Your widgets") {
-              ForEach(widgets) { node in
-                Button(node.displayName) { pins.add(.widget(node.id)) }
-              }
-            }
-          }
         } label: {
           Label("Add to Home", systemImage: "plus")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
       }
-      if pins.pins.isEmpty {
-        Text("Keep a note, checklist, or favourite widget here.")
+      if visiblePins.isEmpty {
+        Text("Keep a note, checklist, or reference file here.")
           .font(.ottoDisplay(12).weight(.medium)).foregroundStyle(palette.paper.opacity(0.85))
           .shadow(color: palette.textHalo, radius: 6)
       }
@@ -60,7 +51,7 @@ struct HomePinnedCards: View {
       LazyVGrid(
         columns: [GridItem(.adaptive(minimum: 280), spacing: 14, alignment: .top)], spacing: 14
       ) {
-        ForEach(pins.pins) { pin in card(pin) }
+        ForEach(visiblePins) { pin in card(pin) }
       }
     }
     .buttonStyle(.plain)
@@ -81,14 +72,14 @@ struct HomePinnedCards: View {
             Image(systemName: "arrow.left")
           }
           .accessibilityLabel("Move \(title(pin)) earlier")
-          .disabled(pins.pins.first?.id == pin.id)
+          .disabled(visiblePins.first?.id == pin.id)
           Button {
             pins.move(pin.id, by: 1)
           } label: {
             Image(systemName: "arrow.right")
           }
           .accessibilityLabel("Move \(title(pin)) later")
-          .disabled(pins.pins.last?.id == pin.id)
+          .disabled(visiblePins.last?.id == pin.id)
           Menu {
             Button(pin.expanded ? "Make compact" : "Make taller") { pins.resize(pin.id) }
             Button("Remove from Home") { pins.remove(pin.id) }
@@ -101,7 +92,7 @@ struct HomePinnedCards: View {
           Button {
             switch pin.source {
             case .markdown(let path): openMarkdown(path)
-            case .widget(let id): openNode(id)
+            case .widget: break // Legacy pins are decoded but not displayed.
             }
           } label: {
             Image(systemName: "arrow.up.right")
@@ -112,17 +103,8 @@ struct HomePinnedCards: View {
       switch pin.source {
       case .markdown(let path):
         HomeMarkdownPreview(path: path, documents: services.documents)
-      case .widget(let id):
-        if let canvas = store.snapshot.canvases.first(where: { $0.nodes.contains { $0.id == id } }),
-          let node = canvas.nodes.first(where: { $0.id == id })
-        {
-          WidgetBody(node: node, scale: 1, documents: services.documents) { content in
-            store.dispatch(.setNodeContent(id: id, content: content), targetCanvasID: canvas.id)
-          }
-        } else {
-          Text("This widget is no longer available. Remove the card or pin another widget.")
-            .font(.ottoDisplay(12)).foregroundStyle(palette.paper.opacity(0.55))
-        }
+      case .widget:
+        EmptyView() // Compatibility with saved pins; filtered from visiblePins.
       }
       Spacer(minLength: 0)
     }
@@ -137,7 +119,7 @@ struct HomePinnedCards: View {
   private func title(_ pin: HomePin) -> String {
     switch pin.source {
     case .markdown(let path): URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-    case .widget(let id): widgets.first { $0.id == id }?.displayName ?? "Missing widget"
+    case .widget: "Legacy card"
     }
   }
 

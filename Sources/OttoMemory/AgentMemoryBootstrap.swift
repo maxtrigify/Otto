@@ -233,17 +233,17 @@ public struct AgentMemoryBootstrap: Codable, Equatable, Sendable {
     if !peerAgents.isEmpty {
       sections.append(
         """
-        ## Canvas agents
+        ## Workspace agents
 
-        Other agents working on this same Otto canvas — when the user names one of them, they \
-        mean this canvas agent, NOT an external contact, channel, or person:
+        Other agents working in this Otto workspace — when the user names one of them, they \
+        mean this workspace agent, NOT an external contact, channel, or person:
 
         \(peerAgents.map { "- \($0)" }.joined(separator: "\n"))
 
-        To hand work or results to a canvas agent, use the otto agent.send_prompt tool with its \
+        To hand work or results to a workspace agent, use the otto agent.send_prompt tool with its \
         agentID. If otto tools are unavailable in your environment, say you cannot reach the \
         agent directly and give the user the content to hand over yourself — never search \
-        contacts or message external channels to reach a canvas agent.
+        contacts or message external channels to reach a workspace agent.
         """
       )
     }

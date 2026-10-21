@@ -55,21 +55,6 @@ struct ProductPreferencesTests {
     #expect(canvas.autoFitEnabled ?? true)
   }
 
-  @Test("Recipe tidy preferences persist independently and migrate off")
-  func recipeTidyPersistence() throws {
-    let suite = "otto-tests-\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
-
-    #expect(RecipeTidyPreferences.load(from: defaults) == RecipeTidyPreferences())
-    RecipeTidyPreferences(onOpen: true, onClose: false).save(to: defaults)
-    #expect(RecipeTidyPreferences.load(from: defaults).onOpen)
-    #expect(!RecipeTidyPreferences.load(from: defaults).onClose)
-    RecipeTidyPreferences(onOpen: false, onClose: true).save(to: defaults)
-    #expect(!RecipeTidyPreferences.load(from: defaults).onOpen)
-    #expect(RecipeTidyPreferences.load(from: defaults).onClose)
-  }
-
   @Test("Hermes defaults local and persists a validated remote backend")
   func hermesConnectionPersistence() throws {
     let suite = "otto-tests-\(UUID().uuidString)"

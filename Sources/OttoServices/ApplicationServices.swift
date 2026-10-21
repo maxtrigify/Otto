@@ -15,7 +15,6 @@ import OttoMemory
 import OttoModels
 import OttoObservability
 import OttoRPCContracts
-import OttoRecipes
 import OttoRemote
 import OttoRuntime
 import OttoSecurity
@@ -70,6 +69,18 @@ public struct BotNavigationRequest: Identifiable, Equatable, Sendable {
   public init(destination: BotNavigationDestination) {
     id = UUID()
     self.destination = destination
+  }
+}
+
+public struct TerminalRevealRequest: Identifiable, Equatable, Sendable {
+  public let id: UUID
+  public let terminalID: UUID
+  public let createdAt: Date
+
+  public init(id: UUID = UUID(), terminalID: UUID, createdAt: Date = .now) {
+    self.id = id
+    self.terminalID = terminalID
+    self.createdAt = createdAt
   }
 }
 
@@ -141,8 +152,11 @@ public final class ApplicationServices: ObservableObject {
   /// even when it mounts after switching to the Chat surface, so team selection is never lost.
   @Published public private(set) var botNavigationRequest: BotNavigationRequest?
   /// The latest browser opened by an agent. Chat consumes this to bind the browser to the
-  /// initiating conversation's work panel instead of presenting it as an unrelated canvas card.
+  /// initiating conversation's work panel instead of presenting it as an unrelated resource preview.
   @Published public private(set) var agentBrowserOpenRequest: AgentBrowserOpenRequest?
+  /// Asks Chat to bring a terminal forward: its conversation's work panel when an agent started
+  /// it, otherwise the Terminals place. Home's "Needs you" and transcript cards route through it.
+  @Published public private(set) var terminalRevealRequest: TerminalRevealRequest?
 
   public let boatCloud = BoatCloudStore()
   public let supervisor: AgentSupervisor
@@ -154,7 +168,6 @@ public final class ApplicationServices: ObservableObject {
   /// REC indicator. Reflected into `isRecordingCanvas` for SwiftUI.
   public let canvasRecorder = CanvasRecorder()
   @Published public private(set) var isRecordingCanvas = false
-  public let recipeStore: RecipeStore
   public let worktreeManager: GitWorktreeManager
   public let worktreeSessions: WorktreeSessionStore
   public let observability: ObservabilityStore?
@@ -300,9 +313,6 @@ public final class ApplicationServices: ObservableObject {
   private var roomOnlyAgentRuns: Set<UUID> = []
   private let agentCommandState: AgentCommandStateStore
   var agentLoopTasks: [UUID: Task<Void, Never>] = [:]
-  public let widgetRunner: WidgetJobRunner
-  private let widgetResourceScheduler: AgentResourceScheduler
-  private let widgetScheduler: WidgetJobScheduler
   var routineEngine: RoutineEngine!
   /// Automation runs currently starting an agent; see `isStartingAutomationRun`.
   var automationSpawnsInFlight = 0
@@ -325,7 +335,6 @@ public final class ApplicationServices: ObservableObject {
     authenticator: ControlAuthenticator = ControlAuthenticator(),
     browserRuntime: BrowserRuntime = BrowserRuntime(),
     mediaRuntime: MediaRuntime = MediaRuntime(),
-    recipeStore: RecipeStore = .live(),
     observability: ObservabilityStore? = nil,
     secrets: any SecretStore = makeDefaultSecretStore(),
     providerAccounts: ProviderAccountStore? = nil,
@@ -352,7 +361,6 @@ public final class ApplicationServices: ObservableObject {
     self.registry = registry
     self.browserRuntime = browserRuntime
     self.mediaRuntime = mediaRuntime
-    self.recipeStore = recipeStore
     self.observability = observability
     self.secrets = secrets
     self.providerAccounts = providerAccounts ?? ProviderAccountStore(secrets: secrets)
@@ -397,15 +405,6 @@ public final class ApplicationServices: ObservableObject {
     self.orchestration = .live(workspacePath: workspacePath)
     let documents = WorkspaceDocumentStore(rootPath: workspacePath)
     self.documents = documents
-    let widgetResourceScheduler = AgentResourceScheduler(
-      configuration: AgentResourceSchedulerConfiguration(
-        nominalLimit: 1, elevatedLimit: 1, criticalLimit: 1))
-    self.widgetResourceScheduler = widgetResourceScheduler
-    let widgetRunner = WidgetJobRunner(
-      store: store, documents: documents, resourceScheduler: widgetResourceScheduler)
-    self.widgetRunner = widgetRunner
-    self.widgetScheduler = WidgetJobScheduler(
-      store: store, documents: documents, runner: widgetRunner)
     self.attachments = WorkspaceAttachmentStore(rootPath: workspacePath)
     let personalPath =
       personalMemoryPath
@@ -424,7 +423,7 @@ public final class ApplicationServices: ObservableObject {
       project: (workspacePath as NSString).lastPathComponent)
     #if os(macOS)
       self.resourcePressureMonitor = AgentResourcePressureMonitor(
-        schedulers: [supervisor.resourceScheduler, widgetResourceScheduler])
+        schedulers: [supervisor.resourceScheduler])
     #endif
     self.routineEngine = RoutineEngine(
       store: routines,
@@ -501,7 +500,6 @@ public final class ApplicationServices: ObservableObject {
         documents: documents,
         browserRuntime: browserRuntime,
         mediaRuntime: mediaRuntime,
-        recipes: recipeStore,
         workspacePath: workspacePath,
         canvasRecorder: canvasRecorder,
         worktrees: worktreeManager,
@@ -526,7 +524,6 @@ public final class ApplicationServices: ObservableObject {
         personalMemory: personalMemory,
         operatingMemory: operatingMemory,
         memoryInbox: memoryInbox,
-        widgetRunner: widgetRunner,
         subagentResolver: { [weak self] input, helperID, context in
           guard let self else { throw ToolRegistryError.invalidInput("Otto unavailable") }
           return try await self.resolveBotSubagent(input, helperID: helperID, context: context)
@@ -618,7 +615,6 @@ public final class ApplicationServices: ObservableObject {
       try botGroups.recoverInterruptedTeams()
       await resumeQueuedTeams()
       _ = await reconcileBotMessageDeliveries()
-      widgetScheduler.start()
       // After an update, or once another account is signed in, existing morning briefs pick up
       // a run for every account before the first scheduled run.
       for profile in dailyBrief.profiles where profile.briefRoutineID != nil {
@@ -954,7 +950,6 @@ public final class ApplicationServices: ObservableObject {
     routineObservation?.cancel()
     routineObservation = nil
     stopHookDaemon(markOffline: true)
-    widgetScheduler.stop()
     #if os(macOS)
       resourcePressureMonitor.stop()
     #endif
@@ -1089,6 +1084,11 @@ public final class ApplicationServices: ObservableObject {
   public func stopAllProcesses() async {
     messageQueue.pauseAll()
     await supervisor.stopAll()
+  }
+
+  /// Brings a terminal forward in Chat. See `terminalRevealRequest`.
+  public func revealTerminal(_ terminalID: UUID) {
+    terminalRevealRequest = TerminalRevealRequest(terminalID: terminalID)
   }
 
   public func acknowledgeAttention(nodeID: UUID) {
@@ -2697,14 +2697,6 @@ public final class ApplicationServices: ObservableObject {
     ).decode(TerminalOutput.self)
   }
 
-  public func recipes() async throws -> [RecipeSummary] {
-    try await registry.call(
-      name: "recipe.list",
-      input: .object([:]),
-      context: internalContext
-    ).decode([RecipeSummary].self)
-  }
-
   public func captureBrowser(nodeID: UUID) async throws -> BrowserScreenshotOutput {
     try await registry.call(
       name: "browser.screenshot",
@@ -2751,26 +2743,6 @@ public final class ApplicationServices: ObservableObject {
     let imported = try await attachments.importFiles(urls)
     store.dispatch(.addAttachments(id: nodeID, attachments: imported))
     return imported
-  }
-
-  @discardableResult
-  public func saveRecipe(id: String, name: String, description: String?) async throws
-    -> RecipeSummary
-  {
-    try await registry.call(
-      name: "recipe.save",
-      input: try JSONValue.encode(RecipeSaveInput(id: id, name: name, description: description)),
-      context: internalContext
-    ).decode(RecipeSummary.self)
-  }
-
-  @discardableResult
-  public func bootRecipe(id: String) async throws -> RecipeBootOutput {
-    try await registry.call(
-      name: "recipe.boot",
-      input: try JSONValue.encode(RecipeBootInput(id: id)),
-      context: internalContext
-    ).decode(RecipeBootOutput.self)
   }
 
   /// Sends a prompt with instructions the agent sees for this turn only. The chat shows just
@@ -3428,6 +3400,18 @@ public final class ApplicationServices: ObservableObject {
     if [.done, .failed, .interrupted, .stopped].contains(snapshot.state) {
       await store.flushPersistence()
     }
+    if node?.kind == .terminal {
+      // A terminal only needs the person while it waits at a prompt. Any other state, including
+      // finishing, clears its "Needs you" entry rather than leaving a stale one behind.
+      if snapshot.state == .waitingUser {
+        queueAttention(
+          nodeID: id, canvasID: canvasID, state: snapshot.state,
+          reason: snapshot.attentionReason ?? statusDetail)
+      } else {
+        acknowledgeAttention(nodeID: id)
+      }
+      return
+    }
     switch snapshot.state {
     case .waitingPermission, .waitingUser, .done, .failed:
       queueAttention(
@@ -3631,7 +3615,7 @@ public final class ApplicationServices: ObservableObject {
       case .failed: return "Command failed with exit \(snapshot.exitCode ?? -1)"
       case .interrupted: return "Command interrupted"
       case .stopped: return "Shell stopped"
-      case .waitingPermission, .waitingUser: return "Shell is waiting for input"
+      case .waitingPermission, .waitingUser: return "Waiting for you"
       }
     }
     return switch snapshot.state {

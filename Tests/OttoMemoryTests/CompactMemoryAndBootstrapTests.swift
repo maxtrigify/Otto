@@ -90,14 +90,14 @@ struct CompactMemoryAndBootstrapTests {
     let bootstrap = await builder.build(
       personal: personal, operating: operating, permissionSummary: "workspace write",
       peerAgents: ["Beck — Claude Code — agentID 2E1B14D0-3898-4D6A-B684-BAF48364A4E7"])
-    #expect(bootstrap.promptText.contains("Canvas agents"))
+    #expect(bootstrap.promptText.contains("Workspace agents"))
     #expect(bootstrap.promptText.contains("Beck — Claude Code"))
     #expect(bootstrap.promptText.contains("NOT an external contact"))
     #expect(bootstrap.promptText.contains("never search"))
 
     let solo = await builder.build(
       personal: personal, operating: operating, permissionSummary: "workspace write")
-    #expect(!solo.promptText.contains("Canvas agents"))
+    #expect(!solo.promptText.contains("Workspace agents"))
   }
 
   @Test("Charter layers resolve in precedence order with the safety layer first")

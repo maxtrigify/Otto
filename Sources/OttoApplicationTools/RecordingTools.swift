@@ -19,7 +19,7 @@ public struct RecordingStartOutput: Codable, Sendable, Equatable {
 }
 
 public struct RecordingStopInput: Codable, Sendable {
-  /// Where to place the finished recording's media node on the canvas; defaults keep it near
+  /// Where to place the finished recording's internal media preview; defaults keep it near
   /// the origin cluster when the caller has no better position.
   public var x: Double?
   public var y: Double?
@@ -49,13 +49,13 @@ public struct RecordingStatusInput: Codable, Sendable {
 }
 
 /// Starts recording the Otto window to an .mp4 in the workspace's Recordings folder. The
-/// capture is a screen recording of the whole canvas window, so everything the user sees —
+/// capture is a screen recording of the whole app window, so everything the user sees —
 /// browser nodes, terminals, agent activity — lands in the video.
 public struct RecordingStartTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "recording.start",
     description:
-      "Starts a screen recording of the Otto canvas window into the workspace's Recordings folder. For a demo of one node (for example a browser walkthrough), stage that node first with layout.stage so it fills the canvas, then start recording and drive it. Stop with recording.stop. Requires the user's one-time macOS Screen Recording permission.",
+      "Starts a screen recording of the Otto window into the workspace's Recordings folder. Open the page being demonstrated, start recording, then stop with recording.stop. Requires the user's one-time macOS Screen Recording permission.",
     inputSchema: .objectSchema(properties: [:], required: []),
     outputSchema: .object(["type": .string("object")]),
     requiredScopes: [.canvasWrite],
@@ -77,22 +77,22 @@ public struct RecordingStartTool: OttoTool {
     let path = try await recorder.start(directory: directory)
     return RecordingStartOutput(
       path: path,
-      message: "Recording the canvas to \(path). Call recording.stop to finish."
+      message: "Recording Otto to \(path). Call recording.stop to finish."
     )
   }
 }
 
-/// Stops the active recording and drops the finished video onto the canvas as a media node so
+/// Stops the active recording and drops the finished video as an internal media preview so
 /// the user can review it immediately.
 public struct RecordingStopTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "recording.stop",
     description:
-      "Stops the active canvas recording, saves the .mp4, and places it on the canvas as a playable media node. Returns the file path and duration.",
+      "Stops the recording and saves the .mp4 in Recordings. Returns the file path and duration.",
     inputSchema: .objectSchema(
       properties: [
-        "x": .numberSchema(description: "Canvas X for the media node (optional)"),
-        "y": .numberSchema(description: "Canvas Y for the media node (optional)"),
+        "x": .numberSchema(description: "Internal resource X for the media preview (optional)"),
+        "y": .numberSchema(description: "Internal resource Y for the media preview (optional)"),
       ],
       required: []
     ),
@@ -135,7 +135,7 @@ public struct RecordingStopTool: OttoTool {
       durationSeconds: result.durationSeconds,
       nodeID: nodeID,
       message:
-        "Saved a \(seconds)s recording to \(result.path)\(nodeID == nil ? "" : " and opened it on the canvas")."
+        "Saved a \(seconds)s recording to \(result.path)\(nodeID == nil ? "" : " and created a media preview")."
     )
   }
 }
@@ -144,7 +144,7 @@ public struct RecordingStatusTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "recording.status",
     description:
-      "Reports whether a canvas recording is running, its file path, and elapsed seconds.",
+      "Reports whether an app recording is running, its file path, and elapsed seconds.",
     inputSchema: .objectSchema(properties: [:], required: []),
     outputSchema: .object(["type": .string("object")]),
     requiredScopes: [.canvasRead],

@@ -975,9 +975,7 @@ private struct BrowserWebView: NSViewRepresentable {
   }
 
   @MainActor
-  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate,
-    WKScriptMessageHandler
-  {
+  final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     static let diagnosticMessageName = "ottoBrowserDiagnostics"
     static let selectionMessageName = "ottoElementSelection"
     static let diagnosticBridgeScript = """
@@ -1005,7 +1003,7 @@ private struct BrowserWebView: NSViewRepresentable {
     let agentCursor = BrowserAgentCursor()
     var appliedSelectionMode: Bool?
     var navigationContexts: [ObjectIdentifier: (revision: Int, requestedURL: String)] = [:]
-    var popupWindows: [ObjectIdentifier: NSWindowController] = [:]
+    let popupWindows = BrowserPopupWindows()
 
     init(
       nodeID: UUID,
@@ -1247,57 +1245,12 @@ private struct BrowserWebView: NSViewRepresentable {
       for navigationAction: WKNavigationAction,
       windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-      // A nil target frame represents window.open() or target="_blank". Returning a child
-      // WKWebView preserves window.opener and postMessage, which OAuth providers use to return
-      // credentials to the initiating page. WebKit still blocks unsolicited JavaScript popups;
-      // this delegate only supplies a destination for popups WebKit has already permitted.
-      guard navigationAction.targetFrame == nil else { return nil }
-
-      let popup = WKWebView(frame: .zero, configuration: configuration)
-      BrowserPasswordBridge.register(popup)
-      popup.uiDelegate = self
-
-      let width = windowFeatures.width?.doubleValue ?? 520
-      let height = windowFeatures.height?.doubleValue ?? 680
-      let window = NSWindow(
-        contentRect: NSRect(x: 0, y: 0, width: max(width, 360), height: max(height, 480)),
-        styleMask: [.titled, .closable, .miniaturizable, .resizable],
-        backing: .buffered,
-        defer: false
-      )
-      window.title = "Sign in"
-      window.contentView = popup
-      window.delegate = self
-      window.isReleasedWhenClosed = false
-      window.center()
-
-      let controller = NSWindowController(window: window)
-      popupWindows[ObjectIdentifier(popup)] = controller
-      controller.showWindow(nil)
-      window.makeKeyAndOrderFront(nil)
-      return popup
+      popupWindows.webView(
+        webView, createWebViewWith: configuration,
+        for: navigationAction, windowFeatures: windowFeatures)
     }
 
-    func webViewDidClose(_ webView: WKWebView) {
-      guard let controller = popupWindows.removeValue(forKey: ObjectIdentifier(webView)) else {
-        return
-      }
-      controller.close()
-    }
-
-    func windowWillClose(_ notification: Notification) {
-      guard let window = notification.object as? NSWindow else { return }
-      popupWindows = popupWindows.filter { $0.value.window !== window }
-    }
-
-    func closePopupWindows() {
-      let controllers = Array(popupWindows.values)
-      popupWindows.removeAll()
-      for controller in controllers {
-        controller.window?.delegate = nil
-        controller.close()
-      }
-    }
+    func closePopupWindows() { popupWindows.closeAll() }
 
     private func inspectPage(_ webView: WKWebView, nodeID: UUID) async throws
       -> BrowserPageSnapshot

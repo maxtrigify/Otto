@@ -35,7 +35,6 @@ let package = Package(
     .library(name: "OttoBrowser", targets: ["OttoBrowser"]),
     .library(name: "OttoMedia", targets: ["OttoMedia"]),
     .library(name: "OttoSecurity", targets: ["OttoSecurity"]),
-    .library(name: "OttoRecipes", targets: ["OttoRecipes"]),
     .library(name: "OttoWorktrees", targets: ["OttoWorktrees"]),
     .library(name: "OttoCommercial", targets: ["OttoCommercial"]),
     .library(name: "OttoObservability", targets: ["OttoObservability"]),
@@ -108,7 +107,6 @@ let package = Package(
       dependencies: ["OttoModels", "OttoTools"],
       linkerSettings: [.linkedFramework("Security")]
     ),
-    .target(name: "OttoRecipes", dependencies: ["OttoCore", "OttoModels"]),
     .target(name: "OttoWorktrees", dependencies: ["OttoModels"]),
     .target(
       name: "OttoCommercial",
@@ -159,7 +157,7 @@ let package = Package(
       name: "OttoApplicationTools",
       dependencies: [
         "OttoBrowser", "OttoCore", "OttoDocuments", "OttoMedia", "OttoMemory", "OttoModels",
-        "OttoRuntime", "OttoRecipes", "OttoTools", "OttoWorktrees",
+        "OttoRuntime", "OttoTools", "OttoWorktrees",
       ]
     ),
     .target(
@@ -167,7 +165,7 @@ let package = Package(
       dependencies: [
         "OttoApplicationTools", "OttoBrowser", "OttoCommercial", "OttoControl", "OttoCore",
         "OttoDocuments",
-        "OttoMedia", "OttoMemory", "OttoModels", "OttoObservability", "OttoRecipes",
+        "OttoMedia", "OttoMemory", "OttoModels", "OttoObservability",
         "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote", "OttoSecurity", "OttoHooks",
         "OttoHostRuntime", "OttoHostTransport", "OttoRPCContracts",
       ],
@@ -239,7 +237,6 @@ let package = Package(
         .copy("Resources/Themes"),
         .copy("Resources/Fonts"),
         .copy("Resources/Deck"),
-        .copy("Resources/Excalidraw"),
         .copy("Resources/DiagramRenderer"),
         .copy("Resources/ProviderLogos"),
         .copy("Resources/Brand"),
@@ -271,7 +268,7 @@ let package = Package(
       name: "OttoApplicationToolsTests",
       dependencies: [
         "OttoApplicationTools", "OttoControl", "OttoCore", "OttoDocuments", "OttoMCP",
-        "OttoModels", "OttoRecipes", "OttoRuntime", "OttoTools", "OttoWorktrees",
+        "OttoModels", "OttoRuntime", "OttoTools", "OttoWorktrees",
       ]
     ),
     .testTarget(
@@ -300,7 +297,6 @@ let package = Package(
     .testTarget(name: "OttoBrowserTests", dependencies: ["OttoBrowser", "OttoModels"]),
     .testTarget(name: "OttoMediaTests", dependencies: ["OttoMedia"]),
     .testTarget(name: "OttoSecurityTests", dependencies: ["OttoSecurity", "OttoTools"]),
-    .testTarget(name: "OttoRecipesTests", dependencies: ["OttoCore", "OttoModels", "OttoRecipes"]),
     .testTarget(name: "OttoWorktreesTests", dependencies: ["OttoModels", "OttoWorktrees"]),
     .testTarget(name: "OttoCommercialTests", dependencies: ["OttoCommercial"]),
     .testTarget(
@@ -344,7 +340,7 @@ if messagingTestsOnly == "1" {
   let names: Set = [
     "OttoServicesTests", "OttoServices", "OttoApplicationTools", "OttoBrowser", "OttoCommercial",
     "OttoControl", "OttoCore", "OttoDocuments", "OttoMedia", "OttoMemory", "OttoModels",
-    "OttoObservability", "OttoRecipes", "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote",
+    "OttoObservability", "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote",
     "OttoSecurity", "OttoHooks", "OttoHostRuntime", "OttoHostTransport", "OttoRPCContracts",
     "OttoPersistence",
   ]

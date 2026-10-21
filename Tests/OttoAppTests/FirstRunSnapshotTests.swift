@@ -76,7 +76,7 @@ struct FirstRunSnapshotTests {
           brief: services.dailyBrief,
           draft: .constant(OnboardingInterest.research.starter.firstTask),
           provider: .constant(.claudeCode), conversationTarget: .constant(.bot(scout.id)),
-          openMarkdown: { _ in }, openNode: { _ in }, openBot: { _ in },
+          openMarkdown: { _ in }, openBot: { _ in },
           openAgent: { _ in }, openCloud: {}, openLibrary: { _ in }, hireBot: {},
           submit: { _, _, _ in })
       }

@@ -373,8 +373,6 @@ struct AppearanceSettingsView: View {
   @AppStorage(OttoPreferenceKey.fontScale) private var fontScaleRaw = OttoFontScale.standard
     .rawValue
   @AppStorage(OttoPreferenceKey.matteOpacity) private var matteOpacity = 0.0
-  @AppStorage(OttoPreferenceKey.tidyOnRecipeOpen) private var tidyOnOpen = false
-  @AppStorage(OttoPreferenceKey.tidyOnRecipeClose) private var tidyOnClose = false
 
   var body: some View {
     Form {
@@ -405,10 +403,6 @@ struct AppearanceSettingsView: View {
         )
         .font(.callout)
         .foregroundStyle(.secondary)
-      }
-      Section("Recipes") {
-        Toggle("Tidy canvas when opening a recipe", isOn: $tidyOnOpen)
-        Toggle("Tidy canvas when closing a recipe", isOn: $tidyOnClose)
       }
     }
     .padding(24)

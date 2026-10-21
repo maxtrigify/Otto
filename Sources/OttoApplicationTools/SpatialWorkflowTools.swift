@@ -39,7 +39,7 @@ public struct BrowserOpenTabInput: Codable, Sendable {
 
 /// A browser surface opened by a canvas agent. The application UI uses this ephemeral signal to
 /// present the browser inside that agent's Chat work panel instead of losing the relationship and
-/// leaving the new browser as an unexplained canvas card.
+/// leaving the new browser as an unexplained resource preview.
 public struct AgentBrowserOpenRequest: Identifiable, Equatable, Sendable {
   public let id: UUID
   public let agentID: UUID
@@ -143,12 +143,12 @@ public struct BrowserOpenTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "browser.open",
     description:
-      "Opens a URL in the Otto canvas browser. Agent, voice, and automation calls reuse the selected or latest browser as a new tab; the first call creates the browser node.",
+      "Opens a URL in the Otto browser. Agent, voice, and automation calls reuse the selected or latest browser as a new tab; the first call creates the browser node.",
     inputSchema: .objectSchema(
       properties: [
         "url": .stringSchema(description: "HTTP or HTTPS URL to open"),
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
       ],
       required: ["url", "x", "y"]
     ),
@@ -649,7 +649,7 @@ public struct BrowserOpenExternalTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "browser.open_external",
     description:
-      "Opens an HTTP or HTTPS URL in the user's default system browser, outside the canvas. Use only when the user explicitly asks for their own or default browser; otherwise prefer browser.open.",
+      "Opens an HTTP or HTTPS URL in the user's default system browser, outside Otto. Use only when the user explicitly asks for their own or default browser; otherwise prefer browser.open.",
     inputSchema: .objectSchema(
       properties: [
         "url": .stringSchema(description: "HTTP or HTTPS URL to hand to the system browser")
@@ -763,8 +763,8 @@ public struct DocumentCreateTool: OttoTool {
       properties: [
         "relativePath": .stringSchema(description: "Workspace-relative Markdown file path"),
         "text": .stringSchema(description: "Initial Markdown content"),
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
       ],
       required: ["relativePath", "text", "x", "y"]
     ),
@@ -823,8 +823,8 @@ public struct DocumentOpenTool: OttoTool {
     inputSchema: .objectSchema(
       properties: [
         "relativePath": .stringSchema(description: "Existing workspace-relative Markdown path"),
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
       ],
       required: ["relativePath", "x", "y"]
     ),
@@ -1065,11 +1065,6 @@ public struct WorkspaceSurfaceSetInput: Codable, Sendable {
   }
 }
 
-public struct LayoutStageInput: Codable, Sendable {
-  public var nodeID: UUID?
-  public init(nodeID: UUID? = nil) { self.nodeID = nodeID }
-}
-
 public struct ThemeSetInput: Codable, Sendable {
   public var themeID: String
   public init(themeID: String) { self.themeID = themeID }
@@ -1097,7 +1092,7 @@ public struct ThemeListTool: OttoTool {
 public struct WorkspaceSurfaceSetTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "surface.set",
-    description: "Opens the Chat workspace surface without changing canvas layout.",
+    description: "Opens the Chat workspace.",
     inputSchema: .objectSchema(
       properties: [
         "surface": .stringSchema(description: "Workspace surface: chat")
@@ -1116,43 +1111,6 @@ public struct WorkspaceSurfaceSetTool: OttoTool {
   {
     let receipt = await store.setWorkspaceSurface(input.surface)
     return MutationOutput(message: receipt.message, affectedNodeIDs: [])
-  }
-}
-
-public struct LayoutStageTool: OttoTool {
-  public static let definition = ToolDefinition(
-    name: "layout.stage",
-    description:
-      "Stages a named node with supporting nodes beside it. Supply nodeID when the user names a node; otherwise stages the currently focused node.",
-    inputSchema: .objectSchema(
-      properties: [
-        "nodeID": .stringSchema(description: "Optional stable UUID of the node to stage")
-      ]
-    ),
-    outputSchema: .object(["type": .string("object")]),
-    requiredScopes: [.canvasWrite],
-    riskLevel: .reversible
-  )
-  private let store: CanvasStore
-  public init(store: CanvasStore) { self.store = store }
-  public func call(_ input: LayoutStageInput, context: ToolContext) async throws -> MutationOutput {
-    if let nodeID = input.nodeID {
-      let node = try await store.requiredNode(nodeID, context: context)
-      // A compact node is excluded from the stage layout. Focusing it alone would leave a
-      // different expanded node on the stage even though this tool reports that the requested
-      // node was staged, so restore its last expanded presentation first.
-      if node.effectivePresentationMode.isExpanded {
-        _ = try await store.dispatch(.focusNode(nodeID), context: context)
-      } else {
-        _ = try await store.dispatch(
-          .setNodePresentation(
-            id: nodeID, presentation: node.effectiveExpandedPresentation),
-          context: context
-        )
-      }
-    }
-    let receipt = try await store.dispatch(.setLayout(.stage), context: context)
-    return MutationOutput(message: receipt.message, affectedNodeIDs: receipt.affectedNodeIDs)
   }
 }
 

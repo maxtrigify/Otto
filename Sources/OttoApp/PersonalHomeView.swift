@@ -15,7 +15,6 @@ struct PersonalHomeView: View {
   @Binding var provider: AgentProvider
   @Binding var conversationTarget: HomeConversationTarget
   let openMarkdown: (String) -> Void
-  let openNode: (UUID) -> Void
   let openBot: (AgentProfile) -> Void
   let openAgent: (UUID) -> Void
   let openCloud: () -> Void
@@ -66,8 +65,8 @@ struct PersonalHomeView: View {
     return artwork ? palette.artworkTint : palette.workspaceSurface
   }
   private var profile: HomeProfile { brief.selectedProfile }
-  /// One theme for the whole app: Home always shows the active canvas's theme, so Chat and
-  /// Canvas look the same as Home. `applyProfileTheme` moves the canvas to the profile's choice.
+  /// One theme for the whole app: Home always shows the active canvas's theme, so other pages
+  /// look the same as Home. `applyProfileTheme` moves the canvas to the profile's choice.
   private var homeTheme: OttoThemeDefinition {
     OttoThemeCatalog.theme(id: store.activeCanvas.themeID)
   }
@@ -569,7 +568,7 @@ struct PersonalHomeView: View {
       .environment(\.ottoPalette, cardPalette)
       .environment(\.colorScheme, cardColorScheme)
       HomePinnedCards(
-        store: store, services: services, openMarkdown: openMarkdown, openNode: openNode,
+        services: services, openMarkdown: openMarkdown,
         profileID: nil
       )
       .environment(\.ottoPalette, cardPalette)
@@ -837,7 +836,10 @@ struct PersonalHomeView: View {
   }
 
   private func agentName(_ id: UUID) -> String {
-    store.snapshot.canvases.flatMap(\.nodes).first { $0.id == id }?.displayName ?? "Agent"
+    guard let node = store.snapshot.canvases.flatMap(\.nodes).first(where: { $0.id == id }) else {
+      return "Agent"
+    }
+    return node.kind == .terminal ? "Terminal · \(node.displayName)" : node.displayName
   }
 
   private var composedPrompt: String? {

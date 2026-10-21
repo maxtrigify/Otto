@@ -515,7 +515,7 @@ final class VoiceController: ObservableObject {
   }
 
   /// Establishes the persistent voice connection for the saved operating mode. Must run after
-  /// ApplicationServices.start() has registered the canvas tools: the session projects the tool
+  /// ApplicationServices.start() has registered the workspace tools: the session projects the tool
   /// registry once at connect, so connecting from init races registration and produces a session
   /// that can speak but has no tools at all.
   func activateOperatingMode() async {

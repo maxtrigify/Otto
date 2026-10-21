@@ -203,6 +203,9 @@ public actor AgentSupervisor {
   private var bootstrapProvider:
     (@Sendable (UUID, AgentPermissionMode) async -> AgentBootstrapPacket?)?
   private var interactiveCompletionTasks: [UUID: Task<Void, Never>] = [:]
+  /// One pending "has this command gone quiet at a prompt?" check per command terminal.
+  private var terminalQuietTasks: [UUID: Task<Void, Never>] = [:]
+  private var terminalInputQuietInterval = TerminalInputWaitDetector.quietInterval
   private var pendingPermissions: [UUID: [PendingPermission]] = [:]
   private var pendingChoices: [UUID: [PendingChoice]] = [:]
   private let scrollbackCapacity: Int
@@ -309,7 +312,7 @@ public actor AgentSupervisor {
   }
 
   /// Installs the control-plane wiring every subsequently spawned provider and terminal receives
-  /// through its child environment, letting agents reach canvas tools via otto-mcp and ottoctl.
+  /// through its child environment, letting agents reach workspace tools via otto-mcp and ottoctl.
   public func setControlPlane(_ plane: AgentControlPlane?) {
     controlPlane = plane
   }
@@ -1205,6 +1208,7 @@ public actor AgentSupervisor {
       }
     }
     consumeInteractivePrompt(from: text, agent: &agent)
+    noteTerminalOutput(&agent, id: id)
     agents[id] = agent
     refreshDelegatingParent(id)
     scheduleInteractiveCompletionIfNeeded(agentID: id, rawChunk: text)
@@ -1383,6 +1387,57 @@ public actor AgentSupervisor {
     }
 
     transition(&agent, to: prompt.state, confidence: 0.95)
+  }
+
+  /// Shortens the quiet period before a command terminal is read as waiting. Tests only.
+  public func setTerminalInputQuietInterval(_ interval: Duration) {
+    terminalInputQuietInterval = interval
+  }
+
+  /// Command terminals (`terminal.run`) are watched for a prompt the person has to answer: new
+  /// output ends any wait, and output that then stays quiet on a prompt-like line starts one.
+  /// Bare shells from `terminal.open` sit at a prompt by design and are never flagged.
+  private func noteTerminalOutput(_ agent: inout ManagedAgent, id: UUID) {
+    guard agent.snapshot.executionMode == .terminal, agent.successfulExitState == .done else {
+      return
+    }
+    if agent.snapshot.state == .waitingUser,
+      TerminalInputWaitDetector.isTerminalAttentionToken(agent.snapshot.attentionToken)
+    {
+      transition(&agent, to: .working, confidence: 1)
+    }
+    let runID = agent.runID
+    let expectedEndOffset = agent.snapshot.outputEndOffset
+    let interval = terminalInputQuietInterval
+    terminalQuietTasks[id]?.cancel()
+    terminalQuietTasks[id] = Task { [weak self] in
+      try? await Task.sleep(for: interval)
+      guard !Task.isCancelled else { return }
+      await self?.evaluateTerminalQuiet(
+        id: id, runID: runID, expectedEndOffset: expectedEndOffset)
+    }
+  }
+
+  private func evaluateTerminalQuiet(id: UUID, runID: UUID, expectedEndOffset: Int) {
+    guard var agent = agents[id], agent.runID == runID,
+      agent.snapshot.outputEndOffset == expectedEndOffset
+    else { return }
+    terminalQuietTasks[id] = nil
+    guard agent.snapshot.exitCode == nil, agent.snapshot.state == .working else { return }
+    let echoDisabled = !agent.process.echoesInput
+    guard
+      let prompt = TerminalInputWaitDetector.waitingPrompt(
+        in: agent.snapshot.output, echoDisabled: echoDisabled)
+    else { return }
+    // Only the prompt the program printed is kept. Keystrokes never reach the snapshot: they go
+    // straight to the PTY, and with echo off the program does not print them back either.
+    agent.snapshot.attentionReason = sanitizedAttentionReason(prompt)
+    agent.snapshot.attentionToken =
+      echoDisabled
+      ? TerminalInputWaitDetector.hiddenInputToken : TerminalInputWaitDetector.inputToken
+    transition(&agent, to: .waitingUser, confidence: 0.8)
+    agents[id] = agent
+    refreshDelegatingParent(id)
   }
 
   /// The range from the start of `text` through the end of the first line carrying a TUI menu's
@@ -1597,6 +1652,8 @@ public actor AgentSupervisor {
     interactiveCompletionTasks[id]?.cancel()
     interactiveCompletionTasks[id] = nil
     guard var agent = agents[id], agent.runID == runID else { return }
+    terminalQuietTasks[id]?.cancel()
+    terminalQuietTasks[id] = nil
     agent.pendingExitCode = code
     if agent.outputEnded { finalizeExit(&agent, id: id, code: code) }
     agents[id] = agent

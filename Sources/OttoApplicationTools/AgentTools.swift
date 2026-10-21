@@ -147,7 +147,7 @@ public struct AgentSpawnTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "agent.spawn",
     description:
-      "Opens a Claude Code, Codex, Hermes, Kimi, or shell agent in a canvas node. Coding-agent prompts use a structured conversation session; the raw provider terminal remains available separately.",
+      "Opens a Claude Code, Codex, Hermes, Kimi, or shell agent in a workspace resource. Coding-agent prompts use a structured conversation session; the raw provider terminal remains available separately.",
     inputSchema: .objectSchema(
       properties: [
         "provider": .stringSchema(
@@ -156,8 +156,8 @@ public struct AgentSpawnTool: OttoTool {
         "prompt": .stringSchema(description: "Task for the agent to complete"),
         "workingDirectory": .stringSchema(
           description: "Optional absolute repository or directory path for the agent"),
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
         "model": .stringSchema(description: "Optional provider model identifier"),
         "effort": .stringSchema(description: "Optional reasoning effort"),
         "executionStrategy": .stringSchema(

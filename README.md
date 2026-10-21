@@ -65,7 +65,7 @@ the matching CLI (Claude Code, Codex, Cursor, Kimi, OpenCode, Grok or Hermes) is
 | `Sources/OttoMCP`, `otto-mcp`, `ottoctl` | MCP server and command-line control |
 | `Sources/ottod` | Headless host daemon |
 | `Apps/OttoMobileApp` | iOS companion app |
-| `Web` | Bundled whiteboard and diagram runtimes |
+| `Web` | Bundled diagram runtimes |
 | `docs/ADR` | Architecture decision records |
 | `docs/THREAT_MODEL.md` | Security model |
 

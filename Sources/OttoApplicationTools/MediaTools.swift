@@ -45,8 +45,8 @@ public struct MediaOpenTool: OttoTool {
     inputSchema: .objectSchema(
       properties: [
         "source": .stringSchema(description: "Workspace audio/video path or HTTP(S) media URL"),
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
       ],
       required: ["source", "x", "y"]
     ),

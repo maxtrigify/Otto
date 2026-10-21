@@ -21,8 +21,6 @@ public enum OttoPreferenceKey {
   public static let hermesRemoteProfile = "otto.agents.hermes.remoteProfile"
   public static let hermesRemoteWorkingDirectory = "otto.agents.hermes.remoteWorkingDirectory"
   public static let hermesSessionTokenSecret = "agents.hermes.sessionToken"
-  public static let tidyOnRecipeOpen = "otto.recipes.tidyOnOpen"
-  public static let tidyOnRecipeClose = "otto.recipes.tidyOnClose"
   public static let onDeviceWorkTitles = "otto.summarizer.onDeviceWorkTitles"
 }
 
@@ -233,27 +231,5 @@ public struct AgentNamingPolicy: Codable, Equatable, Sendable {
   public func save(to defaults: UserDefaults = .standard) {
     defaults.set(mode.rawValue, forKey: OttoPreferenceKey.agentNamingMode)
     defaults.set(customNames, forKey: OttoPreferenceKey.agentCustomNames)
-  }
-}
-
-public struct RecipeTidyPreferences: Codable, Equatable, Sendable {
-  public var onOpen: Bool
-  public var onClose: Bool
-
-  public init(onOpen: Bool = false, onClose: Bool = false) {
-    self.onOpen = onOpen
-    self.onClose = onClose
-  }
-
-  public static func load(from defaults: UserDefaults = .standard) -> RecipeTidyPreferences {
-    RecipeTidyPreferences(
-      onOpen: defaults.bool(forKey: OttoPreferenceKey.tidyOnRecipeOpen),
-      onClose: defaults.bool(forKey: OttoPreferenceKey.tidyOnRecipeClose)
-    )
-  }
-
-  public func save(to defaults: UserDefaults = .standard) {
-    defaults.set(onOpen, forKey: OttoPreferenceKey.tidyOnRecipeOpen)
-    defaults.set(onClose, forKey: OttoPreferenceKey.tidyOnRecipeClose)
   }
 }

@@ -23,7 +23,7 @@ public struct AgentProfileOpenTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "agent.profile_open",
     description:
-      "Opens a saved custom agent by name, focusing its existing canvas node unless a new session is requested.",
+      "Opens a saved custom agent by name, opening its existing conversation unless a new session is requested.",
     inputSchema: .objectSchema(
       properties: [
         "name": .stringSchema(description: "Exact custom agent name, for example Buz"),

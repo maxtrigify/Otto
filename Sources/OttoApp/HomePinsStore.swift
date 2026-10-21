@@ -4,6 +4,7 @@ import Foundation
 struct HomePin: Codable, Equatable, Identifiable {
   enum Source: Codable, Equatable {
     case markdown(String)
+    // Decode old pins without losing the accompanying Markdown pins. Never offered in the UI.
     case widget(UUID)
   }
   var id = UUID()
@@ -15,6 +16,13 @@ struct HomePin: Codable, Equatable, Identifiable {
 @MainActor
 final class HomePinsStore: ObservableObject {
   @Published private(set) var pins: [HomePin] = []
+  var visiblePins: [HomePin] {
+    pins.filter {
+      if case .markdown = $0.source { return true }
+      return false
+    }
+  }
+
   private let defaults: UserDefaults
   private var key: String?
 
@@ -34,7 +42,8 @@ final class HomePinsStore: ObservableObject {
   }
 
   func add(_ source: HomePin.Source) {
-    guard !pins.contains(where: { $0.source == source }) else { return }
+    guard case .markdown = source,
+      !pins.contains(where: { $0.source == source }) else { return }
     pins.append(HomePin(source: source))
     save()
   }
@@ -45,11 +54,13 @@ final class HomePinsStore: ObservableObject {
   }
 
   func move(_ id: UUID, by delta: Int) {
-    guard let index = pins.firstIndex(where: { $0.id == id }),
-      pins.indices.contains(index + delta)
+    let visible = visiblePins
+    guard let visibleIndex = visible.firstIndex(where: { $0.id == id }),
+      visible.indices.contains(visibleIndex + delta),
+      let index = pins.firstIndex(where: { $0.id == id }),
+      let target = pins.firstIndex(where: { $0.id == visible[visibleIndex + delta].id })
     else { return }
-    let pin = pins.remove(at: index)
-    pins.insert(pin, at: index + delta)
+    pins.swapAt(index, target)
     save()
   }
 

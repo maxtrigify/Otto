@@ -120,9 +120,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
         command: mcpExecutable, environment: request.controlEnvironment)
     {
       arguments += ["--mcp-config", mcpConfig]
-      // One appended system prompt carries both the canvas guidance and, when the memory layer
+      // One appended system prompt carries both the workspace guidance and, when the memory layer
       // is active, the run's bootstrap packet (charter, compact context, memory rules).
-      let systemPrompt = [Self.ottoCanvasGuidance, request.memoryBootstrap]
+      let systemPrompt = [Self.ottoWorkspaceGuidance, request.memoryBootstrap]
         .compactMap { $0 }
         .joined(separator: "\n\n")
       arguments += ["--append-system-prompt", systemPrompt]
@@ -169,7 +169,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
   }
 
-  static let ottoCanvasGuidance = """
+  static let ottoWorkspaceGuidance = """
     You are working in Otto. Users access conversations in Chat and files in Documents. Otto tools are available through \
     the "otto" MCP server. When the user asks to open, show, browse, or research a website, open \
     it inside Otto with the otto browser.open tool; it creates the first browser node and opens \
@@ -196,13 +196,12 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     To record a video of work in Otto (a product demo, a browser walkthrough, a bug \
     repro), call recording.start, perform the actions, then recording.stop — the finished \
     .mp4 lands in the workspace's Recordings folder. Return a clickable file link to the recording; a \
-    media node alone is not an accessible deliverable. For a single-node demo, stage that node first with layout.stage so it fills \
-    the frame.
+    resource preview alone is not an accessible deliverable. Open the page being demonstrated before recording.
 
     Documents: use docs.create for user-facing documents, spreadsheets and presentations, and \
     docs.list, docs.read, docs.write or docs.suggest_edit to find and work with them. Tell the user \
-    the exact title and that it is in Documents. Canvas is not a user-facing destination: never \
-    say a deliverable is available by opening a canvas node. The legacy document.* tools manage \
+    the exact title and that it is in Documents. Always return an accessible file link in Chat. \
+    The legacy document.* tools manage \
     Markdown files, not entries in Documents. When Markdown is specifically needed, return a \
     clickable Markdown link to the actual absolute file path in your reply. Existing Markdown \
     files can also be read and copied into Documents with docs.create when the user requests it. \
@@ -220,7 +219,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     "replyBody":"Optional proposed reply"}]}. Omit optional fields when unknown. Never fabricate \
     inbox messages or claim that displaying a card sends, refreshes, or marks mail read. Cards show \
     a mailbox snapshot, expand messages, filter unread, and open reply drafts. Use these formats \
-    instead of a code sample, separate widget, or file link when the user requests an email or inbox. \
+    instead of a code sample, separate interactive UI, or file link when the user requests an email or inbox. \
     Keep ALL requested deliverables (including email cards) above <!-- otto:details -->; only optional \
     supporting explanation belongs below it. Do not hide requested writing behind that divider.
 
@@ -247,7 +246,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     line <!-- otto:details --> after the takeaway, visual and caption, then provide the full supporting \
     explanation and evidence. The detail drawer shows that supporting text directly; do not repeat the \
     takeaway or primary visual there. Do not put the primary visual below that line. For custom interactive \
-    UI, use widget.create with sandboxed HTML or a browser node; link the resulting artifact from \
+    UI, build a local web app and open it with browser.open; link the resulting artifact from \
     the reply. Raw HTML in chat is not executable UI. Only create such UI when interaction materially \
     helps the task; ordinary diagrams and comparisons need no separate app or tool call.
 
@@ -267,6 +266,14 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     when ready to wait longer. Read the returned boundedOutput and do not claim the command \
     completed until its terminal state is done or failed. This is the shared background-job \
     protocol across every Otto agent harness and keeps completion attached to your turn.
+
+    When a step needs the person themselves (a setup script that waits for a key press, a token \
+    or password to paste, a sign-in prompt), run it with terminal.run. Otto opens that terminal \
+    in the work panel on the right of this chat, in a tab named by the result's title, and the \
+    person types straight into it; hidden input such as passwords never reaches you. Tell them \
+    exactly where to look and what to do, for example: "Click into the Setup script terminal in \
+    the panel on the right and follow its prompts." If terminal.wait returns waitingForUser, the \
+    command is waiting on them: say so, then wait again.
 
     You can coordinate other Otto agents when the user asks you to delegate or chain \
     work: agent.spawn creates a new agent (choose the provider the user named), \
@@ -466,7 +473,7 @@ public struct CodexAdapter: AgentAdapter {
       executable: path,
       arguments: arguments,
       // Otto Dev is often launched from Codex Desktop or a Codex shell. Inheriting that parent's
-      // CODEX_THREAD_ID makes `codex exec` append the canvas prompt and image to the desktop task
+      // CODEX_THREAD_ID makes `codex exec` append the workspace prompt and image to the desktop task
       // instead of creating/resuming this node's own session.
       inheritedEnvironmentPrefixesToRemove: ["CODEX_"],
       workingDirectory: request.workspacePath
@@ -500,7 +507,7 @@ public struct CodexAdapter: AgentAdapter {
       guard !value.isEmpty, bootstrap?.contains(value) != true else { return nil }
       return value
     }
-    let instructions = [ClaudeCodeAdapter.ottoCanvasGuidance, includeProfile, bootstrap]
+    let instructions = [ClaudeCodeAdapter.ottoWorkspaceGuidance, includeProfile, bootstrap]
       .compactMap { value in value?.isEmpty == false ? value : nil }
       .joined(separator: "\n\n")
     guard !instructions.isEmpty else { return }
@@ -752,7 +759,7 @@ public struct OpenAIDirectAdapter: AgentAdapter {
       request.executionStrategy == .delegated
         ? "Execution strategy: delegated. Use Otto agent.spawn for independent work, then event.wait and agent.get_result to collect and verify results before completing. This harness delegates through Otto tools."
         : nil,
-      ClaudeCodeAdapter.ottoCanvasGuidance,
+      ClaudeCodeAdapter.ottoWorkspaceGuidance,
       bootstrap,
     ]
     .compactMap { value in value?.isEmpty == false ? value : nil }
@@ -918,7 +925,7 @@ public struct HermesAdapter: AgentAdapter {
       // profile context first-turn-only.
       let prepared = bootstrapEmbeddedPrompt(
         request,
-        prompt: "\(ClaudeCodeAdapter.ottoCanvasGuidance)\n\n---\n\n\(prompt)"
+        prompt: "\(ClaudeCodeAdapter.ottoWorkspaceGuidance)\n\n---\n\n\(prompt)"
       )
       arguments += [
         "--prompt",
@@ -966,7 +973,7 @@ public struct HermesAdapter: AgentAdapter {
 
     Re-inspect after navigation or meaningful page changes because element IDs are revision-scoped.
     When authentication, MFA, a passkey, or CAPTCHA is required, leave that exact page open in the
-    canvas, ask the user to complete it there, and resume after their next message. Never request or
+    Otto browser, ask the user to complete it there, and resume after their next message. Never request or
     transmit their credentials through chat or the tool tunnel. Use ordinary `clarify` questions
     without the marker only when you genuinely need an answer from the user.
     """
@@ -1093,7 +1100,7 @@ public struct KimiAdapter: AgentAdapter {
   private func kimiPrompt(_ request: AgentLaunchRequest, prompt: String) -> String {
     return bootstrapEmbeddedPrompt(
       request,
-      prompt: "\(ClaudeCodeAdapter.ottoCanvasGuidance)\n\n---\n\n\(prompt)"
+      prompt: "\(ClaudeCodeAdapter.ottoWorkspaceGuidance)\n\n---\n\n\(prompt)"
     )
   }
 
@@ -1283,7 +1290,7 @@ public struct CursorAdapter: AgentAdapter {
   private func cursorPrompt(_ request: AgentLaunchRequest, prompt: String) -> String {
     return bootstrapEmbeddedPrompt(
       request,
-      prompt: "\(ClaudeCodeAdapter.ottoCanvasGuidance)\n\n---\n\n\(prompt)"
+      prompt: "\(ClaudeCodeAdapter.ottoWorkspaceGuidance)\n\n---\n\n\(prompt)"
     )
   }
 
@@ -1493,7 +1500,7 @@ public struct OpenCodeAdapter: AgentAdapter {
   private func openCodePrompt(_ request: AgentLaunchRequest, prompt: String) -> String {
     return bootstrapEmbeddedPrompt(
       request,
-      prompt: "\(ClaudeCodeAdapter.ottoCanvasGuidance)\n\n---\n\n\(prompt)"
+      prompt: "\(ClaudeCodeAdapter.ottoWorkspaceGuidance)\n\n---\n\n\(prompt)"
     )
   }
 
@@ -1661,11 +1668,11 @@ public struct GrokAdapter: AgentAdapter {
     )
   }
 
-  /// Grok's `--rules` is the extra-system-prompt channel. Continuations still get canvas
+  /// Grok's `--rules` is the extra-system-prompt channel. Continuations still get workspace
   /// guidance so a resumed TUI stint keeps the otto tools, but skip the memory bootstrap
   /// already stored in the session.
   private func systemRules(for request: AgentLaunchRequest) -> String? {
-    var parts = [ClaudeCodeAdapter.ottoCanvasGuidance]
+    var parts = [ClaudeCodeAdapter.ottoWorkspaceGuidance]
     if request.resumeSessionID == nil, let bootstrap = request.memoryBootstrap {
       parts.append(bootstrap)
     }

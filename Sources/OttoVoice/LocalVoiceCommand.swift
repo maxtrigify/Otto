@@ -62,15 +62,6 @@ public actor LocalVoiceCommandRouter {
       return .completed(toolName: action.toolName, confirmation: action.confirmation)
     }
 
-    if let name = canvasCreateName(command) {
-      _ = try await registry.call(
-        name: "canvas.create",
-        input: .object(["name": .string(name)]),
-        context: toolContext
-      )
-      return .completed(toolName: "canvas.create", confirmation: "Created canvas \(name)")
-    }
-
     if let create = createNodeAction(command) {
       _ = try await registry.call(name: "node.create", input: create.input, context: toolContext)
       return .completed(toolName: "node.create", confirmation: create.confirmation)
@@ -100,22 +91,6 @@ public actor LocalVoiceCommandRouter {
     if let action = botVoiceAction(command) {
       _ = try await registry.call(name: action.toolName, input: action.input, context: toolContext)
       return .completed(toolName: action.toolName, confirmation: action.confirmation)
-    }
-
-    switch namedCanvasAction(command) {
-    case .match(let canvas):
-      _ = try await registry.call(
-        name: "canvas.switch",
-        input: .object(["canvasID": .string(canvas.id.uuidString)]),
-        context: toolContext
-      )
-      return .completed(toolName: "canvas.switch", confirmation: "Switched to \(canvas.name)")
-    case .ambiguous(let names):
-      return .clarification("Which canvas did you mean: \(names.joined(separator: ", "))?")
-    case .missing(let requested):
-      return .clarification("I cannot find a canvas named \(requested).")
-    case .noMatch:
-      break
     }
 
     switch sessionPromptAction(command) {
@@ -159,22 +134,6 @@ public actor LocalVoiceCommandRouter {
       return .clarification("I cannot find a node named \(requested).")
     case .noMatch:
       break
-    }
-
-    if let widget = namedWidgetAction(command) {
-      do {
-        _ = try await registry.call(
-          name: widget.toolName,
-          input: .object(["name": .string(widget.name)]),
-          context: toolContext
-        )
-        return .completed(
-          toolName: widget.toolName,
-          confirmation: "\(widget.confirmation) \(widget.name)"
-        )
-      } catch {
-        return .clarification(error.localizedDescription)
-      }
     }
 
     switch namedNodeAction(command, verb: "open") {
@@ -232,7 +191,7 @@ public actor LocalVoiceCommandRouter {
     }
 
     return .unrecognized(
-      "Command not recognized. Try create a terminal, open a URL, switch canvas, open or close a named widget, focus or close an exact node name, or prompt an exact agent name."
+      "Command not recognized. Try opening a URL, starting a terminal, opening a session, or prompting an exact agent name."
     )
   }
 
@@ -483,26 +442,12 @@ public actor LocalVoiceCommandRouter {
     case "terminal": kind = .terminal
     case "browser": kind = .browser
     case "document", "markdown", "note": kind = .markdown
-    case "whiteboard": kind = .whiteboard
     default: return nil
     }
     return (
       .object(["kind": .string(kind.rawValue), "x": .number(0), "y": .number(0)]),
       "Created \(spokenKind)"
     )
-  }
-
-  private func canvasCreateName(_ transcript: String) -> String? {
-    let normalized = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-    for prefix in [
-      "create a canvas named ", "create canvas named ", "create a canvas ", "create canvas ",
-    ] {
-      guard normalized.lowercased().hasPrefix(prefix) else { continue }
-      let name = String(normalized.dropFirst(prefix.count))
-        .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
-      return name.isEmpty ? nil : name
-    }
-    return nil
   }
 
   private func browserOpenAction(_ transcript: String) -> (input: JSONValue, confirmation: String)?
@@ -528,50 +473,12 @@ public actor LocalVoiceCommandRouter {
     )
   }
 
-  private func namedCanvasAction(_ transcript: String) -> NamedMatch<VoiceCanvasContext> {
-    let requested = namedTarget(
-      in: transcript, verbs: ["switch to", "switch canvas to", "open canvas"])
-    guard let requested else { return .noMatch }
-    let matches = exactMatches(requested, in: voiceContext?.canvases ?? [], name: \.name)
-    if matches.count == 1 { return .match(matches[0]) }
-    if matches.count > 1 { return .ambiguous(matches.map(\.name)) }
-    return .missing(requested)
-  }
-
   private func namedNodeAction(_ transcript: String, verb: String) -> NamedMatch<VoiceNodeContext> {
     guard let requested = namedTarget(in: transcript, verbs: [verb]) else { return .noMatch }
     let matches = exactMatches(requested, in: voiceContext?.nodes ?? [], name: \.name)
     if matches.count == 1 { return .match(matches[0]) }
     if matches.count > 1 { return .ambiguous(matches.map(\.name)) }
     return .missing(requested)
-  }
-
-  private func namedWidgetAction(_ transcript: String) -> (
-    toolName: String, name: String, confirmation: String
-  )? {
-    let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-    let patterns = [
-      #"(?i)^\s*(open|show|find|close|hide)\s+(?:the\s+)?widget\s+(.+?)\s*$"#,
-      #"(?i)^\s*(open|show|find|close|hide)\s+(?:the\s+)?(.+?)\s+widget\s*$"#,
-    ]
-    for pattern in patterns {
-      guard let expression = try? NSRegularExpression(pattern: pattern),
-        let match = expression.firstMatch(
-          in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)),
-        let verbRange = Range(match.range(at: 1), in: trimmed),
-        let nameRange = Range(match.range(at: 2), in: trimmed)
-      else { continue }
-      let verb = trimmed[verbRange].lowercased()
-      var name = String(trimmed[nameRange]).trimmingCharacters(
-        in: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
-      if name.lowercased().hasPrefix("my ") { name = String(name.dropFirst(3)) }
-      guard !name.isEmpty else { return nil }
-      if ["close", "hide"].contains(verb) {
-        return ("widget.close", name, "Closed")
-      }
-      return ("widget.open", name, "Opened")
-    }
-    return nil
   }
 
   private func namedTarget(in transcript: String, verbs: [String]) -> String? {

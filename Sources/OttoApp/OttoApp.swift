@@ -131,7 +131,7 @@ struct OttoApp: App {
   }
 
   var body: some Scene {
-    WindowGroup {
+    WindowGroup(id: "otto-workspace", for: String.self) { _ in
       #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--message-queue-preview") {
           MessageQueuePreview()
@@ -149,10 +149,13 @@ struct OttoApp: App {
       #else
         mainWorkspace.environmentObject(services.messageQueue)
       #endif
+    } defaultValue: {
+      "primary"
     }
     .windowStyle(.hiddenTitleBar)
     .defaultSize(width: 1440, height: 900)
     .commands {
+      BrowserNavigationCommands(uiState: uiState)
       CommandGroup(after: .appInfo) {
         Button("Check for Updates…") { updates.checkNow() }
       }
@@ -184,6 +187,9 @@ struct OttoApp: App {
         Button("Take the Home Tour") {
           NotificationCenter.default.post(name: .ottoStartHomeTour, object: nil)
         }
+      }
+      CommandGroup(replacing: .help) {
+        Button("Send Feedback…") { uiState.showsFeedback = true }
       }
     }
 
@@ -262,7 +268,7 @@ struct OttoApp: App {
           PrivateWebsiteLoginWindows.shared.open(id, service: services.websiteAccounts)
         }
         services.messaging.start()
-        // Only now are the canvas tools registered; the voice session projects them once at
+        // Only now are the workspace tools registered; the voice session projects them once at
         // connect, so the mode's persistent connection must not start any earlier.
         await voice.activateOperatingMode()
       }
@@ -449,4 +455,25 @@ func relaunchOttoIntoActiveProfile() {
     + arguments
   try? process.run()
   NSApp.terminate(nil)
+}
+
+/// Native navigation stays available while editing text or viewing Settings.
+private struct BrowserNavigationCommands: Commands {
+  @Environment(\.openWindow) private var openWindow
+  @ObservedObject var uiState: WorkspaceUIState
+
+  var body: some Commands {
+    CommandMenu("Go") {
+      Button("Browser") {
+        if !BrowserNavigationShortcut.formatDocumentIfNeeded(
+          firstResponder: NSApp.keyWindow?.firstResponder,
+          isKeyPress: NSApp.currentEvent?.type == .keyDown)
+        {
+          uiState.requestsBrowser = true
+          openWindow(id: "otto-workspace", value: "primary")
+        }
+      }
+      .keyboardShortcut("b", modifiers: .command)
+    }
+  }
 }

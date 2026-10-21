@@ -255,8 +255,8 @@ public struct SessionListTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "session.list",
     description:
-      "Lists every one-off agent session across canvases, including its stable ID, name, provider, "
-      + "status, and canvas. Saved bots are deliberately excluded.",
+      "Lists every one-off agent session in this workspace, including its stable ID, name, provider, "
+      + "and status. Saved bots are deliberately excluded.",
     inputSchema: .objectSchema(), outputSchema: .objectSchema(),
     requiredScopes: [.canvasRead], riskLevel: .read
   )

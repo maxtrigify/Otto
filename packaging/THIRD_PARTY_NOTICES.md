@@ -39,19 +39,6 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Excalidraw
-
-Otto includes Excalidraw 0.18.1 and its bundled runtime dependencies:
-<https://github.com/excalidraw/excalidraw>
-
-Copyright (c) 2020 Excalidraw
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 ## Inter
 
 Inter typeface by Rasmus Andersson (https://rsms.me/inter/), version 4.1, bundled as
@@ -65,20 +52,6 @@ Otto bundles Mermaid 11.16.0 (`Resources/DiagramRenderer/mermaid.min.js`):
 
 Copyright (c) 2014-2024 Knut Sveidqvist. Licensed under the MIT License (same terms as the
 SwiftTerm notice above).
-
-## Excalidraw fonts
-
-The Excalidraw build bundles these fonts under `Resources/Excalidraw/assets/fonts`, each under
-its own license:
-
-- Excalifont and Virgil: OFL 1.1, Excalidraw
-- Xiaolai: OFL 1.1, lxgw
-- Nunito: OFL 1.1, The Nunito Project Authors
-- Assistant: OFL 1.1, The Assistant Project Authors
-- Lilita One: OFL 1.1, Juan Montoreano
-- Comic Shanns: MIT, Shannon Miwa
-- Cascadia Code: OFL 1.1, Microsoft Corporation
-- Liberation: OFL 1.1, Red Hat
 
 ## Swift packages
 

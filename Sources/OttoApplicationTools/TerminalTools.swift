@@ -82,16 +82,29 @@ public struct TerminalOutput: Codable, Sendable, Equatable {
   public var state: AgentLifecycleState
   public var exitCode: Int32?
   public var boundedOutput: String
+  /// True when the command has gone quiet at a prompt and is waiting for the person to answer in
+  /// the terminal. Otto shows them a "Waiting for you" banner; tell them where to look.
+  public var waitingForUser: Bool?
+  /// The prompt line the command is waiting on, when `waitingForUser` is true.
+  public var prompt: String?
+  /// The terminal's title in Otto, set when it is started.
+  public var title: String?
+  /// Where the person finds this terminal in Otto, set when it is started.
+  public var whereToFindIt: String?
 }
 
 public struct TerminalOpenTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "terminal.open",
-    description: "Opens a supervised interactive local shell in a terminal node.",
+    description:
+      "Opens a supervised interactive local shell. Otto shows it in Chat: in the work panel on "
+      + "the right of the conversation that opened it (a tab titled \"Terminal\"), and under "
+      + "Terminals in Chat's sidebar. The person can click into it and type. Use terminal.run "
+      + "instead when you have a specific command to run.",
     inputSchema: .objectSchema(
       properties: [
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
         "shell": .stringSchema(description: "Optional absolute shell path; defaults to /bin/zsh"),
       ],
       required: ["x", "y"]
@@ -129,14 +142,22 @@ public struct TerminalRunTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "terminal.run",
     description:
-      "Starts a command in a Otto-supervised terminal and returns immediately. For long-running "
-      + "commands, retain terminalID and call terminal.wait instead of using a provider's own "
-      + "background shell feature.",
+      "Starts a command in an Otto-supervised terminal and returns immediately. Otto opens it in "
+      + "the work panel on the right of this chat, in a tab named after the command (the result's "
+      + "`title`, e.g. \"Setup script\"); it is also listed under Terminals in Chat's sidebar. "
+      + "Use it for interactive steps the person must do themselves (pressing a key, pasting a "
+      + "token or password, signing in): the person types straight into that terminal, and "
+      + "hidden input such as passwords is never shown to you. When a step needs them, tell them "
+      + "exactly where to look, e.g. \"click into the Setup script terminal in the panel on the "
+      + "right and follow the prompts\". Otto marks the terminal \"Waiting for you\" when it "
+      + "goes quiet at a prompt, and terminal.wait returns early with waitingForUser=true. "
+      + "For long-running commands, keep terminalID and call terminal.wait instead of using a "
+      + "provider's own background shell feature.",
     inputSchema: .objectSchema(
       properties: [
         "command": .stringSchema(description: "Shell command to run"),
-        "x": .numberSchema(description: "Canvas X position"),
-        "y": .numberSchema(description: "Canvas Y position"),
+        "x": .numberSchema(description: "Internal resource X position"),
+        "y": .numberSchema(description: "Internal resource Y position"),
         "shell": .stringSchema(description: "Optional absolute shell path; defaults to /bin/zsh"),
       ],
       required: ["command", "x", "y"]
@@ -171,7 +192,8 @@ public struct TerminalRunTool: OttoTool {
     )
     if context.source == .agent, let parentID = context.sourceNodeID {
       await supervisor.registerDelegatedChild(
-        parentID: parentID, childID: output.terminalID, name: input.command, kind: "command")
+        parentID: parentID, childID: output.terminalID, name: output.title ?? input.command,
+        kind: "command")
     }
     return output
   }
@@ -214,9 +236,11 @@ public struct TerminalWaitTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "terminal.wait",
     description:
-      "Waits without polling for a Otto-supervised terminal command to finish. Returns immediately "
-      + "when it is already finished, or returns its current state and bounded output when the "
-      + "timeout expires; call again while state is working.",
+      "Waits without polling for an Otto-supervised terminal command to finish. Returns "
+      + "immediately when it is already finished, early with waitingForUser=true when the command "
+      + "starts waiting for the person to answer a prompt in the terminal (tell them where it is "
+      + "and what to do, then wait again), or with its current state and bounded output when the "
+      + "timeout expires; call again while state is working or waiting_user.",
     inputSchema: .objectSchema(
       properties: [
         "terminalID": .stringSchema(description: "Stable terminal node UUID from terminal.run"),
@@ -248,23 +272,39 @@ public struct TerminalWaitTool: OttoTool {
 
     // Capture the sequence before reading state so a completion racing with the snapshot is
     // replayed by EventWaitTool instead of being lost between two independent operations.
-    let afterSequence = supervisor.eventBus.latestSequence
+    var afterSequence = supervisor.eventBus.latestSequence
     let initial = try await terminalOutput(id: input.terminalID, supervisor: supervisor)
+    // Already waiting on the person is not news: wait for it to move on (or to ask again) so an
+    // agent that waits in a loop does not spin while the person is still typing.
     if terminalHasFinished(initial) { return initial }
 
-    do {
-      _ = try await EventWaitTool(bus: supervisor.eventBus).call(
-        EventWaitInput(
-          types: [.agentRunCompleted, .agentRunFailed, .agentExited],
-          nodeID: input.terminalID,
-          afterSequence: afterSequence,
-          timeoutMilliseconds: timeout
-        ),
-        context: context
-      )
-    } catch EventWaitError.timedOut {
-      // A timeout is an observation point, not a failed command. Returning the current state lets
-      // every provider safely do other work or wait again without inventing a polling shell loop.
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .milliseconds(timeout))
+    while true {
+      let remaining = clock.now.duration(to: deadline)
+      let remainingMilliseconds =
+        Int(remaining.components.seconds * 1_000)
+        + Int(remaining.components.attoseconds / 1_000_000_000_000_000)
+      guard remainingMilliseconds >= 1 else { break }
+      do {
+        let event = try await EventWaitTool(bus: supervisor.eventBus).call(
+          EventWaitInput(
+            types: [.agentRunCompleted, .agentRunFailed, .agentExited, .agentStatusChanged],
+            nodeID: input.terminalID,
+            afterSequence: afterSequence,
+            timeoutMilliseconds: min(remainingMilliseconds, Self.maximumTimeoutMilliseconds)
+          ),
+          context: context
+        )
+        afterSequence = event.sequence
+        // A status change is only an answer when the command now needs the person; any other
+        // transition (back to working) keeps waiting for completion.
+        if event.type != .agentStatusChanged || event.state == .waitingUser { break }
+      } catch EventWaitError.timedOut {
+        // A timeout is an observation point, not a failed command. Returning the current state
+        // lets every provider safely do other work or wait again without a polling shell loop.
+        break
+      }
     }
     return try await terminalOutput(id: input.terminalID, supervisor: supervisor)
   }
@@ -337,8 +377,11 @@ private func launch(
 ) async throws -> TerminalOutput {
   let executable = try validatedShell(shell ?? "/bin/zsh")
   let canvasID = try await store.resolvedCanvasID(for: context)
+  // An agent's terminal belongs to its conversation, so Chat opens it in that work panel. It
+  // must not take the conversation's focus, which createNode guarantees for owned nodes.
+  let ownerAgentID = context.source == .agent ? context.sourceNodeID : nil
   let receipt = try await store.dispatch(
-    .createNode(kind: .terminal, at: point),
+    .createNode(kind: .terminal, at: point, parentAgentID: ownerAgentID),
     context: context
   )
   guard let nodeID = receipt.affectedNodeIDs.first else {
@@ -348,6 +391,14 @@ private func launch(
     .setNodeContent(id: nodeID, content: .terminal(shell: executable)),
     context: context
   )
+  let title =
+    command.map { TerminalInputWaitDetector.friendlyTitle(forCommand: $0) } ?? "Terminal"
+  if let command {
+    _ = try await store.dispatch(.renameNode(id: nodeID, name: title), context: context)
+    // The full command stays with the terminal so the person can copy and rerun it themselves.
+    _ = try await store.dispatch(
+      .setNodeSubtitle(id: nodeID, subtitle: command), context: context)
+  }
   do {
     _ = try await supervisor.spawnTerminal(
       shell: executable,
@@ -360,7 +411,14 @@ private func launch(
     _ = try? await store.dispatch(.closeNode(nodeID), context: context)
     throw error
   }
-  return try await terminalOutput(id: nodeID, supervisor: supervisor)
+  var output = try await terminalOutput(id: nodeID, supervisor: supervisor)
+  output.title = title
+  output.whereToFindIt =
+    ownerAgentID == nil
+    ? "Under Terminals in Otto Chat's sidebar, titled \"\(title)\"."
+    : "In the work panel on the right of this chat, in the tab titled \"\(title)\" (also under "
+      + "Terminals in Chat's sidebar). The person can click into it to type or paste."
+  return output
 }
 
 private func validatedShell(_ shell: String) throws -> String {
@@ -420,11 +478,16 @@ private func terminalIDSchema() -> JSONValue {
 
 private func terminalOutput(id: UUID, supervisor: AgentSupervisor) async throws -> TerminalOutput {
   let snapshot = try await supervisor.snapshot(agentID: id)
+  let waiting =
+    snapshot.state == .waitingUser
+    && TerminalInputWaitDetector.isTerminalAttentionToken(snapshot.attentionToken)
   return TerminalOutput(
     terminalID: id,
     state: snapshot.state,
     exitCode: snapshot.exitCode,
-    boundedOutput: TerminalOutputSearch.sanitizedExcerpt(snapshot.output)
+    boundedOutput: TerminalOutputSearch.sanitizedExcerpt(snapshot.output),
+    waitingForUser: waiting ? true : nil,
+    prompt: waiting ? snapshot.attentionReason : nil
   )
 }
 
