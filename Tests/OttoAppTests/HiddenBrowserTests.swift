@@ -57,7 +57,8 @@ struct HiddenBrowserTests {
         .usingColorSpace(.deviceRGB))
     #expect(pixel.redComponent > 0.7)
     #expect(pixel.greenComponent < 0.3)
-    let hasVisibleWindow = NSApplication.shared.windows.contains { $0.isVisible }
-    #expect(!hasVisibleWindow)
+    // Check the renderer pool's own windows: other suites (the slide presenter) run in parallel in
+    // this process and may legitimately have a window up at this instant.
+    #expect(!BrowserRendererPool.hasVisibleRendererWindow)
   }
 }
