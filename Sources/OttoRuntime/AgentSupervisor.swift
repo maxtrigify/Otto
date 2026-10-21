@@ -177,7 +177,7 @@ public actor AgentSupervisor {
   /// clarify) whose answer travels back through the process's stdin; a non-nil continuation
   /// parks the `agent.ask_user` tool call that carried it until the user answers.
   private struct PendingChoice {
-    let prompt: AgentChoicePrompt
+    var prompt: AgentChoicePrompt
     let continuation: CheckedContinuation<String, Never>?
     /// Set when the question came from a provider TUI rather than a tool call. The answer has to
     /// be delivered as cursor keys against the live menu, not written as a line of text.
@@ -1319,9 +1319,18 @@ public actor AgentSupervisor {
       return
     }
     if prompt.token == agent.activeInteractivePrompt, let menu = prompt.menu,
-      let index = pendingChoices[agent.snapshot.id]?.firstIndex(where: { $0.menu != nil })
+      let index = pendingChoices[agent.snapshot.id]?.firstIndex(where: { $0.menu != nil }),
+      var pending = pendingChoices[agent.snapshot.id]?[index]
     {
-      pendingChoices[agent.snapshot.id]?[index].menu = menu
+      pending.menu = menu
+      // A menu can arrive across several PTY reads. If the question was raised before every row
+      // had painted, offer the rows that arrived since rather than a truncated choice.
+      if menu.options.count > pending.prompt.choices.count {
+        let wasShown = agent.snapshot.pendingChoice == pending.prompt
+        pending.prompt.choices = menu.options
+        if wasShown { agent.snapshot.pendingChoice = pending.prompt }
+      }
+      pendingChoices[agent.snapshot.id]?[index] = pending
     }
     guard
       prompt.token != agent.activeInteractivePrompt

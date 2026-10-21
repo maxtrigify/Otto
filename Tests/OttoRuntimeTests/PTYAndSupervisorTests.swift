@@ -425,10 +425,16 @@ struct AgentSupervisorTests {
     )
 
     try await waitForState(.waitingUser, id: id, supervisor: supervisor)
-    let snapshot = try await supervisor.snapshot(agentID: id)
+    // The menu can arrive over several PTY reads; wait (bounded) until every row has painted.
+    let deadline = ContinuousClock.now + .seconds(10)
+    var snapshot = try await supervisor.snapshot(agentID: id)
+    while (snapshot.pendingChoice?.choices.count ?? 0) < 3, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(20))
+      snapshot = try await supervisor.snapshot(agentID: id)
+    }
     #expect(snapshot.attentionToken == "kimi-login-platform")
     let choice = try #require(snapshot.pendingChoice)
-    #expect(choice.choices.count == 3)
+    try #require(choice.choices.count == 3)
     #expect(choice.choices.first == "Kimi Code (OAuth)")
 
     // Answering the third option must reach the TUI as two downs and Enter. Typing the label
