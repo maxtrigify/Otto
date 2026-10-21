@@ -1540,6 +1540,15 @@ struct BotModeStoreTests {
         environment: ["NO_COLOR": "1"], workingDirectory: root.path), id: beckID)
     let beck = (agentID: beckID, displayName: "Beck")
     store.dispatch(.renameNode(id: beck.agentID, name: "Beck"))
+    let backgroundID = try #require(
+      store.dispatch(
+        .createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))
+      ).affectedNodeIDs.first)
+    store.dispatch(.setNodeStatus(id: backgroundID, status: .failed, detail: "Failed update"))
+    services.office.setSession(backgroundID, path: OfficeStore.cardRunKey(UUID()))
+    _ = store.dispatch(
+      .createNode(
+        kind: .agent, at: WorldPoint(x: 0, y: 0), parentAgentID: beckID))
     let listedSessions = try await services.registry.call(
       name: "session.list", input: .object([:]), context: voice
     ).decode(SessionListOutput.self)

@@ -88,6 +88,8 @@ struct OttoBrowserToolbar: View {
       guard addressFocusRequest > 0 else { return }
       await Task.yield()
       addressFocused = true
+      await Task.yield()
+      NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
     }
   }
 
@@ -98,6 +100,12 @@ struct OttoBrowserToolbar: View {
 
 enum OttoBrowserInputAction: Equatable {
   case newTab
+  case closeTab
+  case reopenTab
+  case focusAddress
+  case reload
+  case nextTab
+  case previousTab
   case back
   case forward
 }
@@ -108,7 +116,18 @@ enum OttoBrowserInputPolicy {
     modifiers: NSEvent.ModifierFlags
   ) -> OttoBrowserInputAction? {
     let significant = modifiers.intersection([.command, .option, .control, .shift])
-    return keyCode == 17 && significant == [.control] ? .newTab : nil
+    switch (keyCode, significant) {
+    case (17, [.command]), (17, [.control]): return .newTab
+    case (13, [.command]): return .closeTab
+    case (17, [.command, .shift]): return .reopenTab
+    case (37, [.command]): return .focusAddress
+    case (15, [.command]): return .reload
+    case (30, [.command, .shift]), (48, [.control]): return .nextTab
+    case (33, [.command, .shift]), (48, [.control, .shift]): return .previousTab
+    case (33, [.command]): return .back
+    case (30, [.command]): return .forward
+    default: return nil
+    }
   }
 
   static func mouseAction(buttonNumber: Int) -> OttoBrowserInputAction? {
@@ -124,9 +143,7 @@ enum OttoBrowserInputPolicy {
 /// additionally require the pointer to be inside this browser so another app surface is untouched.
 struct OttoBrowserInputMonitor: NSViewRepresentable {
   let isEnabled: Bool
-  let newTab: () -> Void
-  let goBack: () -> Void
-  let goForward: () -> Void
+  let perform: (OttoBrowserInputAction) -> Void
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -135,9 +152,7 @@ struct OttoBrowserInputMonitor: NSViewRepresentable {
     context.coordinator.update(
       view: view,
       isEnabled: isEnabled,
-      newTab: newTab,
-      goBack: goBack,
-      goForward: goForward
+      perform: perform
     )
     context.coordinator.install()
     return view
@@ -147,9 +162,7 @@ struct OttoBrowserInputMonitor: NSViewRepresentable {
     context.coordinator.update(
       view: view,
       isEnabled: isEnabled,
-      newTab: newTab,
-      goBack: goBack,
-      goForward: goForward
+      perform: perform
     )
   }
 
@@ -162,29 +175,25 @@ struct OttoBrowserInputMonitor: NSViewRepresentable {
     private weak var view: NSView?
     private var monitor: Any?
     private var isEnabled = false
-    private var newTab: (() -> Void)?
-    private var goBack: (() -> Void)?
-    private var goForward: (() -> Void)?
+    private var perform: ((OttoBrowserInputAction) -> Void)?
 
     func update(
       view: NSView,
       isEnabled: Bool,
-      newTab: @escaping () -> Void,
-      goBack: @escaping () -> Void,
-      goForward: @escaping () -> Void
+      perform: @escaping (OttoBrowserInputAction) -> Void
     ) {
       self.view = view
       self.isEnabled = isEnabled
-      self.newTab = newTab
-      self.goBack = goBack
-      self.goForward = goForward
+      self.perform = perform
     }
 
     func install() {
       guard monitor == nil else { return }
       monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) {
         [weak self] event in
-        guard let self, self.isEnabled else { return event }
+        guard let self, self.isEnabled, let window = self.view?.window,
+          event.window === window, window.isKeyWindow
+        else { return event }
         let action: OttoBrowserInputAction?
         if event.type == .keyDown {
           action = OttoBrowserInputPolicy.keyAction(
@@ -196,11 +205,7 @@ struct OttoBrowserInputMonitor: NSViewRepresentable {
           action = OttoBrowserInputPolicy.mouseAction(buttonNumber: event.buttonNumber)
         }
         guard let action else { return event }
-        switch action {
-        case .newTab: self.newTab?()
-        case .back: self.goBack?()
-        case .forward: self.goForward?()
-        }
+        self.perform?(action)
         return nil
       }
     }

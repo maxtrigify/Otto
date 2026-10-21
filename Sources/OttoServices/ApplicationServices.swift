@@ -1528,7 +1528,9 @@ public final class ApplicationServices: ObservableObject {
     let botNodeIDs = Set(botRoster().compactMap(\.nodeID))
     let sessions = store.snapshot.canvases.flatMap { canvas in
       canvas.nodes.compactMap { node -> SessionControlSummary? in
-        guard node.kind == .agent, !botNodeIDs.contains(node.id) else { return nil }
+        guard node.isStandaloneAgent, !botNodeIDs.contains(node.id),
+          !office.boundSessionIDs.contains(node.id)
+        else { return nil }
         if let profileID = node.agentDefinition?.profileID, profileIDs.contains(profileID) {
           return nil
         }

@@ -156,6 +156,25 @@ else
 fi
 git -C "$releases_checkout" push
 
+# --- 6. Mirror the source to the public repository and release it there too. ---------------
+# Only the private checkout has the sync script; public builds skip this step.
+public_repo=${OTTO_PUBLIC_REPO:-maxtrigify/Otto}
+sync_script="$repository_root/Server/scripts/sync-open-source"
+if [[ -x $sync_script ]]; then
+  if public_sha=$("$sync_script" HEAD | tail -1) && [[ -n $public_sha ]]; then
+    if gh release view "$tag" --repo "$public_repo" > /dev/null 2>&1; then
+      gh release upload "$tag" "$archive" "$dmg" --repo "$public_repo" --clobber
+    else
+      gh release create "$tag" "$archive" "$dmg" --repo "$public_repo" \
+        --target "$public_sha" --title "Otto $version" --notes "$notes"
+    fi
+    print "  public    https://github.com/$public_repo/releases/tag/$tag"
+  else
+    print -u2 "The release is published, but mirroring to $public_repo failed."
+    print -u2 "Rerun: $sync_script HEAD, then create the $tag release on $public_repo."
+  fi
+fi
+
 print "Published Otto $version (build $build_number)"
 print "  artifact  $artifact_url"
 print "  sha256    $sha256"

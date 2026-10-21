@@ -46,6 +46,46 @@ struct OttoRenameMigrationTests {
     #expect(read(legacy.appending(path: "workspace.sqlite")) == "sessions")
   }
 
+  @Test("A partially created Otto workspace recovers bindings and keeps new files")
+  func partiallyCreatedWorkspace() throws {
+    let root = try temporaryHome()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write("bindings", to: root.appending(path: ".muse/office.json"))
+    try write("old image", to: root.appending(path: ".muse/captures/old.png"))
+    try write("old log", to: root.appending(path: ".muse/brain/log/old.md"))
+    try write("legacy", to: root.appending(path: ".muse/brain/log/shared.md"))
+    try write("new", to: root.appending(path: ".otto/brain/log/shared.md"))
+    try write("image", to: root.appending(path: ".otto/chat-attachments/image.png"))
+    #expect(OttoWorkspaceMigration.migrateStateFolder(workspacePath: root.path) == .mergedMissing)
+    #expect(read(root.appending(path: ".otto/office.json")) == "bindings")
+    #expect(read(root.appending(path: ".otto/brain/log/old.md")) == "old log")
+    #expect(read(root.appending(path: ".otto/brain/log/shared.md")) == "new")
+    #expect(read(root.appending(path: ".otto/chat-attachments/image.png")) == "image")
+    #expect(read(root.appending(path: ".muse/office.json")) == "bindings")
+    #expect(read(root.appending(path: ".muse/captures/old.png")) == "old image")
+    #expect(read(root.appending(path: ".otto/captures/old.png")) == nil)
+    try FileManager.default.removeItem(at: root.appending(path: ".otto/office.json"))
+    #expect(OttoWorkspaceMigration.migrateStateFolder(workspacePath: root.path) == .alreadyMigrated)
+    #expect(read(root.appending(path: ".otto/office.json")) == nil)
+  }
+
+  @Test("Workspace import does not traverse legacy or current symlinks")
+  func workspaceImportSymlinks() throws {
+    let root = try temporaryHome()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write("outside", to: root.appending(path: "outside/keep"))
+    try write("legacy", to: root.appending(path: ".muse/nested/old"))
+    try FileManager.default.createDirectory(
+      at: root.appending(path: ".otto"), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(
+      at: root.appending(path: ".otto/nested"), withDestinationURL: root.appending(path: "outside"))
+    try FileManager.default.createSymbolicLink(
+      at: root.appending(path: ".muse/link"), withDestinationURL: root.appending(path: "outside"))
+    #expect(OttoWorkspaceMigration.migrateStateFolder(workspacePath: root.path) == .mergedMissing)
+    #expect(read(root.appending(path: "outside/old")) == nil)
+    #expect(!FileManager.default.fileExists(atPath: root.appending(path: ".otto/link").path))
+  }
+
   @Test("Both exist: nothing is touched")
   func bothExist() throws {
     let home = try temporaryHome()
@@ -248,7 +288,8 @@ struct OttoRenameMigrationTests {
     defer { try? FileManager.default.removeItem(at: workspace) }
     try write("old", to: workspace.appending(path: ".muse/a"))
     try write("new", to: workspace.appending(path: ".otto/a"))
-    #expect(OttoWorkspaceMigration.migrateStateFolder(workspacePath: workspace.path) == .bothExist)
+    #expect(
+      OttoWorkspaceMigration.migrateStateFolder(workspacePath: workspace.path) == .mergedMissing)
     #expect(read(workspace.appending(path: ".muse/a")) == "old")
     #expect(read(workspace.appending(path: ".otto/a")) == "new")
   }

@@ -141,9 +141,17 @@ struct BrowserChromeTests {
         to: URL(fileURLWithPath: directory).appendingPathComponent("chrome-\(theme.id).png"))
     }
 
-    for (name, text) in [("otto-new-tab-empty", ""), ("otto-new-tab-typed", "what is clay")] {
+    for (name, text) in [
+      ("otto-new-tab-empty", ""), ("otto-new-tab-typed", "what is clay"),
+      ("otto-new-tab-history", "linedin"),
+    ] {
+      let historyDefaults = UserDefaults(suiteName: "browser-chrome-snapshot")!
+      historyDefaults.removePersistentDomain(forName: "browser-chrome-snapshot")
+      let history = BrowserHistoryStore(defaults: historyDefaults)
+      history.record(url: "https://www.linkedin.com/feed/", title: "LinkedIn")
       let page = OttoStartSurface(
-        query: .constant(text), focusRequest: 0, navigate: { _ in }, askOtto: { _ in }
+        query: .constant(text), focusRequest: 0, navigate: { _ in }, askOtto: { _ in },
+        history: history
       )
       .environment(\.ottoPalette, OttoPalette(theme: OttoThemeCatalog.theme(id: "highfell")))
       .frame(width: 1100, height: 620)

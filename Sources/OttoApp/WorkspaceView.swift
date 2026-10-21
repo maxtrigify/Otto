@@ -17,6 +17,7 @@ extension Notification.Name {
 
 struct WorkspaceView: View {
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.openSettings) private var openSettings
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.ottoMotion) private var motion
   @State private var showingBoatCloud = false
@@ -39,7 +40,6 @@ struct WorkspaceView: View {
   @State private var showingAgentManager = false
   @State private var createsAgentAfterManagerDismiss = false
   @State private var agentProfileLaunchError: String?
-  @State private var widgetActionError: String?
   @State private var agentLaunchPoint = WorldPoint(x: 0, y: 0)
   @State private var showingMediaLauncher = false
   @State private var mediaLaunchPoint = WorldPoint(x: 0, y: 0)
@@ -146,11 +146,6 @@ struct WorkspaceView: View {
       Button("Dismiss", role: .cancel) { agentProfileLaunchError = nil }
     } message: {
       Text(agentProfileLaunchError ?? "Unknown custom-agent launch error")
-    }
-    .alert("Could not manage widget", isPresented: widgetActionErrorBinding) {
-      Button("Dismiss", role: .cancel) { widgetActionError = nil }
-    } message: {
-      Text(widgetActionError ?? "Unknown widget error")
     }
     .sheet(isPresented: $showingAgentLauncher) {
       AgentLaunchSheet(services: services, point: agentLaunchPoint)
@@ -375,6 +370,22 @@ struct WorkspaceView: View {
         symbol: "house", keywords: "home brief today dashboard",
         perform: { showingPersonalHome = true }),
       PaletteQuickAction(
+        id: "go.chat", title: "Chat", subtitle: "Your bots, teams and sessions",
+        symbol: "bubble.left.and.bubble.right", keywords: "chat conversations bots teams sessions",
+        perform: { openChatDestination(.conversation) }),
+      PaletteQuickAction(
+        id: "go.documents", title: "Documents", subtitle: "Documents, spreadsheets and presentations",
+        symbol: "doc.richtext", keywords: "documents spreadsheets presentations slides sheets",
+        perform: { openChatDestination(.documents) }),
+      PaletteQuickAction(
+        id: "go.dashboards", title: "Dashboards", subtitle: "Your dashboards and cards",
+        symbol: "chart.bar.xaxis", keywords: "dashboards cards charts metrics",
+        perform: { openChatDestination(.dashboards) }),
+      PaletteQuickAction(
+        id: "go.browser", title: "Browser", subtitle: "Your browser tabs",
+        symbol: "globe", keywords: "browser tabs web website internet",
+        perform: { openChatDestination(.browser) }),
+      PaletteQuickAction(
         id: "go.automations", title: "Automations", subtitle: "Tasks that run on a schedule",
         symbol: "clock", keywords: "automations routines schedule",
         perform: { openChatDestination(.routines) }),
@@ -382,6 +393,10 @@ struct WorkspaceView: View {
         id: "go.activity", title: "Activity", subtitle: "What your agents did and need",
         symbol: "tray", keywords: "activity inbox needs you",
         perform: { openChatDestination(.activity) }),
+      PaletteQuickAction(
+        id: "go.settings", title: "Settings", subtitle: "Connections, appearance and preferences",
+        symbol: "gearshape", keywords: "settings preferences accounts connections appearance",
+        perform: { openSettings() }),
       PaletteQuickAction(
         id: "go.files", title: "Files & notes", subtitle: "Notes and media",
         symbol: "doc.text", keywords: "files notes documents media",
@@ -393,6 +408,7 @@ struct WorkspaceView: View {
           id: "go.bot.\(entry.profile.id.uuidString)", title: entry.profile.name,
           subtitle: "Bot", symbol: "person.crop.circle",
           keywords: "bot chat \(entry.profile.name) \(entry.profile.role)", accent: .cyan,
+          searchOnly: true,
           perform: {
             showingPersonalHome = false
             agentLaunchPoint = nextPlacementPoint()
@@ -411,6 +427,7 @@ struct WorkspaceView: View {
           subtitle: "Session", symbol: "bubble.left",
           keywords: "session chat \(node.displayName)",
           agentProvider: node.declaredAgentProvider,
+          searchOnly: true,
           perform: { openHomeAgent(node.id) }))
     }
     return jumps
@@ -588,35 +605,13 @@ struct WorkspaceView: View {
     )
   }
 
-  private var widgetActionErrorBinding: Binding<Bool> {
-    Binding(
-      get: { widgetActionError != nil },
-      set: { if !$0 { widgetActionError = nil } }
-    )
-  }
-
-  /// Quick actions are the friendly face of Cmd+K: each one runs immediately with the same
-  /// defaults the toolbar flows use, no JSON required. The raw tool catalog stays below them.
+  /// Current app actions; legacy canvas creation lives outside the command menu.
   private var paletteQuickActions: [PaletteQuickAction] {
-    let profileActions = services.agentProfileList.map { profile in
-      PaletteQuickAction(
-        id: "agent.profile.\(profile.id.uuidString)",
-        title: profile.name,
-        subtitle: profile.role.isEmpty
-          ? "Custom agent · \(profile.provider.rawValue)"
-          : "\(profile.role) · \(profile.provider.rawValue)",
-        symbol: "person.crop.circle.badge.sparkles",
-        keywords: "custom saved agent profile \(profile.name) \(profile.role)",
-        accent: profile.provider == .codex ? .amber : .cyan,
-        agentProvider: profile.provider,
-        perform: { openAgentProfile(profile) }
-      )
-    }
-    var actions = [
+    let actions = [
       PaletteQuickAction(
         id: "agent.claude",
-        title: "New Claude Code agent",
-        subtitle: "Start a Claude chat agent here with your default permissions",
+        title: "New Claude Code session",
+        subtitle: "Start a new Claude Code conversation",
         symbol: "sparkles",
         keywords: "claude code agent ai chat launch spawn",
         accent: .cyan,
@@ -625,8 +620,8 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "agent.codex",
-        title: "New Codex agent",
-        subtitle: "Start a Codex chat agent here with your default permissions",
+        title: "New Codex session",
+        subtitle: "Start a new Codex conversation",
         symbol: "chevron.left.forwardslash.chevron.right",
         keywords: "codex openai agent ai chat launch spawn",
         accent: .amber,
@@ -635,7 +630,7 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "agent.hermes",
-        title: "New Hermes agent",
+        title: "New Hermes session",
         subtitle: "Use the Hermes connection configured in Agent settings",
         symbol: "wing",
         keywords: "hermes agent local remote gateway launch spawn",
@@ -645,8 +640,8 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "agent.kimi",
-        title: "New Kimi agent",
-        subtitle: "Start a Kimi Code chat agent here with your default permissions",
+        title: "New Kimi session",
+        subtitle: "Start a new Kimi Code conversation",
         symbol: "moon.stars",
         keywords: "kimi code moonshot agent ai chat launch spawn",
         agentProvider: .kimi,
@@ -654,8 +649,8 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "agent.cursor",
-        title: "New Cursor agent",
-        subtitle: "Start a Cursor CLI agent here with your default permissions",
+        title: "New Cursor session",
+        subtitle: "Start a new Cursor CLI conversation",
         symbol: "cursorarrow.rays",
         keywords: "cursor composer agent ai chat launch spawn grok",
         agentProvider: .cursor,
@@ -663,8 +658,8 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "agent.opencode",
-        title: "New OpenCode agent",
-        subtitle: "Start an OpenCode chat agent here with your default permissions",
+        title: "New OpenCode session",
+        subtitle: "Start a new OpenCode conversation",
         symbol: "chevron.right.square",
         keywords: "opencode open code sst agent ai chat launch spawn",
         agentProvider: .openCode,
@@ -672,8 +667,8 @@ struct WorkspaceView: View {
       ),
       PaletteQuickAction(
         id: "agent.grok",
-        title: "New Grok agent",
-        subtitle: "Start a Grok chat agent here with your default permissions",
+        title: "New Grok session",
+        subtitle: "Start a new Grok conversation",
         symbol: "bolt.fill",
         keywords: "grok xai x.ai agent ai chat launch spawn",
         agentProvider: .grok,
@@ -699,100 +694,6 @@ struct WorkspaceView: View {
         perform: { showingCreateTeam = true }
       ),
       PaletteQuickAction(
-        id: "agent.custom.create",
-        title: "Create custom agent…",
-        subtitle: "Save a named teammate with its own instructions and harness",
-        symbol: "person.crop.circle.badge.plus",
-        keywords: "custom agent profile persona instructions system prompt create",
-        perform: { createCustomAgent() }
-      ),
-      PaletteQuickAction(
-        id: "agent.custom.manage",
-        title: "Manage agents…",
-        subtitle: "Edit prompts, defaults, and your saved agent fleet",
-        symbol: "person.2.badge.gearshape",
-        keywords: "agents manage fleet edit delete duplicate system prompt profiles",
-        perform: { showingAgentManager = true }
-      ),
-      PaletteQuickAction(
-        id: "agent.options",
-        title: "Launch agent with options…",
-        subtitle: "Choose provider, name, prompt, directory, and permissions",
-        symbol: "slider.horizontal.3",
-        keywords: "agent launch configure options prompt workspace permissions",
-        perform: { createNode(.agent) }
-      ),
-      PaletteQuickAction(
-        id: "node.terminal",
-        title: "New terminal",
-        subtitle: "Open a local shell on the canvas",
-        symbol: "terminal",
-        keywords: "terminal shell console command line",
-        accent: .signal,
-        perform: { createNode(.terminal) }
-      ),
-      PaletteQuickAction(
-        id: "node.browser",
-        title: "New browser",
-        subtitle: "Open a web browser card",
-        symbol: "safari",
-        keywords: "browser web safari url internet",
-        accent: .cyan,
-        perform: { createNode(.browser) }
-      ),
-      PaletteQuickAction(
-        id: "node.widget",
-        title: "New custom widget",
-        subtitle: "Create a user-owned HTML widget package",
-        symbol: "square.stack.3d.up",
-        keywords: "widget custom code html dashboard visualization schedule",
-        accent: .signal,
-        perform: { createNode(.widget) }
-      ),
-      PaletteQuickAction(
-        id: "node.markdown",
-        title: "New note",
-        subtitle: "Create a markdown note",
-        symbol: "doc.text",
-        keywords: "note markdown document text write",
-        accent: .signal,
-        perform: { createNode(.markdown) }
-      ),
-      PaletteQuickAction(
-        id: "node.whiteboard",
-        title: "New whiteboard",
-        subtitle: "Sketch freely on a drawing card",
-        symbol: "pencil.and.scribble",
-        keywords: "whiteboard draw sketch scribble",
-        perform: { createNode(.whiteboard) }
-      ),
-      PaletteQuickAction(
-        id: "node.label",
-        title: "New label",
-        subtitle: "Drop a text label on the canvas",
-        symbol: "textformat",
-        keywords: "label text caption title",
-        perform: { createNode(.label) }
-      ),
-      PaletteQuickAction(
-        id: "node.media",
-        title: "Open media…",
-        subtitle: "Add audio or video to the canvas",
-        symbol: "waveform",
-        keywords: "media audio video sound play",
-        perform: { createNode(.media) }
-      ),
-      PaletteQuickAction(
-        id: "recording.toggle",
-        title: services.isRecordingCanvas ? "Stop recording" : "Record the canvas",
-        subtitle: services.isRecordingCanvas
-          ? "Finish the screen recording and drop the video on the canvas"
-          : "Screen-record the canvas window to an .mp4 in the workspace",
-        symbol: services.isRecordingCanvas ? "stop.circle.fill" : "record.circle",
-        keywords: "record recording video capture screen demo stop rec",
-        perform: { Task { await services.toggleCanvasRecording() } }
-      ),
-      PaletteQuickAction(
         id: "memory.inspector",
         title: "Memory inspector",
         subtitle: "Review proposals, budgets, and the Project Brain",
@@ -800,27 +701,8 @@ struct WorkspaceView: View {
         keywords: "memory brain inspector review proposals budget knowledge",
         perform: { uiState.showsMemoryInspector = true }
       ),
-      PaletteQuickAction(
-        id: "widget.manager",
-        title: "Manage widgets",
-        subtitle: "See every installed widget, open one, or delete it",
-        symbol: "square.stack.3d.up.badge.automatic",
-        keywords: "widget widgets manage manager list delete remove all",
-        perform: { uiState.showsWidgetManager = true }
-      ),
-      PaletteQuickAction(
-        id: "routine.manager",
-        title: "New automation",
-        subtitle: "Give an agent a task and a time",
-        symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-        keywords: "routine routines automation automations automate schedule webhook cron new",
-        perform: { openChatDestination(.routines) }
-      ),
     ]
-    actions.insert(contentsOf: profileActions, at: 0)
-    actions.insert(contentsOf: jumpActions, at: 0)
-    actions.append(contentsOf: widgetOpenActions)
-    return actions
+    return jumpActions + actions
   }
 
   private func openAgentProfile(_ profile: AgentProfile, forceNew: Bool = false) {
@@ -845,116 +727,6 @@ struct WorkspaceView: View {
     guard createsAgentAfterManagerDismiss else { return }
     createsAgentAfterManagerDismiss = false
     createCustomAgent()
-  }
-
-  /// Installed packages, not just currently visible canvas cards, are the source of truth. Closing
-  /// a card therefore leaves its widget searchable and gives the palette a way to restore it.
-  private struct PaletteWidget {
-    let packagePath: String
-    let name: String
-    let liveNodeID: UUID?
-    let liveCanvasID: UUID?
-    let liveCanvasName: String?
-  }
-
-  private var installedPaletteWidgets: [PaletteWidget] {
-    let liveEntries = store.snapshot.canvases.flatMap { canvas in
-      canvas.nodes.compactMap { node -> (String, UUID, UUID, String, String)? in
-        guard node.kind == .widget, case .widget(let path, _) = node.content, !path.isEmpty
-        else { return nil }
-        return (path, node.id, canvas.id, canvas.name, node.displayName)
-      }
-    }
-    let liveByPath = Dictionary(
-      liveEntries.map { ($0.0, $0) }, uniquingKeysWith: { first, _ in first })
-    let widgetsURL = URL(fileURLWithPath: services.documents.rootPath, isDirectory: true)
-      .appendingPathComponent("Widgets", isDirectory: true)
-    let packageURLs =
-      (try? FileManager.default.contentsOfDirectory(
-        at: widgetsURL, includingPropertiesForKeys: [.isDirectoryKey],
-        options: [.skipsHiddenFiles])) ?? []
-    var widgets = packageURLs.compactMap { url -> PaletteWidget? in
-      guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true,
-        let data = try? Data(contentsOf: url.appendingPathComponent("widget.json")),
-        let manifest = try? JSONDecoder().decode(WidgetManifest.self, from: data)
-      else { return nil }
-      let path = "Widgets/\(url.lastPathComponent)"
-      let live = liveByPath[path]
-      return PaletteWidget(
-        packagePath: path,
-        name: manifest.name,
-        liveNodeID: live?.1,
-        liveCanvasID: live?.2,
-        liveCanvasName: live?.3
-      )
-    }
-    let installedPaths = Set(widgets.map(\.packagePath))
-    widgets.append(
-      contentsOf: liveEntries.compactMap { live in
-        guard !installedPaths.contains(live.0) else { return nil }
-        return PaletteWidget(
-          packagePath: live.0, name: live.4, liveNodeID: live.1,
-          liveCanvasID: live.2, liveCanvasName: live.3)
-      })
-    return widgets.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-  }
-
-  /// Every installed widget gets an Open result. Visible widgets additionally get a Close result;
-  /// closed packages say so explicitly and are recreated on the active canvas when opened.
-  private var widgetOpenActions: [PaletteQuickAction] {
-    installedPaletteWidgets.flatMap { widget in
-      var actions = [
-        PaletteQuickAction(
-          id: "node.widget.open.\(widget.packagePath)",
-          title: "Open \(widget.name)",
-          subtitle: widget.liveCanvasName.map { "Widget · \($0)" }
-            ?? "Widget · Closed · opens on this canvas",
-          symbol: "square.stack.3d.up",
-          keywords:
-            "widget open find show restore \(widget.name) "
-            + "\(widget.liveCanvasName ?? "closed")",
-          accent: .signal,
-          perform: {
-            if let nodeID = widget.liveNodeID, let canvasID = widget.liveCanvasID {
-              openWidget(nodeID: nodeID, canvasID: canvasID)
-            } else {
-              runWidgetCommand("widget.open", name: widget.name)
-            }
-          }
-        )
-      ]
-      if widget.liveNodeID != nil {
-        actions.append(
-          PaletteQuickAction(
-            id: "node.widget.close.\(widget.packagePath)",
-            title: "Close \(widget.name)",
-            subtitle: "Hide its canvas card · keep the widget installed",
-            symbol: "xmark.square",
-            keywords: "widget close hide dismiss \(widget.name)",
-            accent: .amber,
-            perform: { runWidgetCommand("widget.close", name: widget.name) }
-          ))
-      }
-      return actions
-    }
-  }
-
-  private func openWidget(nodeID: UUID, canvasID: UUID) {
-    if store.snapshot.activeCanvasID != canvasID {
-      store.dispatch(.switchCanvas(canvasID))
-    }
-    store.dispatch(.focusNode(nodeID), targetCanvasID: canvasID)
-  }
-
-  private func runWidgetCommand(_ toolName: String, name: String) {
-    Task {
-      do {
-        _ = try await services.callUserTool(
-          name: toolName, input: .object(["name": .string(name)]))
-      } catch {
-        widgetActionError = error.localizedDescription
-      }
-    }
   }
 
   private func quickLaunchAgent(_ provider: AgentProvider) {

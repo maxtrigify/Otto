@@ -108,7 +108,7 @@ struct OttoBrowserTabStrip: View {
           }
           .buttonStyle(.ottoChrome)
           .foregroundStyle(palette.muted)
-          .help("New tab (⌃T)")
+          .help("New tab (⌘T)")
           .accessibilityLabel("New tab")
         }
         .padding(.vertical, 2)
@@ -149,6 +149,8 @@ struct OttoBrowserTabStrip: View {
       guard addressFocusRequest > 0 else { return }
       await Task.yield()
       addressFocused = true
+      await Task.yield()
+      NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
     }
   }
 
@@ -184,7 +186,7 @@ struct OttoBrowserTabStrip: View {
       }
       .buttonStyle(.ottoChrome(cornerRadius: 4))
       .foregroundStyle(palette.muted)
-      .help("Close tab")
+      .help("Close tab (⌘W)")
     }
     .padding(.leading, 10)
     .padding(.trailing, 6)
@@ -312,6 +314,8 @@ struct OttoBrowserCompactBar: View {
       guard addressFocusRequest > 0 else { return }
       await Task.yield()
       addressFocused = true
+      await Task.yield()
+      NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
     }
   }
 }

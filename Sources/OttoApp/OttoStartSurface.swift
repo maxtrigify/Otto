@@ -1,3 +1,4 @@
+import AppKit
 import OttoModels
 import SwiftUI
 
@@ -15,6 +16,9 @@ struct OttoStartSurface: View {
   /// Opens the Otto panel and sends the request there.
   let askOtto: (String) -> Void
 
+  @ObservedObject var history: BrowserHistoryStore = .shared
+  var bookmarks: [BrowserBookmark] = []
+
   @State private var highlighted = 0
   @State private var floating = false
   @State private var hop = false
@@ -23,10 +27,12 @@ struct OttoStartSurface: View {
     case ask
     case search
     case open(String)
+    case visit(BrowserSuggestion)
   }
 
   var body: some View {
-    let choices = Self.choices(for: query)
+    let choices = Self.choices(
+      for: query, suggestions: history.suggestions(for: query, bookmarks: bookmarks))
     ZStack {
       palette.ink
       RadialGradient(
@@ -90,6 +96,22 @@ struct OttoStartSurface: View {
               .font(.ottoDisplay(11))
               .foregroundStyle(palette.muted.opacity(0.8))
             Spacer(minLength: 8)
+            Menu {
+              Toggle("Save Browsing History", isOn: $history.isEnabled)
+              Button("Clear Browsing History", role: .destructive) { history.clear() }
+                .disabled(history.entries.isEmpty)
+              Divider()
+              Text("History stays on this Mac · up to 500 pages")
+            } label: {
+              Label("History", systemImage: "clock.arrow.circlepath")
+                .font(.ottoDisplay(11))
+            }
+            .menuStyle(.borderlessButton)
+            .foregroundStyle(palette.muted)
+            .tint(palette.muted)
+            .fixedSize()
+            .help("Browsing history")
+            .accessibilityLabel("Browsing history")
             Button {
               run(choices)
             } label: {
@@ -104,8 +126,8 @@ struct OttoStartSurface: View {
               .background(.white, in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(trimmed.isEmpty)
-            .opacity(trimmed.isEmpty ? 0.5 : 1)
+            .disabled(choices.isEmpty)
+            .opacity(choices.isEmpty ? 0.5 : 1)
           }
           .padding(.horizontal, 14)
           .padding(.bottom, 12)
@@ -133,10 +155,14 @@ struct OttoStartSurface: View {
         }
       }
     }
+    .onChange(of: history.entries) { _, _ in highlighted = 0 }
+    .onChange(of: history.isEnabled) { _, _ in highlighted = 0 }
     .task(id: focusRequest) {
       // A new tab button keeps keyboard focus; wait a turn so typing lands in the box.
       await Task.yield()
       focused = true
+      await Task.yield()
+      NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
     }
   }
 
@@ -153,7 +179,7 @@ struct OttoStartSurface: View {
         }
       }
       .frame(width: 16)
-      Text(trimmed).font(.ottoDisplay(13).weight(.semibold)).foregroundStyle(palette.paper)
+      Text(rowTitle(choice)).font(.ottoDisplay(13).weight(.semibold)).foregroundStyle(palette.paper)
         .lineLimit(1)
       Text("— \(label(for: choice))").font(.ottoDisplay(13)).foregroundStyle(palette.muted)
       Spacer(minLength: 8)
@@ -171,11 +197,17 @@ struct OttoStartSurface: View {
     .contentShape(Rectangle())
   }
 
+  private func rowTitle(_ choice: Choice) -> String {
+    if case .visit(let suggestion) = choice { return suggestion.title }
+    return trimmed
+  }
+
   private func icon(for choice: Choice) -> String {
     switch choice {
     case .ask: "bubble.left"
     case .search: "magnifyingglass"
     case .open: "globe"
+    case .visit(let suggestion): suggestion.isBookmark ? "star" : "clock"
     }
   }
 
@@ -184,6 +216,7 @@ struct OttoStartSurface: View {
     case .ask: "Ask Otto"
     case .search: "Google"
     case .open(let url): "Open \(URL(string: url)?.host ?? url)"
+    case .visit(let suggestion): URL(string: suggestion.url)?.host ?? suggestion.url
     }
   }
 
@@ -192,7 +225,7 @@ struct OttoStartSurface: View {
     switch choices[highlighted] {
     case .ask: return "Ask Otto"
     case .search: return "Search"
-    case .open: return "Open"
+    case .open, .visit: return "Open"
     }
   }
 
@@ -203,7 +236,6 @@ struct OttoStartSurface: View {
 
   private func perform(_ choice: Choice) {
     let text = trimmed
-    guard !text.isEmpty else { return }
     switch choice {
     case .ask:
       query = ""
@@ -212,6 +244,8 @@ struct OttoStartSurface: View {
       navigate(Self.searchURL(text))
     case .open(let url):
       navigate(url)
+    case .visit(let suggestion):
+      navigate(suggestion.url)
     }
   }
 
@@ -219,11 +253,21 @@ struct OttoStartSurface: View {
 
   /// Addresses open directly; questions and longer requests go to Otto; short keyword lookups
   /// search Google. Every option stays available underneath.
-  nonisolated static func choices(for text: String) -> [Choice] {
+  nonisolated static func choices(for text: String, suggestions: [BrowserSuggestion] = [])
+    -> [Choice]
+  {
     let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return [] }
-    if let url = address(from: text) { return [.open(url), .ask, .search] }
-    return isQuestion(text) ? [.ask, .search] : [.search, .ask]
+    let visits = suggestions.map { Choice.visit($0) }
+    guard !text.isEmpty else { return visits }
+    if let url = address(from: text) {
+      return [.open(url)]
+        + visits.filter {
+          if case .visit(let item) = $0 { return item.url != url }
+          return true
+        } + [.ask, .search]
+    }
+    if isQuestion(text) { return [.ask] + visits + [.search] }
+    return visits + [.search, .ask]
   }
 
   nonisolated static func address(from text: String) -> String? {

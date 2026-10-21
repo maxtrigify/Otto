@@ -4,8 +4,7 @@ import OttoServices
 import OttoTools
 import SwiftUI
 
-/// A one-keystroke way to do common canvas work. Quick actions run immediately with sensible
-/// defaults; the registered tool catalog stays available underneath as an advanced console.
+/// Navigation and everyday app actions. Raw tools require the explicit Developer filter.
 struct PaletteQuickAction: Identifiable {
   let id: String
   let title: String
@@ -14,6 +13,7 @@ struct PaletteQuickAction: Identifiable {
   let keywords: String
   var accent: PaletteAccent = .signal
   var agentProvider: AgentProvider? = nil
+  var searchOnly = false
   let perform: () -> Void
 }
 
@@ -32,18 +32,25 @@ enum PaletteAccent {
 }
 
 /// The palette's segmented filter chips. Categories follow the quick-action id namespaces.
-private enum PaletteFilter: String, CaseIterable {
+enum PaletteFilter: String, CaseIterable {
   case all = "All"
   case jump = "Jump to"
-  case agents = "Agents"
+  case agents = "Chat"
   case actions = "Actions"
+  case developer = "Developer"
 
-  func includes(_ action: PaletteQuickAction) -> Bool {
-    switch self {
+  var showsTools: Bool { self == .developer }
+
+  func includes(_ action: PaletteQuickAction, searching: Bool = true) -> Bool {
+    guard searching || !action.searchOnly else { return false }
+    return switch self {
     case .all: true
     case .jump: action.id.hasPrefix("go.")
-    case .agents: action.id.hasPrefix("agent.")
-    case .actions: !action.id.hasPrefix("go.") && !action.id.hasPrefix("agent.")
+    case .agents: action.id.hasPrefix("agent.") || action.id.hasPrefix("bot.")
+    case .actions:
+      !action.id.hasPrefix("go.") && !action.id.hasPrefix("agent.")
+        && !action.id.hasPrefix("bot.")
+    case .developer: false
     }
   }
 
@@ -109,7 +116,7 @@ struct CommandPaletteOverlay: View {
 
   private var matchingActions: [PaletteQuickAction] {
     let needle = trimmedQuery
-    let scoped = quickActions.filter { filter.includes($0) }
+    let scoped = quickActions.filter { filter.includes($0, searching: !needle.isEmpty) }
     guard !needle.isEmpty else { return scoped }
     return scoped.filter {
       $0.title.lowercased().contains(needle) || $0.subtitle.lowercased().contains(needle)
@@ -131,10 +138,9 @@ struct CommandPaletteOverlay: View {
     return rest.filter { $0.id.hasPrefix("go.") } + rest.filter { !$0.id.hasPrefix("go.") }
   }
 
-  // The advanced tool console only rides along with the unfiltered view — the category chips
-  // scope the friendly quick actions.
+  // Internal tools never appear in everyday navigation or search.
   private var matchingTools: [ToolDefinition] {
-    guard filter == .all else { return [] }
+    guard filter.showsTools else { return [] }
     return CommandPaletteCatalog.actions(from: definitions, matching: query)
   }
 
@@ -200,7 +206,7 @@ struct CommandPaletteOverlay: View {
             .font(.system(size: 13, weight: searchFocused ? .bold : .medium))
             .foregroundStyle(searchFocused ? palette.paper : palette.muted)
             .animation(motion.tint, value: searchFocused)
-          TextField("Search actions and commands", text: $query)
+          TextField(filter.showsTools ? "Search developer tools" : "Search Otto", text: $query)
             .textFieldStyle(.plain)
             .font(.ottoDisplay(16))
             .foregroundStyle(palette.paper)

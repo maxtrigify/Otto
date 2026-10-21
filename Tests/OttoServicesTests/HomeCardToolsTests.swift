@@ -243,6 +243,31 @@ struct HomeCardToolsTests {
     #expect(reloaded.cards(on: board.id).map(\.title) == ["Reddit", "LinkedIn", "Substack"])
   }
 
+  @Test("Legacy card bindings survive an Otto folder created before migration")
+  func legacyCardBindingsHideFailedSessions() throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = CanvasStore()
+    let nodeID = try #require(
+      store.dispatch(
+        .createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))
+      ).affectedNodeIDs.first)
+    store.dispatch(.setNodeStatus(id: nodeID, status: .failed, detail: "Failed update"))
+    let key = OfficeStore.cardRunKey(UUID())
+    let legacy = root.appending(path: ".muse")
+    try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(
+      at: root.appending(path: ".otto/chat-attachments"), withIntermediateDirectories: true)
+    try JSONSerialization.data(withJSONObject: [
+      "schemaVersion": 1, "suggestions": [], "sessions": [key: nodeID.uuidString],
+    ]).write(to: legacy.appending(path: "office.json"))
+
+    let services = ApplicationServices(store: store, workspacePath: root.path)
+    #expect(services.office.boundSessionIDs.contains(nodeID))
+    #expect(!services.controlSessionList().sessions.contains { $0.sessionID == nodeID })
+    #expect(store.activeCanvas.nodes.contains { $0.id == nodeID })
+  }
+
   @Test("A card's update is background work: out of Chat, gone once the card is updated")
   @MainActor func cardRunSessions() async throws {
     let root = root()

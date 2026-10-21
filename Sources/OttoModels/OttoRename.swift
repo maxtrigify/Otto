@@ -144,12 +144,16 @@ public enum OttoDirectoryMigration {
     case nothingToMigrate
     /// Both names hold real directories. Nothing is touched; Otto uses the new one.
     case bothExist
+    /// Missing workspace files were copied from the legacy folder without replacing current data.
+    case mergedMissing
     /// The legacy path is not a directory (a plain file, for instance). Left alone.
     case legacyNotDirectory
     case failed(String)
 
     /// Whether this run actually brought pre-rename data across.
-    public var migratedData: Bool { self == .moved || self == .repairedSymlink }
+    public var migratedData: Bool {
+      self == .moved || self == .repairedSymlink || self == .mergedMissing
+    }
   }
 
   @discardableResult
@@ -312,11 +316,76 @@ public enum OttoWorkspaceMigration {
     workspacePath: String, fileManager: FileManager = .default
   ) -> OttoDirectoryMigration.Outcome {
     let root = URL(fileURLWithPath: workspacePath, isDirectory: true)
-    return OttoDirectoryMigration.migrate(
-      legacy: root.appending(
-        path: OttoNames.legacyWorkspaceStateFolder, directoryHint: .isDirectory),
-      current: root.appending(path: OttoNames.workspaceStateFolder, directoryHint: .isDirectory),
-      fileManager: fileManager)
+    let legacy = root.appending(path: OttoNames.legacyWorkspaceStateFolder)
+    let current = root.appending(path: OttoNames.workspaceStateFolder)
+    let outcome = OttoDirectoryMigration.migrate(
+      legacy: legacy, current: current, fileManager: fileManager)
+    guard outcome == .bothExist else { return outcome }
+    guard
+      (try? fileManager.attributesOfItem(atPath: legacy.path)[.type]) as? FileAttributeType
+        == .typeDirectory,
+      (try? fileManager.attributesOfItem(atPath: current.path)[.type]) as? FileAttributeType
+        == .typeDirectory
+    else { return outcome }
+    // Chat attachments or a first new run can create .otto before migration. Recover missing
+    // state (including office's hidden-session bindings) without replacing newer Otto data.
+    // Run only once: later deletions must not resurrect old files from the preserved .muse copy.
+    let marker = current.appending(path: ".otto-legacy-files-imported")
+    guard !fileManager.fileExists(atPath: marker.path) else { return .alreadyMigrated }
+    do {
+      // Large generated assets retain their original .muse paths. Do not hydrate old
+      // cloud-backed screenshots or copy runtime sockets while recovering workspace state.
+      try copyMissingFiles(
+        from: legacy, to: current, fileManager: fileManager,
+        excluding: [
+          "captures", "chat-attachments", "bootstrap", "tmp", "snapshots",
+          "mobile-host", "mobile-host-dev",
+        ])
+      try Data("Imported missing legacy workspace files\n".utf8).write(to: marker, options: .atomic)
+      return .mergedMissing
+    } catch {
+      return .failed("could not import legacy workspace files: \(error.localizedDescription)")
+    }
+  }
+
+  private static func copyMissingFiles(
+    from source: URL, to destination: URL, fileManager: FileManager, excluding: Set<String> = []
+  ) throws {
+    // Never traverse symlinks: neither folder may redirect migration outside the workspace.
+    let sourceType =
+      try fileManager.attributesOfItem(atPath: source.path)[.type] as? FileAttributeType
+    let destinationType =
+      try fileManager.attributesOfItem(atPath: destination.path)[.type] as? FileAttributeType
+    guard sourceType == .typeDirectory, destinationType == .typeDirectory else { return }
+    for item in try fileManager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) {
+      guard !excluding.contains(item.lastPathComponent) else { continue }
+      let type = try fileManager.attributesOfItem(atPath: item.path)[.type] as? FileAttributeType
+      guard type == .typeDirectory || type == .typeRegular else { continue }
+      let target = destination.appending(path: item.lastPathComponent)
+      if (try? fileManager.attributesOfItem(atPath: target.path)) != nil {
+        if type == .typeDirectory {
+          try copyMissingFiles(from: item, to: target, fileManager: fileManager)
+        }
+      } else {
+        if type == .typeDirectory {
+          try fileManager.createDirectory(at: target, withIntermediateDirectories: false)
+          try copyMissingFiles(from: item, to: target, fileManager: fileManager)
+        } else {
+          #if canImport(Darwin)
+            // Foundation attempts APFS cloning, which can stall on file-provider captures.
+            // Copy bytes and metadata exclusively, never replacing a concurrently created file.
+            guard
+              copyfile(item.path, target.path, nil, copyfile_flags_t(COPYFILE_ALL | COPYFILE_EXCL))
+                == 0
+            else {
+              throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+          #else
+            try fileManager.copyItem(at: item, to: target)
+          #endif
+        }
+      }
+    }
   }
 
   @discardableResult

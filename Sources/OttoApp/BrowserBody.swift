@@ -22,6 +22,8 @@ struct BrowserBody: View {
   let updateBrowserSession: (BrowserSession) -> Void
   let updateBrowserTab: (UUID, String, String?) -> Void
   var chrome: BrowserChromeStyle = .canvas
+  @ObservedObject private var history = BrowserHistoryStore.shared
+  @State private var lastRecordedURL: String?
   @State private var state: BrowserRuntimeState?
   @State private var address = ""
   @State private var startQuery = ""
@@ -48,10 +50,8 @@ struct BrowserBody: View {
     chromeContent
       .background {
         OttoBrowserInputMonitor(
-          isEnabled: isSelected,
-          newTab: newTab,
-          goBack: goBack,
-          goForward: goForward
+          isEnabled: isSelected && windowIsActive,
+          perform: performBrowserShortcut
         )
       }
       .onChange(of: isDragging) { _, dragging in
@@ -110,6 +110,12 @@ struct BrowserBody: View {
           state = update
           address = displayedBrowserAddress(update.url)
           appendBrowserActivity(update.lastActivity)
+          if !update.isLoading, update.errorMessage == nil,
+            update.url != lastRecordedURL, update.url.hasPrefix("http")
+          {
+            history.record(url: update.url, title: update.title)
+            lastRecordedURL = update.url
+          }
           if isLocalBrowserURL(update.url), !agentRailVisible {
             withAnimation(.easeOut(duration: 0.18)) { agentRailVisible = true }
           }
@@ -351,7 +357,9 @@ struct BrowserBody: View {
               startQuery = ""
               navigate(url)
             },
-            askOtto: askOtto
+            askOtto: askOtto,
+            history: history,
+            bookmarks: bookmarks
           )
           .transition(.opacity)
         } else if showsBlankSurface {
@@ -488,6 +496,39 @@ struct BrowserBody: View {
     if isPlace { startFocusRequest += 1 } else { addressFocusRequest += 1 }
   }
 
+  private func performBrowserShortcut(_ action: OttoBrowserInputAction) {
+    switch action {
+    case .newTab: newTab()
+    case .closeTab: closeTab(sessionValue.activeTabID)
+    case .focusAddress:
+      if showsStartSurface || showsBlankSurface {
+        focusEmptyTab()
+      } else {
+        addressFocusRequest += 1
+      }
+    case .reload: Task { try? await runtime.refresh(nodeID: node.id) }
+    case .back: goBack()
+    case .forward: goForward()
+    case .nextTab, .previousTab:
+      let session = sessionValue
+      guard let index = session.tabs.firstIndex(where: { $0.id == session.activeTabID }),
+        !session.tabs.isEmpty
+      else { return }
+      let offset = action == .nextTab ? 1 : -1
+      selectTab(session.tabs[(index + offset + session.tabs.count) % session.tabs.count].id)
+    case .reopenTab:
+      guard let closed = BrowserClosedTabs.shared.pop(nodeID: node.id) else { return }
+      var session = sessionValue
+      let tab = BrowserTab(title: closed.title, url: closed.url)
+      session.tabs.append(tab)
+      session.activeTabID = tab.id
+      updateBrowserSession(session)
+      address = displayedBrowserAddress(tab.url)
+      updateContent(.browser(url: tab.url))
+      Task { try? await runtime.openTab(nodeID: node.id, url: tab.url, tabID: tab.id) }
+    }
+  }
+
   private func newTab() {
     var session = sessionValue
     let tab = BrowserTab()
@@ -521,7 +562,8 @@ struct BrowserBody: View {
     var session = sessionValue
     guard let index = session.tabs.firstIndex(where: { $0.id == id }) else { return }
     let wasActive = session.activeTabID == id
-    session.tabs.remove(at: index)
+    let closed = session.tabs.remove(at: index)
+    BrowserClosedTabs.shared.remember(closed, nodeID: node.id)
     if session.tabs.isEmpty {
       let replacement = BrowserTab()
       session.tabs = [replacement]
