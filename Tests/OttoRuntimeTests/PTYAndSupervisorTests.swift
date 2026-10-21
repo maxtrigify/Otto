@@ -365,6 +365,9 @@ struct AgentSupervisorTests {
     )
 
     try await waitForOutput("trust-confirmed", id: id, supervisor: supervisor)
+    // The output can land before the supervisor finishes clearing the trust prompt's attention
+    // state; on a loaded runner, wait for the settled state rather than sampling it once.
+    try await waitForState(.idle, id: id, supervisor: supervisor)
     let snapshot = try await supervisor.snapshot(agentID: id)
     #expect(snapshot.state == .idle)
     #expect(snapshot.attentionReason == nil)
