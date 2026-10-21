@@ -133,7 +133,8 @@ struct PTYTransportTests {
         ))
       defer { process.close() }
 
-      let deadline = ContinuousClock.now + .seconds(2)
+      // Polls until the transient pre-exec helper is gone; a loaded CI runner can take seconds.
+      let deadline = ContinuousClock.now + .seconds(10)
       var childCount: Int32 = -1
       while ContinuousClock.now < deadline {
         var childPIDs = [pid_t](repeating: 0, count: 8)
@@ -391,6 +392,25 @@ struct AgentSupervisorTests {
     try await supervisor.sendInput(agentID: id, text: "2")
     try await waitForOutput("choice:2", id: id, supervisor: supervisor)
     #expect(try await supervisor.snapshot(agentID: id).state == .working)
+    try await supervisor.stop(agentID: id)
+  }
+
+  @Test("A trust screen footer read after the automatic answer is not a new prompt")
+  func lateTrustFooterIsIgnored() async throws {
+    let supervisor = AgentSupervisor()
+    let id = try await supervisor.spawnInteractive(
+      adapter: SplitClaudeTrustPromptAdapter(),
+      request: AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        permissionMode: .workspaceWrite
+      )
+    )
+
+    try await waitForOutput("trust-confirmed", id: id, supervisor: supervisor)
+    try await Task.sleep(for: .milliseconds(300))
+    let snapshot = try await supervisor.snapshot(agentID: id)
+    #expect(snapshot.state == .idle)
+    #expect(snapshot.attentionReason == nil)
     try await supervisor.stop(agentID: id)
   }
 
@@ -825,6 +845,29 @@ private struct ClaudeTrustPromptAdapter: AgentAdapter {
       arguments: [
         "-c",
         "printf 'Security guide\\n1. Yes, I trust this folder\\n2. No, exit\\nEnter to confirm · Esc to cancel\\n'; IFS= read -r answer; printf 'trust-confirmed\\n'; sleep 5",
+      ],
+      workingDirectory: request.workspacePath
+    )
+  }
+}
+
+/// Reproduces a PTY read that ends before the trust screen's footer: the footer only reaches the
+/// supervisor together with the output that follows the automatic answer.
+private struct SplitClaudeTrustPromptAdapter: AgentAdapter {
+  let provider = AgentProvider.claudeCode
+
+  func detectInstallation() async -> InstallationStatus {
+    .installed(path: "/bin/sh", version: "fixture")
+  }
+
+  func availableModels() async -> [AgentModel] { [] }
+
+  func buildLaunchSpec(_ request: AgentLaunchRequest) async throws -> ProcessLaunchSpec {
+    ProcessLaunchSpec(
+      executable: "/bin/sh",
+      arguments: [
+        "-c",
+        "printf 'Security guide\\n1. Yes, I trust this folder\\n2. No, exit\\n'; IFS= read -r answer; printf 'Enter to confirm · Esc to cancel\\ntrust-confirmed\\n'; sleep 5",
       ],
       workingDirectory: request.workspacePath
     )

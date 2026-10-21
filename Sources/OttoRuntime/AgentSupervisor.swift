@@ -150,6 +150,9 @@ public actor AgentSupervisor {
     var promptScanBuffer: String
     var activeInteractivePrompt: String?
     var confirmedWorkspaceTrust: Bool
+    /// Set when workspace trust was answered before the trust screen's navigation footer was
+    /// read. That footer still arrives afterwards and must not be mistaken for a new prompt.
+    var trustFooterPending = false
     let scheduledWorker: Bool
     /// Where the process runs, kept for harvesting the provider's on-disk session records.
     let workingDirectory: String
@@ -1297,6 +1300,13 @@ public actor AgentSupervisor {
     let plainText = agent.promptTextFilter.ingest(text)
     guard !plainText.isEmpty else { return }
     agent.promptScanBuffer = String((agent.promptScanBuffer + plainText).suffix(4_096))
+    if agent.trustFooterPending,
+      let footer = Self.navigationFooterRange(in: agent.promptScanBuffer)
+    {
+      // Drop the tail of the already-answered trust screen, footer line included.
+      agent.trustFooterPending = false
+      agent.promptScanBuffer = String(agent.promptScanBuffer[footer.upperBound...])
+    }
     guard
       let prompt = InteractivePromptDetector.detect(
         in: agent.promptScanBuffer,
@@ -1343,6 +1353,8 @@ public actor AgentSupervisor {
       !agent.confirmedWorkspaceTrust
     {
       agent.confirmedWorkspaceTrust = true
+      // A PTY read can end before the screen's "Enter to confirm · Esc to cancel" line.
+      agent.trustFooterPending = Self.navigationFooterRange(in: agent.promptScanBuffer) == nil
       agent.promptScanBuffer = ""
       agent.activeInteractivePrompt = nil
       agent.snapshot.attentionReason = nil
@@ -1371,6 +1383,20 @@ public actor AgentSupervisor {
     }
 
     transition(&agent, to: prompt.state, confidence: 0.95)
+  }
+
+  /// The range from the start of `text` through the end of the first line carrying a TUI menu's
+  /// navigation footer ("Enter to confirm · Esc to cancel"), if one is present.
+  private static func navigationFooterRange(in text: String) -> Range<String.Index>? {
+    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+      let lowered = line.lowercased()
+      guard lowered.contains("enter to confirm") || lowered.contains("esc to cancel") else {
+        continue
+      }
+      let end = line.endIndex < text.endIndex ? text.index(after: line.endIndex) : line.endIndex
+      return text.startIndex..<end
+    }
+    return nil
   }
 
   private func scheduleInteractiveCompletionIfNeeded(agentID: UUID, rawChunk: String) {
