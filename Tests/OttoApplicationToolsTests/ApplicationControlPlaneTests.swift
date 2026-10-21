@@ -1095,7 +1095,8 @@ struct ApplicationControlPlaneTests {
       name: "terminal.run",
       input: try JSONValue.encode(
         TerminalRunInput(
-          command: "sleep 0.05; printf 'terminal-run-ok\\n'",
+          // Long enough to still be running at the 1 ms wait below, even on a loaded CI runner.
+          command: "sleep 1; printf 'terminal-run-ok\\n'",
           x: 20,
           y: 30,
           shell: "/bin/sh"
