@@ -13,7 +13,7 @@ final class OttoMobileAppUITests: XCTestCase {
     composer.tap()
     composer.typeText(message + "\n")
     let reply = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Received ‘\(message)’")).firstMatch
-    XCTAssertTrue(reply.waitForExistence(timeout: 15), "Keyboard Send must dispatch the message, not insert a newline")
+    XCTAssertTrue(reply.waitForExistence(timeout: 40), "Keyboard Send must dispatch the message, not insert a newline")
     XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", message)).count, 1)
     let screenshot = XCTAttachment(screenshot: app.screenshot())
     screenshot.name = "Keyboard send and streamed reply"
@@ -63,13 +63,11 @@ final class OttoMobileAppUITests: XCTestCase {
     composer.typeText(messageBody)
     app.buttons["Send message"].tap()
 
+    // A CI simulator can take several seconds per accessibility query, so allow a generous bound;
+    // the demo host keeps the run in flight for 15 seconds.
     let interrupt = app.buttons["Interrupt"]
-    let interruptDeadline = Date().addingTimeInterval(3)
-    while !interrupt.exists && Date() < interruptDeadline {
-      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-    }
     XCTAssertTrue(
-      interrupt.exists,
+      interrupt.waitForExistence(timeout: 12),
       "A foreground run should expose its exact interrupt control"
     )
     interrupt.tap()
@@ -77,7 +75,7 @@ final class OttoMobileAppUITests: XCTestCase {
     let streamedReply = app.staticTexts.containing(
       NSPredicate(format: "label CONTAINS %@", streamedReplyFragment)
     ).firstMatch
-    XCTAssertTrue(streamedReply.waitForExistence(timeout: 10), "The host reply should stream live")
+    XCTAssertTrue(streamedReply.waitForExistence(timeout: 40), "The host reply should stream live")
 
     app.terminate()
     app.launch()
@@ -250,7 +248,7 @@ final class OttoMobileAppUITests: XCTestCase {
       NSPredicate(format: "label CONTAINS %@", replyFragment)
     ).firstMatch
     XCTAssertTrue(
-      streamedReply.waitForExistence(timeout: 15),
+      streamedReply.waitForExistence(timeout: 40),
       "The canonical host reply should arrive through the managed relay"
     )
 
@@ -485,12 +483,13 @@ final class OttoMobileAppUITests: XCTestCase {
     composer.tap()
     composer.typeText("Background notification check (UUID().uuidString.prefix(8))")
     app.buttons["Send message"].tap()
-    XCTAssertTrue(app.buttons["Interrupt"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["Interrupt"].waitForExistence(timeout: 12))
 
     XCUIDevice.shared.press(.home)
     let completion = springboard.staticTexts["Ada finished"]
+    // The demo host keeps each run in flight for 15 seconds.
     XCTAssertTrue(
-      completion.waitForExistence(timeout: 10),
+      completion.waitForExistence(timeout: 40),
       "A streamed run completion should become a native notification while backgrounded"
     )
     let screenshot = XCTAttachment(screenshot: springboard.screenshot())
