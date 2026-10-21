@@ -735,6 +735,11 @@ internal enum BrowserRendererPool {
     }
   }
 
+  /// Whether any pooled renderer's parking window is on screen. Renderers must stay unshown.
+  static var hasVisibleRendererWindow: Bool {
+    entries.values.contains { $0.window.isVisible }
+  }
+
   static func prune(snapshot: WorkspaceSnapshot) {
     let validTabs = Set(
       snapshot.canvases.flatMap(\.nodes).flatMap {
