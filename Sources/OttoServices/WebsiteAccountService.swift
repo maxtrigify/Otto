@@ -569,7 +569,14 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
     }
     revision = nil
     webView.load(URLRequest(url: url))
-    for _ in 0..<200 {
+    #if DEBUG
+      // Test fixtures load many WebKit views in parallel; on a loaded CI runner starting the web
+      // content process alone can exceed the ten seconds allowed for a real site.
+      let attempts = fixtureURL == nil ? 200 : 600
+    #else
+      let attempts = 200
+    #endif
+    for _ in 0..<attempts {
       try await Task.sleep(for: .milliseconds(50))
       guard !closed else { throw WebsiteAccountError.denied }
       if webView.url != nil && !webView.isLoading {
