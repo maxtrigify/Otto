@@ -73,6 +73,7 @@ struct OttoBrowserToolbar: View {
       .overlay(RoundedRectangle(cornerRadius: 7 * scale).stroke(.white.opacity(0.055)))
       .layoutPriority(1)
 
+      BrowserPasswordsButton(tabID: state?.activeTabID)
       ChromeButton(
         symbol: captureStatus?.hasPrefix("Saved") == true ? "checkmark" : "camera",
         help: captureStatus ?? "Save screenshot", scale: scale, action: capture)

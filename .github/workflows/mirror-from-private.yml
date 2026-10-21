@@ -1,0 +1,54 @@
+# Keeps this public repository in step with the maintainer's private repository, where Otto is
+# developed alongside a few private hosted services. Every ten minutes it reads the private main
+# branch (read-only key) and, when something changed, commits the open-source part here.
+# Runs only in maxtrigify/Otto; forks and pull requests never receive these secrets.
+name: Mirror from private
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-from-private
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.repository == 'maxtrigify/Otto'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Load keys
+        env:
+          PRIVATE_READ_KEY: ${{ secrets.OTTO_PRIVATE_READ_KEY }}
+          PUBLIC_WRITE_KEY: ${{ secrets.OTTO_PUBLIC_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PRIVATE_READ_KEY" > ~/.ssh/private_read
+          printf '%s\n' "$PUBLIC_WRITE_KEY" > ~/.ssh/public_write
+          chmod 600 ~/.ssh/private_read ~/.ssh/public_write
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<'CFG'
+          Host github-private
+            HostName github.com
+            IdentityFile ~/.ssh/private_read
+            IdentitiesOnly yes
+          Host github-public
+            HostName github.com
+            IdentityFile ~/.ssh/public_write
+            IdentitiesOnly yes
+          CFG
+      - name: Read the private main branch
+        run: git clone --quiet --filter=blob:none git@github-private:maxtrigify/Muse.git private
+      - name: Mirror the open-source part
+        working-directory: private
+        env:
+          OTTO_PUBLIC_REMOTE: git@github-public:maxtrigify/Otto.git
+        run: Server/scripts/sync-open-source origin/main
+      - name: Forget the keys
+        if: always()
+        run: rm -f ~/.ssh/private_read ~/.ssh/public_write

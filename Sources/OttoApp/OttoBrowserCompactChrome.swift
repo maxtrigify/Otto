@@ -115,6 +115,7 @@ struct OttoBrowserTabStrip: View {
       }
 
       Spacer(minLength: 4)
+      BrowserPasswordsButton(tabID: session.activeTabID)
 
       Button(action: showImport) {
         Image(systemName: "square.and.arrow.down")
@@ -294,6 +295,7 @@ struct OttoBrowserCompactBar: View {
         RoundedRectangle(cornerRadius: 8)
           .strokeBorder(palette.paper.opacity(addressFocused ? 0.16 : 0.08)))
 
+      BrowserPasswordsButton(tabID: state?.activeTabID)
       if let openInBrowser {
         Button(action: openInBrowser) {
           Label("Open in Browser", systemImage: "arrow.up.forward.app")

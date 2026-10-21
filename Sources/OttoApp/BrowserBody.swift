@@ -740,6 +740,8 @@ internal enum BrowserRendererPool {
         forName: BrowserWebView.Coordinator.diagnosticMessageName)
       webView.configuration.userContentController.removeScriptMessageHandler(
         forName: BrowserWebView.Coordinator.selectionMessageName)
+      webView.configuration.userContentController.removeScriptMessageHandler(
+        forName: BrowserPasswordBridge.name, contentWorld: BrowserPasswordBridge.world)
       coordinator.unregisterHandlers()
       coordinator.closePopupWindows()
       window.close()
@@ -775,6 +777,13 @@ internal enum BrowserRendererPool {
       }
       throw BrowserRuntimeError.pageInspectionUnavailable(state.nodeID)
     }
+  }
+
+  static func passwordPage(tabID: UUID?) -> WKWebView? {
+    guard let tabID, let entry = entries[tabID], entry.mounted,
+      !entry.webView.isHidden, entry.webView.window?.isVisible == true
+    else { return nil }
+    return entry.webView
   }
 
   /// Whether any pooled renderer's parking window is on screen. Renderers must stay unshown.
@@ -881,7 +890,9 @@ private struct BrowserWebView: NSViewRepresentable {
         injectionTime: .atDocumentStart,
         forMainFrameOnly: true
       ))
+    let passwordBridge = BrowserPasswordBridge.install(in: configuration)
     let webView = WKWebView(frame: .zero, configuration: configuration)
+    passwordBridge.webView = webView
     webView.navigationDelegate = coordinator
     webView.uiDelegate = coordinator
     webView.allowsBackForwardNavigationGestures = true
@@ -1243,6 +1254,7 @@ private struct BrowserWebView: NSViewRepresentable {
       guard navigationAction.targetFrame == nil else { return nil }
 
       let popup = WKWebView(frame: .zero, configuration: configuration)
+      BrowserPasswordBridge.register(popup)
       popup.uiDelegate = self
 
       let width = windowFeatures.width?.doubleValue ?? 520
