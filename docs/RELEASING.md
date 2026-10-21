@@ -101,3 +101,16 @@ Remove the affected release from its channel, add its version to `blockedVersion
 ## Credential boundary
 
 Signing keys, notary credentials, update-manifest private keys, licence keys, and provider credentials are never committed. The application embeds only rotating public verification keys. Commercial telemetry must not contain prompts, terminal output, paths, file content, or voice transcripts.
+
+## Public mirror
+
+Otto is developed in a private repository together with a few hosted services. The
+public repository, github.com/maxtrigify/Otto, mirrors everything else.
+
+- **Every ten minutes**, the "Mirror from private" workflow in the public repository reads
+  the private main branch with a read-only deploy key. It commits whatever changed as a single
+  "Sync from private main" commit, which lists the private commit subjects it includes.
+- **Every release**, `scripts/publish-release.sh` mirrors the release commit straight away
+  and creates the matching GitHub release, with the DMG and zip, in the public repository.
+- **Contributions** arrive as pull requests on the public repository. After review they are
+  applied to the private repository, and the next mirror run carries them back.
