@@ -27,6 +27,28 @@ struct MessagingStoreTests {
     let code = try store.issuePairing()
     #expect(try store.accept(event("PAIR " + code)))
   }
+  @Test func savedStateCanBeReadBack() throws {
+    // macOS 27 refuses to read files saved with complete-unless-open protection, even by their writer.
+    let (_, url) = try fixture()
+    let data = try Data(contentsOf: url)
+    #expect(!data.isEmpty)
+    let reopened = try MessagingStore(url: url)
+    #expect(reopened.binding?.accountID == "account-a")
+  }
+
+  @Test func unreadableStateIsSetAsideNotDeleted() throws {
+    let (_, url) = try fixture()
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+    let reopened = try MessagingStore(url: url)
+    #expect(reopened.binding == nil)
+    let folder = url.deletingLastPathComponent()
+    let aside = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+      .filter { $0.hasPrefix("state.unreadable-") }
+    #expect(aside.count == 1)
+    // The fresh state was saved and is readable.
+    #expect(!(try Data(contentsOf: url)).isEmpty)
+  }
+
   @Test func validPairingIsSingleUseAndNeverPersistsToken() throws {
     let (store, url) = try fixture()
     defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
