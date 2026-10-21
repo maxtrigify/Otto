@@ -109,7 +109,6 @@ struct ChatWorkspaceView: View {
     get { navigation.destination }
     nonmutating set { navigation.destination = newValue }
   }
-  @State private var showingAppConnections = false
   @State private var showingAgentDetails = false
   @AppStorage("otto.workPanelWidth") private var preferredWorkPanelWidth = 0.0
   @State private var workPanelDragStart: Double?
@@ -458,16 +457,6 @@ struct ChatWorkspaceView: View {
         }
       }
     }
-    .sheet(isPresented: $showingAppConnections) {
-      MarketplaceView(
-        connections: services.appConnections, accounts: services.providerAccounts,
-        workspacePath: services.defaultWorkspacePath,
-        initialAccountID: selectedAgent.flatMap { services.effectiveAccountID(nodeID: $0.id) }
-          ?? services.providerAccounts.defaultAccountID,
-        onClose: { showingAppConnections = false }
-      )
-      .environment(\.ottoPalette, palette)
-    }
     .sheet(isPresented: $showingHire) {
       HireBotSheet(services: services, hired: selectHiredBot)
         .environment(\.ottoPalette, palette)
@@ -687,25 +676,6 @@ struct ChatWorkspaceView: View {
           .documents, symbol: "doc.richtext", count: services.office.files.count)
         destinationRow(
           .files, symbol: "doc.text", count: libraryItems(kinds: [.markdown, .media]).count)
-        // Connected apps sit with the other places so the footer stays Settings + status.
-        Button {
-          showingAppConnections = true
-        } label: {
-          HStack(spacing: 8) {
-            Image(systemName: "puzzlepiece.extension")
-              .font(.system(size: 13, weight: .regular))
-              .frame(width: 18)
-            Text("Marketplace").font(.ottoDisplay(13))
-            Spacer(minLength: 4)
-          }
-          .foregroundStyle(palette.paper.opacity(0.78))
-          .padding(.horizontal, 7)
-          .frame(height: 30)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Browse apps and connect through your provider")
-        .accessibilityIdentifier("apps.manage")
       }
     }
   }
@@ -4031,11 +4001,9 @@ struct ChatWorkspaceView: View {
     return VStack(alignment: .leading, spacing: 8) {
       Text("TOOLS").font(.ottoMono(7, weight: .black)).foregroundStyle(palette.muted)
       PluginLogoRow(plugins: extras.isEmpty ? plugins : extras, palette: palette, size: 28)
-      Text(pluginSummary(extrasCount: extras.count, provider: provider))
+      Text(pluginSummary(extrasCount: extras.count))
         .font(.ottoDisplay(12).weight(.semibold))
         .fixedSize(horizontal: false, vertical: true)
-      Button("Marketplace") { showingAppConnections = true }
-        .buttonStyle(.plain).foregroundStyle(palette.cyan)
       Text(HarnessPluginCatalog.addMoreHint(for: provider))
         .font(.ottoMono(8))
         .foregroundStyle(palette.muted)
@@ -4043,9 +4011,9 @@ struct ChatWorkspaceView: View {
     }
   }
 
-  private func pluginSummary(extrasCount: Int, provider: AgentProvider) -> String {
+  private func pluginSummary(extrasCount: Int) -> String {
     if extrasCount == 0 {
-      return "Browse Marketplace to connect apps through your provider."
+      return "Otto tools are included."
     }
     if extrasCount == 1 {
       return "1 app or plugin available, plus Otto tools."
@@ -4943,7 +4911,7 @@ struct HireBotSheet: View {
       PluginLogoRow(plugins: extras.isEmpty ? plugins : extras, palette: palette, size: 32)
       Text(
         extras.isEmpty
-          ? "Otto tools are included. Browse Marketplace to add apps."
+          ? "Otto tools are included."
           : "\(extras.count) additional integration\(extras.count == 1 ? "" : "s"), plus Otto tools."
       )
       .font(.ottoDisplay(13).weight(.semibold))

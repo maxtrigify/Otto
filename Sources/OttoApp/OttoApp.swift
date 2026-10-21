@@ -207,11 +207,6 @@ struct OttoApp: App {
           .tabItem { Label("Agents", systemImage: "sparkles") }
         ModelProviderSettingsView()
           .tabItem { Label("Models", systemImage: "cpu") }
-        MarketplaceView(
-          connections: services.appConnections, accounts: services.providerAccounts,
-          workspacePath: services.defaultWorkspacePath
-        )
-        .tabItem { Label("Marketplace", systemImage: "puzzlepiece.extension") }
         ProviderAccountsSettingsView(services: services)
           .tabItem { Label("Accounts", systemImage: "person.2.crop.square.stack") }
         SummarizerSettingsView()

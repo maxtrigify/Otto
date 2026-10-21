@@ -289,22 +289,6 @@ struct FirstRunWelcomeView: View {
           .padding(.horizontal, 4)
         }
       }
-      fieldLabel("YOUR APPS").padding(.top, 16)
-      HStack(spacing: 12) {
-        HStack(spacing: -4) {
-          ForEach(["gmail", "googlecalendar", "slack", "notion"], id: \.self) { asset in
-            appLogo(asset)
-          }
-        }
-        Text(
-          "Connect Gmail, Calendar, Slack and more from Marketplace whenever you're ready. You sign in through your browser, and Otto never asks you to paste a key."
-        )
-        .font(.ottoDisplay(12))
-        .foregroundStyle(palette.muted)
-        .fixedSize(horizontal: false, vertical: true)
-      }
-      .padding(12)
-      .background(palette.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
     }
   }
 
@@ -369,18 +353,6 @@ struct FirstRunWelcomeView: View {
     .padding(12)
     .background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(palette.paper.opacity(0.08)))
-  }
-
-  @ViewBuilder private func appLogo(_ asset: String) -> some View {
-    if let image = PluginLogoAssets.image(named: asset, kind: .mark) {
-      Image(nsImage: image)
-        .resizable()
-        .scaledToFit()
-        .padding(5)
-        .frame(width: 28, height: 28)
-        .background(Color.white, in: Circle())
-        .overlay(Circle().strokeBorder(palette.paper.opacity(0.1)))
-    }
   }
 
   private var firstAgentStep: some View {

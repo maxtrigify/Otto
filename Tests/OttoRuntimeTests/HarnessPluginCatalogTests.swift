@@ -125,10 +125,10 @@ struct HarnessPluginCatalogTests {
     try? FileManager.default.removeItem(at: root)
   }
 
-  @Test("App hints route people through Otto and preserve Hermes independence")
+  @Test("App hints route people to provider settings and preserve Hermes independence")
   func addMoreHints() {
     for provider in [AgentProvider.codex, .claudeCode, .cursor, .grok, .kimi, .openCode] {
-      #expect(HarnessPluginCatalog.addMoreHint(for: provider).contains("Marketplace in Otto"))
+      #expect(HarnessPluginCatalog.addMoreHint(for: provider).contains("provider’s own settings"))
     }
     #expect(HarnessPluginCatalog.addMoreHint(for: .hermes).contains("own app connections"))
   }

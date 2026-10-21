@@ -30,3 +30,11 @@ Reproduce Google/X with the updated build and trace the provider handoff without
 recording credentials, cookies, or OAuth payloads. The installed app was not
 replaced or restarted during this investigation because it hosts active work.
 Do not describe this issue as fixed until the real X flow signs in successfully.
+
+An opt-in troubleshooting build enables Web Inspector on the parent page and
+its popups. Launch with `--browser-diagnostics`, or set the diagnostic build's
+`OttoBrowserDiagnosticsEnabled` Info.plist flag. Neither is enabled in normal
+builds. The `io.openotto.desktop` / `BrowserSignIn` log category records only
+static popup lifecycle names and numeric error codes; it excludes URLs, page
+text, and authentication payloads. Do not export a raw inspector capture of an
+authentication flow.

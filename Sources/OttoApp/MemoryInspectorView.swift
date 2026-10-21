@@ -3,7 +3,7 @@ import OttoServices
 import SwiftUI
 
 /// Memory is automatic; the default view makes its recorded connections explorable.
-/// Curation remains an optional, explicit user action in Manage.
+/// Optional review and correction lives behind the secondary menu.
 struct MemoryInspectorView: View {
   @Environment(\.ottoPalette) private var palette
   @Environment(\.dismiss) private var dismiss
@@ -31,14 +31,18 @@ struct MemoryInspectorView: View {
             .font(.ottoDisplay(11)).foregroundStyle(palette.muted)
         }
         Spacer()
-        Picker("Memory view", selection: $showingManage) {
-          Text("Explore").tag(false)
-          Text("Manage").tag(true)
+        if showingManage {
+          Button { showingManage = false } label: {
+            Label("Back to graph", systemImage: "arrow.left")
+          }
         }
-        .pickerStyle(.segmented).labelsHidden().frame(width: 180)
+        Menu {
+          Button("Review and edit memories…") { showingManage = true }
+          Button("Refresh memory") { notice = nil; reload() }.disabled(loadingRecords)
+        } label: { Image(systemName: "ellipsis.circle") }
+        .menuStyle(.borderlessButton).fixedSize()
+        .accessibilityLabel("Memory options")
         if loadingRecords { ProgressView().controlSize(.small) }
-        Button { notice = nil; reload() } label: { Image(systemName: "arrow.clockwise") }
-          .disabled(loadingRecords).help("Refresh memory").accessibilityLabel("Refresh memory")
         Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
       }
       .padding(20)

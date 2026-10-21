@@ -892,6 +892,7 @@ private struct BrowserWebView: NSViewRepresentable {
       ))
     let passwordBridge = BrowserPasswordBridge.install(in: configuration)
     let webView = WKWebView(frame: .zero, configuration: configuration)
+    BrowserSignInDiagnostics.configure(webView)
     passwordBridge.webView = webView
     webView.navigationDelegate = coordinator
     webView.uiDelegate = coordinator

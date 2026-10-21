@@ -19,15 +19,8 @@ struct MemoryGraphView: View {
   @State private var neighborIndex: [String: Set<String>] = [:]
   @State private var positions: [String: MemoryGraphLayout.Point] = [:]
   @State private var selectedID: String?
-  @State private var hoveredID: String?
-  @State private var zoom: CGFloat = 1
-  @State private var pan = CGSize.zero
-  @State private var gesturePan = CGSize.zero
-  @State private var dragging = false
   @State private var worldBounds = CGRect(x: -100, y: -90, width: 200, height: 180)
-  @State private var dragOrigin: MemoryGraphLayout.Point?
-  @State private var draggedID: String?
-  @State private var magnificationStart: CGFloat?
+  @State private var cameraReset = UUID()
   @State private var loading = false
 
   private struct Request: Equatable, Sendable {
@@ -73,7 +66,9 @@ struct MemoryGraphView: View {
       Divider().overlay(palette.paper.opacity(0.07))
       HStack(spacing: 0) {
         ZStack(alignment: .bottomLeading) {
-          if listMode { nodeList } else { map }
+          map.opacity(listMode ? 0 : 1)
+            .allowsHitTesting(!listMode).disabled(listMode).accessibilityHidden(listMode)
+          if listMode { nodeList }
           if loading {
             ProgressView().controlSize(.small).padding(20)
           }
@@ -142,111 +137,15 @@ struct MemoryGraphView: View {
   }
 
   private var map: some View {
-    GeometryReader { geometry in
-      ZStack {
-        RadialGradient(colors: [palette.signal.opacity(0.065), palette.surface],
-          center: .center, startRadius: 0, endRadius: 450)
-        Canvas { context, size in
-          for x in stride(from: 16.0, to: size.width, by: 28) {
-            for y in stride(from: 16.0, to: size.height, by: 28) {
-              context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 1)),
-                with: .color(palette.paper.opacity(0.07)))
-            }
-          }
-          for edge in visibleEdges {
-            guard let from = positions[edge.from], let to = positions[edge.to] else { continue }
-            let a = screen(from, in: size), b = screen(to, in: size)
-            let active = edge.from == selectedID || edge.to == selectedID
-            var line = Path(); line.move(to: a); line.addLine(to: b)
-            context.stroke(line, with: .color(active ? palette.signal.opacity(0.72)
-              : palette.paper.opacity(selectedID == nil ? 0.055 : 0.025)),
-              style: StrokeStyle(lineWidth: active ? 1.4 : 0.7,
-                dash: edge.relationship == .supersedes ? [4, 4] : []))
-          }
-        }
-        .accessibilityHidden(true)
-        ForEach(visibleNodes) { node in
-          if let point = positions[node.id] {
-            graphNode(node)
-              .position(screen(point, in: geometry.size))
-          }
-        }
-        if graph.nodes.isEmpty && !loading {
-          ContentUnavailableView(
-            query.isEmpty ? "Your map starts here" : "No matching memories",
-            systemImage: "point.3.connected.trianglepath.dotted",
-            description: Text(query.isEmpty
-              ? "Connections appear as Otto saves memories with sources, entities and tags."
-              : "Try another search, layer, or include activity and history."))
-        }
-      }
-      .clipped().contentShape(Rectangle())
-      .simultaneousGesture(drag(in: geometry.size))
-      .simultaneousGesture(MagnificationGesture()
-        .onChanged { value in
-          if magnificationStart == nil { magnificationStart = zoom }
-          zoom = min(3.5, max(0.45, (magnificationStart ?? 1) * value))
-        }.onEnded { _ in magnificationStart = nil })
-      .overlay(alignment: .bottomTrailing) { mapControls.padding(16) }
-    }
-  }
-
-  private func graphNode(_ node: MemoryGraph.Node) -> some View {
-    let emphasized = selectedID == node.id || hoveredID == node.id
-    let related = selectedID == nil || selectedID == node.id || neighbors.contains(node.id)
-    let showLabel = emphasized || (related && (zoom > 2 || visibleNodes.count < 22
-      || (selectedID != nil && neighbors.count < 15) || node.kind == .layer
-      || (node.kind == .topic && connectionCount(node.id) >= 4)))
-    let diameter: CGFloat = node.kind == .layer ? 18 : (node.kind == .memory ? 10 : 8)
-    return Button { select(node.id) } label: {
-      ZStack {
-        Circle().fill(color(node.kind).opacity(emphasized ? 0.14 : 0))
-          .frame(width: 34, height: 34)
-        Circle().fill(node.confidence == nil || node.confidence == .confirmed
-          ? color(node.kind) : palette.surface)
-          .frame(width: diameter, height: diameter)
-          .overlay(Circle().strokeBorder(color(node.kind), lineWidth: 1.5))
-          .shadow(color: color(node.kind).opacity(emphasized ? 0.6 : 0.2), radius: emphasized ? 9 : 3)
-      }
-      .frame(width: 26, height: 26)
-      .overlay(alignment: .top) {
-        if showLabel {
-          Text(shortTitle(node)).font(.ottoDisplay(emphasized ? 12 : 10).weight(emphasized ? .semibold : .regular))
-            .lineLimit(1).truncationMode(.middle)
-            .frame(width: emphasized ? 190 : 120).foregroundStyle(palette.paper.opacity(emphasized ? 1 : 0.7))
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(palette.surface.opacity(emphasized ? 0.95 : 0.15), in: Capsule())
-            .offset(y: 25).allowsHitTesting(false)
-        }
-      }
-      .opacity(related ? 1 : 0.22)
-    }
-    .buttonStyle(.plain)
-    .accessibilityLabel("\(node.kind.rawValue.capitalized): \(node.title)")
-    .accessibilityValue(node.confidence?.rawValue ?? "Recorded relationship")
-    .help(node.title)
-    .onHover { hoveredID = $0 ? node.id : nil }
-  }
-
-  private var mapControls: some View {
-    HStack(spacing: 12) {
-      Button { neighborhoodOnly.toggle(); resetCamera() } label: {
-        Image(systemName: neighborhoodOnly ? "scope" : "circle.dotted.circle")
-      }
-      .disabled(selectedID == nil).help("Focus the selected node and its connections")
-      .accessibilityLabel("Focus connections")
-      Divider().frame(height: 14)
-      Button { zoom = max(0.45, zoom / 1.25) } label: { Image(systemName: "minus") }
-        .accessibilityLabel("Zoom out")
-      Text("\(Int(zoom * 100))%").font(.ottoMono(9)).frame(width: 35)
-      Button { zoom = min(3.5, zoom * 1.25) } label: { Image(systemName: "plus") }
-        .accessibilityLabel("Zoom in")
-      Button { resetCamera() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-        .help("Fit graph").accessibilityLabel("Fit memory graph")
-    }
-    .buttonStyle(.plain).foregroundStyle(palette.paper)
-    .padding(11).background(palette.raised.opacity(0.94), in: Capsule())
-    .overlay(Capsule().strokeBorder(palette.paper.opacity(0.08)))
+    MemoryGraphSurface(nodes: visibleNodes, edges: visibleEdges, positions: $positions,
+      selectedID: selectedID, neighbors: neighbors, neighborIndex: neighborIndex,
+      bounds: worldBounds, resetID: cameraReset, neighborhoodOnly: neighborhoodOnly,
+      emptyTitle: query.isEmpty ? "Your map starts here" : "No matching memories",
+      emptyDescription: query.isEmpty
+        ? "Connections appear as Otto saves memories with sources, entities and tags."
+        : "Try another search, layer, or include activity and history.",
+      loading: loading, select: select,
+      focus: { neighborhoodOnly.toggle(); resetCamera() }, fit: resetCamera)
   }
 
   private var nodeList: some View {
@@ -317,7 +216,7 @@ struct MemoryGraphView: View {
             .font(.system(size: 32, weight: .ultraLight)).foregroundStyle(palette.signal)
             .padding(.top, 12)
           Text("Follow a thought.").font(.ottoDisplay(25).weight(.semibold))
-          Text("Select a dot to explore its memory, source and connections. Drag dots to rearrange; drag the background to move around.")
+          Text("Select a dot to explore its memory, source and connections. Two-finger scroll or drag the background to move. Pinch to zoom; use the mouse wheel or ⌘-scroll to zoom at the pointer. Drag dots to rearrange.")
             .font(.ottoDisplay(12)).lineSpacing(4).foregroundStyle(palette.muted)
           Divider()
           Text("MOST CONNECTED").font(.ottoMono(9, weight: .bold)).foregroundStyle(palette.muted)
@@ -461,13 +360,8 @@ struct MemoryGraphView: View {
   }
 
   private func resetCamera() {
-    withAnimation(motion.enter(.moderate)) {
-      worldBounds = calculateBounds(); zoom = 1; pan = .zero
-    }
-  }
-
-  private var bounds: CGRect {
-    return worldBounds
+    worldBounds = calculateBounds()
+    cameraReset = UUID()
   }
 
   private func calculateBounds() -> CGRect {
@@ -477,44 +371,6 @@ struct MemoryGraphView: View {
     let width = max(200, maxX - minX), height = max(180, maxY - minY)
     return CGRect(x: (minX + maxX - width) / 2, y: (minY + maxY - height) / 2,
       width: width, height: height)
-  }
-
-  private func scale(in size: CGSize) -> CGFloat {
-    min((size.width - 110) / bounds.width, (size.height - 90) / bounds.height) * zoom
-  }
-
-  private func screen(_ point: MemoryGraphLayout.Point, in size: CGSize) -> CGPoint {
-    let factor = scale(in: size)
-    return CGPoint(x: size.width / 2 + (point.x - bounds.midX) * factor + pan.width,
-      y: size.height / 2 + (point.y - bounds.midY) * factor + pan.height)
-  }
-
-  private func drag(in size: CGSize) -> some Gesture {
-    DragGesture(minimumDistance: 3)
-      .onChanged { value in
-        if !dragging {
-          dragging = true
-          let hit = visibleNodes.first { node in
-            guard let point = positions[node.id] else { return false }
-            let p = screen(point, in: size)
-            return hypot(p.x - value.startLocation.x, p.y - value.startLocation.y) < 16
-          }
-          draggedID = hit?.id
-          dragOrigin = hit.flatMap { positions[$0.id] }
-          gesturePan = pan
-        }
-        if let id = draggedID, let origin = dragOrigin {
-          let factor = max(0.01, scale(in: size))
-          positions[id] = .init(x: origin.x + value.translation.width / factor,
-            y: origin.y + value.translation.height / factor)
-        } else {
-          pan = CGSize(width: gesturePan.width + value.translation.width,
-            height: gesturePan.height + value.translation.height)
-        }
-      }
-      .onEnded { _ in
-        draggedID = nil; dragOrigin = nil; gesturePan = .zero; dragging = false
-      }
   }
 
   @MainActor private func rebuild(_ request: Request) async {
@@ -533,6 +389,6 @@ struct MemoryGraphView: View {
       selectedID = nil; neighborhoodOnly = false
     }
     worldBounds = calculateBounds()
-    pan = .zero; zoom = 1; loading = false
+    cameraReset = UUID(); loading = false
   }
 }

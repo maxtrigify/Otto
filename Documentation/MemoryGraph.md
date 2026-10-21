@@ -1,7 +1,8 @@
 # Memory explorer
 
-Memory opens in Explore: a local, interactive graph of the existing memory stores.
-Manage retains budget meters, review queues and explicit curation controls.
+Memory opens directly into a local, interactive graph of the existing memory stores.
+The Memory options (ellipsis) menu holds optional review/edit controls and refresh.
+There is no Manage tab: memory continues to operate automatically.
 
 ## Recorded relationships
 
@@ -21,9 +22,12 @@ The graph is displayed to the local user inside the inspector; it is not an agen
 
 - Search, choose a memory layer, toggle relationship types, or include activity/history in Filters.
 - Select a dot or a row in List to read the memory and follow typed connections.
-- Drag dots to rearrange them; drag the background to pan; pinch or use +/- to zoom.
+- Two-finger scroll or drag the background to pan, including trackpad momentum.
+- Pinch, mouse-wheel, or Command/Control-scroll zooms around the pointer (20–800%).
+- The +/- controls zoom around the viewport center. Drag dots to rearrange them.
 - Focus connections isolates the selection and its immediate neighbors; Fit resets the view.
-- Switching to Manage and back preserves your search, selection, filters and camera position.
+- Opening Review and edit memories from the options menu and returning with Back to graph
+  preserves your search, selection, filters and camera position. Curation remains explicit.
 - Solid memory dots are confirmed; hollow dots remain unconfirmed. History shows status badges.
 
 The default projection samples up to 100 matching memories and 320 total nodes. Counts and a
@@ -33,3 +37,7 @@ Layout is deterministic, computed off the UI thread, and never changes persisted
 
 The native SwiftUI drawing API is used for graph lines; this does not restore the retired
 spatial workspace, widgets, layout tools or any obsolete canvas product APIs.
+
+Camera input is isolated from graph projection and inspector details. Local macOS event
+monitoring is scoped to the active graph bounds and disabled during curation; the details
+pane keeps normal scrolling. Camera updates do not re-filter the graph per node or per frame.

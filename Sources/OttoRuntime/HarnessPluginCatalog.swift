@@ -57,7 +57,7 @@ public enum HarnessPluginCatalog {
     if provider == .hermes {
       return "Hermes manages its own app connections."
     }
-    return "Browse Marketplace in Otto to connect apps through your provider."
+    return "Manage additional apps and MCP servers in your provider’s own settings."
   }
 
   /// Resolve a display name back to a configured server identity, never a shell command.
