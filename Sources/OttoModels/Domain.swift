@@ -298,7 +298,6 @@ public enum ChatSurfaceDestination: String, Codable, CaseIterable, Identifiable,
   case dashboards = "Dashboards"
   case documents = "Documents"
   case browser = "Browser"
-  case terminals = "Terminals"
 
   /// A place added by a newer Otto (or Otto Dev) falls back to the conversation. Failing here
   /// fails the whole workspace snapshot, which used to let the next save wipe every session.

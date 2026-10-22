@@ -481,6 +481,10 @@ final class OttoBuddyController: NSObject {
     if case .napping = behaviour { return false }
     return true
   }
+  func replacesCompletionBanners(for services: ApplicationServices) -> Bool {
+    self.services === services && replacesCompletionBanners
+  }
+
   private var isEngaged: Bool {
     model.menuOpen || (model.bubble.map { !$0.isTransient } ?? false)
   }
@@ -488,7 +492,8 @@ final class OttoBuddyController: NSObject {
   // MARK: Lifecycle
 
   func start(services: ApplicationServices, store: CanvasStore) {
-    guard self.services == nil else { return }
+    guard self.services !== services else { return }
+    eventTask?.cancel()
     self.services = services
     self.store = store
     let bus = services.supervisor.eventBus
@@ -499,6 +504,7 @@ final class OttoBuddyController: NSObject {
         await self.consume(event)
       }
     }
+    guard observers.isEmpty else { return }
     observers.append(
       NotificationCenter.default.addObserver(
         forName: UserDefaults.didChangeNotification, object: nil, queue: .main

@@ -10,10 +10,11 @@ import SwiftUI
 @main
 struct OttoApp: App {
   @NSApplicationDelegateAdaptor(OttoApplicationDelegate.self) private var applicationDelegate
-  @StateObject private var store: CanvasStore
-  @StateObject private var services: ApplicationServices
-  @StateObject private var voice: VoiceController
-  @StateObject private var uiState = WorkspaceUIState()
+  @StateObject private var spaces: OttoSpaceController
+  private var store: CanvasStore { spaces.active.store }
+  private var services: ApplicationServices { spaces.active.services }
+  private var voice: VoiceController { spaces.active.voice }
+  private var uiState: WorkspaceUIState { spaces.active.uiState }
   @StateObject private var updates = AppUpdateController()
   @AppStorage(OttoBuddyPreferences.enabledKey) private var buddyEnabled = false
 
@@ -108,7 +109,6 @@ struct OttoApp: App {
       // what every actor actually did (names and outcomes only, never payloads).
       Task { try? await registry.register(AuditRecentTool(store: database)) }
     }
-    _store = StateObject(wrappedValue: store)
     let services = ApplicationServices(
       store: store,
       registry: registry,
@@ -120,15 +120,17 @@ struct OttoApp: App {
     #if DEBUG
       if MessagingPreview.enabled { MessagingPreview.configure(services, root: previewRoot) }
     #endif
-    _services = StateObject(wrappedValue: services)
-    _voice = StateObject(
-      wrappedValue: VoiceController(
-        registry: registry,
-        store: store,
-        services: services,
-        observability: observability,
-        workspacePath: workspacePath
-      ))
+    let voice = VoiceController(
+      registry: registry,
+      store: store,
+      services: services,
+      observability: observability,
+      workspacePath: workspacePath
+    )
+    _spaces = StateObject(
+      wrappedValue: OttoSpaceController(
+        initial: OttoSpaceRuntime(store: store, services: services, voice: voice),
+        registry: profileRegistry, observability: observability))
   }
 
   var body: some Scene {
@@ -145,10 +147,10 @@ struct OttoApp: App {
           MessagingPreviewView(services: services, store: store)
             .environmentObject(services.messageQueue)
         } else {
-          mainWorkspace.environmentObject(services.messageQueue)
+          mainWorkspace
         }
       #else
-        mainWorkspace.environmentObject(services.messageQueue)
+        mainWorkspace
       #endif
     } defaultValue: {
       "primary"
@@ -232,24 +234,14 @@ struct OttoApp: App {
     }
   }
 
-  private var providerAccountContext: ProviderAccountUIContext {
-    ProviderAccountUIContext.shared(for: services)
-  }
-
   private var mainWorkspace: some View {
-    WorkspaceView(store: store, services: services, voice: voice, uiState: uiState)
-      .environment(\.providerAccounts, providerAccountContext)
+    SpaceWorkspaceStack(spaces: spaces)
       .frame(minWidth: 1100, minHeight: 720)
       .onAppear {
-        applicationDelegate.configure(services: services)
-        Task {
-          await BrowserRendererPool.configure(store: store, runtime: services.browserRuntime)
-        }
+        applicationDelegate.configure(spaces: spaces)
+        spaces.startActive()
         DevelopmentAutoReloader.startIfNeeded()
         updates.startAutomaticChecks()
-      }
-      .onReceive(store.$snapshot) { snapshot in
-        BrowserRendererPool.prune(snapshot: snapshot)
       }
       .onReceive(
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
@@ -259,28 +251,14 @@ struct OttoApp: App {
       .sheet(isPresented: $updates.isPresentingUpdateSheet) {
         AppUpdateSheet(controller: updates)
       }
-      .task {
-        await store.restore()
-        ProviderModelCatalogStore.shared.configure(
-          accounts: services.providerAccounts, projects: services.conversationProjects)
-        CompletionNotifications.shared.start(services: services, store: store)
-        OttoBuddyController.shared.start(services: services, store: store)
-        await services.start()
-        services.websiteAccounts.onOpenLogin = { id in
-          PrivateWebsiteLoginWindows.shared.open(id, service: services.websiteAccounts)
-        }
-        services.messaging.start()
-        // Only now are the workspace tools registered; the voice session projects them once at
-        // connect, so the mode's persistent connection must not start any earlier.
-        await voice.activateOperatingMode()
-      }
-      .onReceive(
-        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
-      ) { _ in
-        services.markCleanTermination()
-        Task { await store.flushPersistence() }
-      }
+      .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification))
+    {
+      _ in
+      for runtime in spaces.opened { runtime.services.markCleanTermination() }
+      Task { await spaces.flushPersistence() }
+    }
   }
+
 }
 
 private func observabilityDirectory() -> URL {
@@ -328,10 +306,10 @@ private func normalizedDemoURL(_ value: String) -> String? {
 
 @MainActor
 private final class OttoApplicationDelegate: NSObject, NSApplicationDelegate {
-  private weak var services: ApplicationServices?
+  private weak var spaces: OttoSpaceController?
 
-  func configure(services: ApplicationServices) {
-    self.services = services
+  func configure(spaces: OttoSpaceController) {
+    self.spaces = spaces
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -371,14 +349,14 @@ private final class OttoApplicationDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     if UpdateRelaunchRequest.shared.isActive {
-      guard let services else { return .terminateNow }
+      guard let spaces else { return .terminateNow }
       let gate = UpdateTerminationGate {
         sender.reply(toApplicationShouldTerminate: true)
       }
       Task { @MainActor in
-        await services.stopAllProcesses()
-        services.markCleanTermination()
-        await services.flushPersistence()
+        await spaces.stopAllProcesses()
+        spaces.markCleanTermination()
+        await spaces.flushPersistence()
         gate.finish()
       }
       Task { @MainActor in
@@ -388,17 +366,17 @@ private final class OttoApplicationDelegate: NSObject, NSApplicationDelegate {
       return .terminateLater
     }
 
-    guard let services, services.activeProcessCount > 0 else { return .terminateNow }
+    guard let spaces else { return .terminateNow }
 
     // Idle agent harnesses and quiet shells hold no in-flight work — sessions resume from
     // their persisted IDs on next launch. Only interrupt the quit when an agent is mid-run,
     // waiting on the user, or a terminal still has a live child process.
     Task { @MainActor in
-      let busyCount = await services.busyProcessCount()
+      let busyCount = await spaces.busyProcessCount()
       if busyCount == 0 {
-        await services.stopAllProcesses()
-        services.markCleanTermination()
-        await services.flushPersistence()
+        await spaces.stopAllProcesses()
+        spaces.markCleanTermination()
+        await spaces.flushPersistence()
         sender.reply(toApplicationShouldTerminate: true)
         return
       }
@@ -416,9 +394,9 @@ private final class OttoApplicationDelegate: NSObject, NSApplicationDelegate {
         sender.reply(toApplicationShouldTerminate: false)
         return
       }
-      await services.stopAllProcesses()
-      services.markCleanTermination()
-      await services.flushPersistence()
+      await spaces.stopAllProcesses()
+      spaces.markCleanTermination()
+      await spaces.flushPersistence()
       sender.reply(toApplicationShouldTerminate: true)
     }
     return .terminateLater
@@ -440,23 +418,6 @@ final class UpdateTerminationGate {
     hasFinished = true
     action()
   }
-}
-
-/// Opens Otto again in the newly active profile. Profiles own separate databases and agent
-/// runtimes, so a clean relaunch is the safe way to swap everything at once.
-@MainActor
-func relaunchOttoIntoActiveProfile() {
-  var arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
-  if let index = arguments.firstIndex(of: "--workspace") {
-    arguments.removeSubrange(index...min(index + 1, arguments.count - 1))
-  }
-  let process = Process()
-  process.executableURL = URL(fileURLWithPath: "/bin/sh")
-  process.arguments =
-    ["-c", "sleep 1; /usr/bin/open -n \"$0\" --args \"$@\"", Bundle.main.bundlePath]
-    + arguments
-  try? process.run()
-  NSApp.terminate(nil)
 }
 
 /// Native navigation stays available while editing text or viewing Settings.

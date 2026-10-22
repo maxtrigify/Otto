@@ -20,7 +20,8 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
   static let soundKey = "otto.notifications.completion.sound"
   @Published private(set) var permissionStatus = ""
   var visibleConversations: [UUID: UUID] = [:]
-  private var task: Task<Void, Never>?
+  private var tasks: [String: Task<Void, Never>] = [:]
+  var onOpenConversation: ((UUID) -> Void)?
   private var completions = CompletionEventFilter()
 
   static func enabled(_ key: String, defaults: UserDefaults = .standard) -> Bool {
@@ -28,12 +29,13 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
   }
 
   func start(services: ApplicationServices, store: CanvasStore) {
-    guard task == nil else { return }
+    let key = services.defaultWorkspacePath
+    guard tasks[key] == nil else { return }
     let center = UNUserNotificationCenter.current()
     center.delegate = self
     let bus = services.supervisor.eventBus
     let stream = bus.stream(afterSequence: bus.latestSequence)
-    task = Task { [weak self, weak services] in
+    tasks[key] = Task { [weak self, weak services] in
       for await event in stream {
         guard let self, let services, !Task.isCancelled else { return }
         await self.consume(event, services: services, store: store)
@@ -78,7 +80,7 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
     guard Self.enabled(Self.enabledKey), Self.enabled(isBot ? Self.botsKey : Self.sessionsKey),
       !(NSApp.isActive && visibleConversations.values.contains(nodeID)),
       // Otto on screen says it himself; one announcement is enough.
-      !OttoBuddyController.shared.replacesCompletionBanners
+      !OttoBuddyController.shared.replacesCompletionBanners(for: services)
     else { return }
     let content = UNMutableNotificationContent()
     let failed = event.type == .agentRunFailed
@@ -114,7 +116,7 @@ final class CompletionNotifications: NSObject, ObservableObject, UNUserNotificat
       Task { @MainActor in
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first(where: { $0.canBecomeMain })?.makeKeyAndOrderFront(nil)
-        NotificationCenter.default.post(name: .ottoOpenCompletedConversation, object: nodeID)
+        self.onOpenConversation?(nodeID)
       }
     }
     completionHandler()

@@ -643,6 +643,7 @@ struct CommandPaletteOverlay: View {
 /// and handles those codes itself while it is on screen. ← → go to the filter chips when the
 /// palette says it can take them.
 private struct PaletteArrowKeyCatcher: NSViewRepresentable {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   var onMove: (Int) -> Void
   var onMoveFilter: (Int) -> Bool
 
@@ -651,11 +652,13 @@ private struct PaletteArrowKeyCatcher: NSViewRepresentable {
   }
 
   func makeNSView(context: Context) -> NSView {
+    context.coordinator.isEnabled = spaceVisible
     context.coordinator.install()
     return NSView(frame: .zero)
   }
 
   func updateNSView(_ view: NSView, context: Context) {
+    context.coordinator.isEnabled = spaceVisible
     context.coordinator.onMove = onMove
     context.coordinator.onMoveFilter = onMoveFilter
   }
@@ -668,6 +671,7 @@ private struct PaletteArrowKeyCatcher: NSViewRepresentable {
   final class Coordinator {
     var onMove: (Int) -> Void
     var onMoveFilter: (Int) -> Bool
+    var isEnabled = true
     private var monitor: Any?
 
     init(onMove: @escaping (Int) -> Void, onMoveFilter: @escaping (Int) -> Bool) {
@@ -678,6 +682,7 @@ private struct PaletteArrowKeyCatcher: NSViewRepresentable {
     func install() {
       guard monitor == nil else { return }
       monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        guard self.isEnabled else { return event }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard modifiers.isEmpty else { return event }
         switch event.keyCode {

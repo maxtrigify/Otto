@@ -155,7 +155,7 @@ public final class ApplicationServices: ObservableObject {
   /// initiating conversation's work panel instead of presenting it as an unrelated resource preview.
   @Published public private(set) var agentBrowserOpenRequest: AgentBrowserOpenRequest?
   /// Asks Chat to bring a terminal forward: its conversation's work panel when an agent started
-  /// it, otherwise the Terminals place. Home's "Needs you" and transcript cards route through it.
+  /// it, otherwise beside the current page. Home's "Needs you" and transcript cards route through it.
   @Published public private(set) var terminalRevealRequest: TerminalRevealRequest?
 
   public let boatCloud = BoatCloudStore()
@@ -1205,10 +1205,48 @@ public final class ApplicationServices: ObservableObject {
       store.dispatch(.focusNode(existing.id))
       return existing.id
     }
+    // The channel outlives its node. If the node was lost, resume the conversation it held.
+    let lostSessionID =
+      forceNew ? nil : botChannels.canonicalChannel(for: profile.id)?.providerSessionID
     let output = try await launchAgentProfile(profile, at: point)
+    if let lostSessionID {
+      await resumeBotConversation(nodeID: output.agentID, sessionID: lostSessionID)
+    }
     store.dispatch(.setNodePresentation(id: output.agentID, presentation: .conversation))
     store.dispatch(.focusNode(output.agentID))
     return output.agentID
+  }
+
+  /// Points a freshly launched bot node at its earlier provider session and restarts it, which
+  /// resumes that session and restores its transcript, so the bot does not reopen blank.
+  private func resumeBotConversation(nodeID: UUID, sessionID: String) async {
+    guard let canvasID = store.canvasID(containing: nodeID),
+      var definition = store.snapshot.canvases.flatMap(\.nodes)
+        .first(where: { $0.id == nodeID })?.agentDefinition
+    else { return }
+    definition.resumeSessionID = sessionID
+    store.dispatch(
+      .setAgentDefinition(id: nodeID, definition: definition), targetCanvasID: canvasID)
+    await store.flushPersistence()
+    _ = try? await registry.call(
+      name: "agent.restart",
+      input: try JSONValue.encode(AgentStatusInput(agentID: nodeID)),
+      context: ToolContext(
+        actorID: "otto-restoration",
+        scopes: [.canvasWrite, .agentControl],
+        confirmed: true,
+        source: .userInterface,
+        targetCanvasID: canvasID
+      )
+    )
+  }
+
+  /// A channel can name a node that no longer exists, for example after a workspace reset.
+  /// Treat that as no node rather than selecting it and showing an empty chat.
+  public func liveAgentNodeID(_ nodeID: UUID?) -> UUID? {
+    guard let nodeID, store.canvasID(containing: nodeID) != nil || fleet[nodeID] != nil
+    else { return nil }
+    return nodeID
   }
 
   public func openAgentProfile(named name: String, forceNew: Bool = false) async throws
@@ -1432,7 +1470,7 @@ public final class ApplicationServices: ObservableObject {
     agentProfiles.activeProfiles.map { profile in
       let nodeID =
         nodeID(forProfile: profile.id)
-        ?? botChannels.canonicalChannel(for: profile.id)?.nodeID
+        ?? liveAgentNodeID(botChannels.canonicalChannel(for: profile.id)?.nodeID)
       let needsYou = attentionItems.contains {
         $0.nodeID == nodeID && ($0.state == .waitingUser || $0.state == .waitingPermission)
       }
@@ -3383,6 +3421,10 @@ public final class ApplicationServices: ObservableObject {
         .setAgentDefinition(id: id, definition: definition),
         targetCanvasID: canvasID
       )
+      if let profileID = definition.profileID {
+        _ = try? botChannels.recordProviderSession(
+          profileID: profileID, nodeID: id, sessionID: sessionID)
+      }
       // Provider session identity is the only durable route back to the transcript. Do not leave
       // it behind the normal UI-write coalescing window.
       await store.flushPersistence()
@@ -3473,6 +3515,14 @@ public final class ApplicationServices: ObservableObject {
     let ids = store.snapshot.canvases.flatMap(\.nodes).filter {
       $0.agentDefinition?.resumeSessionID?.isEmpty == false
     }.map(\.id)
+    // Channels written before they remembered sessions learn them from their live nodes.
+    for node in store.snapshot.canvases.flatMap(\.nodes) {
+      guard let definition = node.agentDefinition, let profileID = definition.profileID,
+        let sessionID = definition.resumeSessionID
+      else { continue }
+      _ = try? botChannels.recordProviderSession(
+        profileID: profileID, nodeID: node.id, sessionID: sessionID)
+    }
     for id in ids { await restorePersistedAgentTranscript(nodeID: id) }
   }
 

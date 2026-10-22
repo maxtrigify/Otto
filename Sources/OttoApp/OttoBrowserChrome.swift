@@ -143,6 +143,7 @@ enum OttoBrowserInputPolicy {
 /// Browser-local input routing. Keyboard commands follow the selected node; mouse history buttons
 /// additionally require the pointer to be inside this browser so another app surface is untouched.
 struct OttoBrowserInputMonitor: NSViewRepresentable {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   let isEnabled: Bool
   let perform: (OttoBrowserInputAction) -> Void
 
@@ -152,7 +153,7 @@ struct OttoBrowserInputMonitor: NSViewRepresentable {
     let view = NSView(frame: .zero)
     context.coordinator.update(
       view: view,
-      isEnabled: isEnabled,
+      isEnabled: isEnabled && spaceVisible,
       perform: perform
     )
     context.coordinator.install()
@@ -162,7 +163,7 @@ struct OttoBrowserInputMonitor: NSViewRepresentable {
   func updateNSView(_ view: NSView, context: Context) {
     context.coordinator.update(
       view: view,
-      isEnabled: isEnabled,
+      isEnabled: isEnabled && spaceVisible,
       perform: perform
     )
   }

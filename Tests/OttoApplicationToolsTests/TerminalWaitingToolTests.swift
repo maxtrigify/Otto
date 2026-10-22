@@ -71,7 +71,9 @@ struct TerminalWaitingToolTests {
   func descriptionsPointAtChat() {
     #expect(TerminalRunTool.definition.description.contains("work panel on the right"))
     #expect(TerminalRunTool.definition.description.contains("waitingForUser"))
-    #expect(TerminalOpenTool.definition.description.contains("Terminals in Chat's sidebar"))
+    #expect(TerminalOpenTool.definition.description.contains("work panel on"))
+    #expect(!TerminalOpenTool.definition.description.contains("sidebar"))
+    #expect(!TerminalRunTool.definition.description.contains("sidebar"))
     #expect(TerminalWaitTool.definition.description.contains("waitingForUser"))
   }
 }

@@ -518,8 +518,28 @@ final class VoiceController: ObservableObject {
   /// ApplicationServices.start() has registered the workspace tools: the session projects the tool
   /// registry once at connect, so connecting from init races registration and produces a session
   /// that can speak but has no tools at all.
-  func activateOperatingMode() async {
-    await reconcileOperatingMode()
+  private var spaceIsActive = false
+
+  func activateOperatingMode() async { await setSpaceActive(true) }
+
+  func setSpaceActive(_ active: Bool) async {
+    spaceIsActive = active
+    if active {
+      await session.setPresentationEnabled(true)
+      if isCloudVoiceActive {
+        await setCloudMicrophoneEnabled(operatingMode == .alwaysListening)
+      } else {
+        await reconcileOperatingMode()
+      }
+      await reconcileWakeWord()
+    } else {
+      pushToTalkHeld = false
+      await stopLocalCapture()
+      await stopVoicePreview()
+      await stopWakeWord(nextStatus: .paused)
+      await setCloudMicrophoneEnabled(false)
+      await session.setPresentationEnabled(false)
+    }
   }
 
   deinit {
@@ -601,8 +621,9 @@ final class VoiceController: ObservableObject {
     pushToTalkMonitor = VoicePushToTalkMonitor(
       shortcut: { [weak self] in self?.talkShortcut ?? .optionSpace },
       isEnabled: { [weak self] in
-        self?.operatingMode == .pushToTalk || self?.operatingMode == .outputOnly
-          || self?.operatingMode == .alwaysListening
+        self?.spaceIsActive == true
+          && (self?.operatingMode == .pushToTalk || self?.operatingMode == .outputOnly
+            || self?.operatingMode == .alwaysListening)
       },
       changed: { [weak self] pressed in
         guard let self else { return }
@@ -633,6 +654,7 @@ final class VoiceController: ObservableObject {
   }
 
   private func reconcileOperatingMode() async {
+    guard spaceIsActive else { return }
     pushToTalkHeld = false
     switch operatingMode {
     case .off:
@@ -1024,6 +1046,7 @@ final class VoiceController: ObservableObject {
   }
 
   private func reconcileWakeWord() async {
+    guard spaceIsActive else { return }
     guard wakeWordEnabled else {
       await stopWakeWord(nextStatus: .disabled)
       return

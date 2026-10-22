@@ -44,11 +44,11 @@ struct ChatTerminalTests {
     #expect(!ChatTerminalStatus.running.isWaiting)
   }
 
-  @Test("Saved workspaces from an older Otto still decode the new Terminals place")
-  func terminalsDestinationRoundTrips() throws {
-    let encoded = try JSONEncoder().encode(ChatSurfaceDestination.terminals)
-    #expect(String(decoding: encoded, as: UTF8.self) == "\"Terminals\"")
-    #expect(try JSONDecoder().decode(ChatSurfaceDestination.self, from: encoded) == .terminals)
+  @Test("The retired Terminals destination restores Chat without breaking saved workspaces")
+  func retiredTerminalsDestinationRestoresChat() throws {
+    let encoded = Data("\"Terminals\"".utf8)
+    #expect(try JSONDecoder().decode(ChatSurfaceDestination.self, from: encoded) == .conversation)
+    #expect(!ChatSurfaceDestination.allCases.contains { $0.rawValue == "Terminals" })
   }
 
   /// Opt-in visual check of the work panel with a terminal waiting for the person. Set

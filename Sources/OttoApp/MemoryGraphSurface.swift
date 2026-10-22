@@ -214,6 +214,7 @@ private enum MemoryGraphInput {
 
 /// Observe only events over this graph; never swallow scrolling in details, menus, or curation.
 private struct MemoryGraphInputMonitor: NSViewRepresentable {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   let isEnabled: Bool
   let perform: (MemoryGraphInput, CGPoint) -> Void
 
@@ -225,7 +226,7 @@ private struct MemoryGraphInputMonitor: NSViewRepresentable {
     return view
   }
   func updateNSView(_ view: NSView, context: Context) {
-    context.coordinator.isEnabled = isEnabled
+    context.coordinator.isEnabled = isEnabled && spaceVisible
     context.coordinator.perform = perform
   }
   static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {

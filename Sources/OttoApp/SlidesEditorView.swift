@@ -7,6 +7,7 @@ import WebKit
 /// Decks built like websites: the slide in the middle is a live page you can type on, the
 /// thumbnails are rendered by the same engine, and agents redesign slides through the side panel.
 struct SlidesEditorView: View {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   @ObservedObject var office: OfficeStore
   let file: OfficeFile
   let ask: (OfficeAsk) -> Void
@@ -62,7 +63,10 @@ struct SlidesEditorView: View {
     .onAppear {
       load()
       keys.step = { offset in step(offset) }
-      keys.start()
+      if spaceVisible { keys.start() }
+    }
+    .onChange(of: spaceVisible) { _, visible in
+      if visible { keys.start() } else { keys.stop() }
     }
     .onDisappear { keys.stop() }
     .onChange(of: office.revisions[file.path]) { _, _ in load() }

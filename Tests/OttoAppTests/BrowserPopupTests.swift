@@ -46,6 +46,16 @@ struct BrowserPopupTests {
     #expect(returned == true)
     #expect(popups.windows.isEmpty)
   }
+
+  @Test func clickedNewWindowLinksOpenAsTabsButScriptPopupsDoNot() {
+    let account = URL(string: "https://mail.google.com/mail/u/1/")!
+    #expect(BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: account) == account)
+    #expect(BrowserPopupWindows.tabURL(navigationType: .other, url: account) == nil)
+    #expect(
+      BrowserPopupWindows.tabURL(
+        navigationType: .linkActivated, url: URL(string: "mailto:a@example.com")) == nil)
+    #expect(BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: nil) == nil)
+  }
 }
 
 private final class PopupFixtureServer {

@@ -1248,7 +1248,10 @@ extension ApplicationServices {
           delivery, succeeded: false, reason: "Sender, receiver, or channel is unavailable",
           source: source)) ?? delivery
     }
-    guard let nodeID = channel.nodeID ?? nodeID(forProfile: delivery.receiverProfileID) else {
+    guard
+      let nodeID = liveAgentNodeID(channel.nodeID)
+        ?? nodeID(forProfile: delivery.receiverProfileID)
+    else {
       return delivery
     }
     do {

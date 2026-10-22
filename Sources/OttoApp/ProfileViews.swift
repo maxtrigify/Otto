@@ -5,16 +5,16 @@ import OttoModels
 import OttoServices
 import SwiftUI
 
-/// The one profile switch, shared by Home and Chat. Switching relaunches Otto into the other
-/// profile because each profile has its own database, agents and memory.
+/// Switching changes the visible space while its runtime stays alive in the app.
 struct ProfileSwitcherMenu: View {
   @ObservedObject var services: ApplicationServices
   @ObservedObject var registry: OttoProfileRegistry
   var compact = false
 
   @State private var sheet: ProfileSheet?
-  @State private var pendingSwitch: OttoProfile?
+  @Environment(\.ottoSwitchSpace) private var switchSpace
   @State private var error: String?
+  @State private var switching = false
 
   enum ProfileSheet: Identifiable {
     case create
@@ -28,9 +28,6 @@ struct ProfileSwitcherMenu: View {
   }
 
   private var current: OttoProfile? { services.currentProfile }
-  private var runningAgents: Int {
-    services.fleet.values.filter { $0.state == .starting || $0.state == .working }.count
-  }
 
   var body: some View {
     Menu {
@@ -60,6 +57,7 @@ struct ProfileSwitcherMenu: View {
       }
       .contentShape(Rectangle())
     }
+    .disabled(switching)
     .menuStyle(.borderlessButton)
     .fixedSize()
     .accessibilityLabel("Space")
@@ -84,17 +82,6 @@ struct ProfileSwitcherMenu: View {
       .foregroundStyle(Color(nsColor: .labelColor))
     }
     .alert(
-      "Switch to \(pendingSwitch?.name ?? "space")?",
-      isPresented: Binding(get: { pendingSwitch != nil }, set: { if !$0 { pendingSwitch = nil } })
-    ) {
-      Button("Switch") { if let target = pendingSwitch { performSwitch(to: target) } }
-      Button("Stay", role: .cancel) { pendingSwitch = nil }
-    } message: {
-      Text(
-        "\(runningAgents) agent\(runningAgents == 1 ? " is" : "s are") still working in \(current?.name ?? "this space"). Otto reopens in the other space, which stops them."
-      )
-    }
-    .alert(
       "Space error",
       isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })
     ) {
@@ -106,20 +93,14 @@ struct ProfileSwitcherMenu: View {
 
   private func requestSwitch(to profile: OttoProfile) {
     guard profile.id != current?.id else { return }
-    if runningAgents > 0 {
-      pendingSwitch = profile
-    } else {
-      performSwitch(to: profile)
+    guard !switching else { return }
+    switching = true
+    Task { @MainActor in
+      defer { switching = false }
+      do { try await switchSpace(profile) } catch { self.error = error.localizedDescription }
     }
   }
 
-  private func performSwitch(to profile: OttoProfile) {
-    pendingSwitch = nil
-    do {
-      try registry.setActive(profile.id)
-      relaunchOttoIntoActiveProfile()
-    } catch { self.error = error.localizedDescription }
-  }
 }
 
 /// Creates a blank profile, optionally bringing across chosen "About me" facts and memories.

@@ -97,9 +97,9 @@ public struct TerminalOpenTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "terminal.open",
     description:
-      "Opens a supervised interactive local shell. Otto shows it in Chat: in the work panel on "
-      + "the right of the conversation that opened it (a tab titled \"Terminal\"), and under "
-      + "Terminals in Chat's sidebar. The person can click into it and type. Use terminal.run "
+      "Starts a supervised interactive local shell. Otto makes it available in the work panel on "
+      + "the right of the conversation that opened it (a tab titled \"Terminal\"). "
+      + "The panel stays closed until the person opens it. They can click into the terminal and type. Use terminal.run "
       + "instead when you have a specific command to run.",
     inputSchema: .objectSchema(
       properties: [
@@ -142,9 +142,9 @@ public struct TerminalRunTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "terminal.run",
     description:
-      "Starts a command in an Otto-supervised terminal and returns immediately. Otto opens it in "
+      "Starts a command in an Otto-supervised terminal and returns immediately. Otto makes it available in "
       + "the work panel on the right of this chat, in a tab named after the command (the result's "
-      + "`title`, e.g. \"Setup script\"); it is also listed under Terminals in Chat's sidebar. "
+      + "`title`, e.g. \"Setup script\"). The panel stays closed until the person opens it. "
       + "Use it for interactive steps the person must do themselves (pressing a key, pasting a "
       + "token or password, signing in): the person types straight into that terminal, and "
       + "hidden input such as passwords is never shown to you. When a step needs them, tell them "
@@ -414,10 +414,8 @@ private func launch(
   var output = try await terminalOutput(id: nodeID, supervisor: supervisor)
   output.title = title
   output.whereToFindIt =
-    ownerAgentID == nil
-    ? "Under Terminals in Otto Chat's sidebar, titled \"\(title)\"."
-    : "In the work panel on the right of this chat, in the tab titled \"\(title)\" (also under "
-      + "Terminals in Chat's sidebar). The person can click into it to type or paste."
+    "In the work panel on the right of this chat, in the tab titled \"\(title)\". "
+    + "Open the work panel to view it. The person can click into it to type or paste."
   return output
 }
 

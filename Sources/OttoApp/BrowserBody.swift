@@ -72,6 +72,12 @@ struct BrowserBody: View {
       .onChange(of: sessionValue.activeTabID, initial: true) { _, tabID in
         retainWarmTab(tabID)
       }
+      .onReceive(NotificationCenter.default.publisher(for: BrowserLinkTabRequest.name)) {
+        guard let request = BrowserLinkTabRequest(notification: $0), request.nodeID == node.id,
+          BrowserLinkTabRequest.claim(request.id)
+        else { return }
+        openLinkInNewTab(request.url)
+      }
       .onChange(of: sessionValue.tabs.map(\.id)) { _, tabIDs in
         let valid = Set(tabIDs)
         warmTabIDs.removeAll { !valid.contains($0) }
@@ -529,6 +535,18 @@ struct BrowserBody: View {
     }
   }
 
+  /// Open a page's new-window link beside it as a tab, the way a desktop browser does.
+  private func openLinkInNewTab(_ url: String) {
+    var session = sessionValue
+    let tab = BrowserTab(title: "Loading…", url: url)
+    session.tabs.append(tab)
+    session.activeTabID = tab.id
+    updateBrowserSession(session)
+    address = displayedBrowserAddress(url)
+    updateContent(.browser(url: url))
+    Task { try? await runtime.openTab(nodeID: node.id, url: url, tabID: tab.id) }
+  }
+
   private func newTab() {
     var session = sessionValue
     let tab = BrowserTab()
@@ -690,11 +708,12 @@ struct BrowserBody: View {
 /// A renderer is created on demand and parked in an unshown window when its panel unmounts.
 @MainActor
 internal enum BrowserRendererPool {
-  private static weak var store: CanvasStore?
+  private static var stores: [ObjectIdentifier: CanvasStore] = [:]
   private static var entries: [UUID: Entry] = [:]
 
   @MainActor
   fileprivate final class Entry {
+    let runtime: BrowserRuntime
     let webView: WKWebView
     let coordinator: BrowserWebView.Coordinator
     let window: NSWindow
@@ -703,6 +722,7 @@ internal enum BrowserRendererPool {
     var updates: Task<Void, Never>?
 
     init(spec: BrowserWebView) {
+      runtime = spec.runtime
       coordinator = BrowserWebView.Coordinator(
         nodeID: spec.state.nodeID, tabID: spec.tabID, runtime: spec.runtime,
         requestedURL: spec.state.url, requestedRevision: spec.state.revision,
@@ -749,7 +769,7 @@ internal enum BrowserRendererPool {
   }
 
   static func configure(store: CanvasStore, runtime: BrowserRuntime) async {
-    self.store = store
+    stores[ObjectIdentifier(runtime)] = store
     await runtime.setRendererPreparation { [weak store, weak runtime] state in
       guard let store, let runtime,
         let canvasID = store.canvasID(containing: state.nodeID),
@@ -791,16 +811,21 @@ internal enum BrowserRendererPool {
     entries.values.contains { $0.window.isVisible }
   }
 
-  static func prune(snapshot: WorkspaceSnapshot) {
+  static func prune(snapshot: WorkspaceSnapshot, runtime: BrowserRuntime? = nil) {
     let validTabs = Set(
       snapshot.canvases.flatMap(\.nodes).flatMap {
         $0.browserSession?.tabs.map(\.id) ?? []
       })
-    for id in Array(entries.keys) where !validTabs.contains(id) {
+    for id in Array(entries.keys)
+    where !validTabs.contains(id)
+      && (runtime == nil || entries[id]?.runtime === runtime)
+    {
       entries.removeValue(forKey: id)?.close()
     }
     // Bound detached WebContent processes, while allowing in-flight observations to finish.
-    let parked = entries.filter { !$0.value.mounted }.sorted {
+    let parked = entries.filter {
+      !$0.value.mounted && (runtime == nil || $0.value.runtime === runtime)
+    }.sorted {
       $0.value.lastUsed > $1.value.lastUsed
     }
     for (id, entry) in parked.dropFirst(4) where entry.lastUsed.timeIntervalSinceNow < -60 {
@@ -838,7 +863,8 @@ internal enum BrowserRendererPool {
     Task {
       guard let state = await runtime.state(nodeID: nodeID), state.activeTabID == tabID,
         state.revision == report.expectedRevision,
-        let store, let canvasID = store.canvasID(containing: nodeID)
+        let store = stores[ObjectIdentifier(runtime)],
+        let canvasID = store.canvasID(containing: nodeID)
       else { return }
       try? await runtime.reportLoaded(
         nodeID: nodeID, url: report.url, title: report.title,
@@ -1246,7 +1272,14 @@ private struct BrowserWebView: NSViewRepresentable {
       for navigationAction: WKNavigationAction,
       windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-      popupWindows.webView(
+      if navigationAction.targetFrame == nil,
+        let url = BrowserPopupWindows.tabURL(
+          navigationType: navigationAction.navigationType, url: navigationAction.request.url)
+      {
+        BrowserLinkTabRequest.post(nodeID: nodeID, url: url.absoluteString)
+        return nil
+      }
+      return popupWindows.webView(
         webView, createWebViewWith: configuration,
         for: navigationAction, windowFeatures: windowFeatures)
     }
@@ -1967,4 +2000,33 @@ private func isLocalBrowserURL(_ value: String) -> Bool {
 
 private func displayedBrowserAddress(_ value: String) -> String {
   value == BrowserDefaults.blankURL || BrowserDefaults.isStartURL(value) ? "" : value
+}
+
+/// Hands a link that asked for a new window from the page's web view to the browser view that
+/// owns the tab list. Several views can show one browser node, so only the first claim acts.
+@MainActor
+struct BrowserLinkTabRequest {
+  static let name = Notification.Name("OttoBrowserLinkTabRequest")
+  private static var claimed: Set<UUID> = []
+  let id: UUID
+  let nodeID: UUID
+  let url: String
+
+  static func post(nodeID: UUID, url: String) {
+    NotificationCenter.default.post(
+      name: name, object: nil,
+      userInfo: ["id": UUID(), "nodeID": nodeID, "url": url])
+  }
+
+  init?(notification: Notification) {
+    guard let id = notification.userInfo?["id"] as? UUID,
+      let nodeID = notification.userInfo?["nodeID"] as? UUID,
+      let url = notification.userInfo?["url"] as? String
+    else { return nil }
+    self.id = id
+    self.nodeID = nodeID
+    self.url = url
+  }
+
+  static func claim(_ id: UUID) -> Bool { claimed.insert(id).inserted }
 }

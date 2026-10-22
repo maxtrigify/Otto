@@ -76,6 +76,7 @@ public struct OttoEvent: Codable, Identifiable, Sendable, Equatable {
 public final class OttoEventBus: @unchecked Sendable {
   public let streamID = UUID()
   private let lock = NSLock()
+  private let deliveryQueue = DispatchQueue(label: "io.openotto.events.delivery")
   private let historyLimit: Int
   private var nextSequence = 1
   private var history: [OttoEvent] = []
@@ -96,8 +97,13 @@ public final class OttoEventBus: @unchecked Sendable {
       if history.count > historyLimit {
         history.removeFirst(history.count - historyLimit)
       }
-      for continuation in subscribers.values {
-        continuation.yield(sequenced)
+      let deliveryEvent = sequenced
+      let continuations = Array(subscribers.values)
+      // AsyncStream yield can acquire Swift task locks. Cancellation holds those locks while
+      // onTermination takes our lock, so never yield synchronously under the bus lock.
+      // Enqueue under the lock to preserve sequence order across publishers and replay.
+      deliveryQueue.async {
+        for continuation in continuations { continuation.yield(deliveryEvent) }
       }
       return sequenced
     }
@@ -106,12 +112,15 @@ public final class OttoEventBus: @unchecked Sendable {
   public func stream(afterSequence: Int = 0) -> AsyncStream<OttoEvent> {
     let subscriberID = UUID()
     return AsyncStream { continuation in
-      lock.withLock {
-        for event in history where event.sequence > afterSequence { continuation.yield(event) }
-        subscribers[subscriberID] = continuation
-      }
       continuation.onTermination = { [weak self] _ in
         _ = self?.lock.withLock { self?.subscribers.removeValue(forKey: subscriberID) }
+      }
+      lock.withLock {
+        let replay = history.filter { $0.sequence > afterSequence }
+        deliveryQueue.async {
+          for event in replay { continuation.yield(event) }
+        }
+        subscribers[subscriberID] = continuation
       }
     }
   }

@@ -50,7 +50,7 @@
           },
           sendBytes: { _ in }, resize: { _, _ in }, interrupt: { provider.stop() },
           stop: { provider.stop() }, restart: { provider.state = .idle },
-          resolvePermission: { _ in }, resolveChoice: { _ in },
+          resolvePermission: { _ in }, alwaysAllowPermission: {}, resolveChoice: { _ in },
           setPermissionMode: { _ in }, setModel: { _, _ in }, setExecutionStrategy: { _ in },
           handoffTargets: { [] }, handoff: { _, _ in }, openBrowser: { _ in }
         ).environmentObject(provider.queue)

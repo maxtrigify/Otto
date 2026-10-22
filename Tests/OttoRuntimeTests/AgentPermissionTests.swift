@@ -5,6 +5,42 @@ import Testing
 
 @Suite("One-shot permission approvals")
 struct AgentPermissionTests {
+  @Test(
+    "Always allow applies to the current run and can be revoked without bypassing app confirmations"
+  )
+  func liveProviderBypass() async throws {
+    let supervisor = AgentSupervisor()
+    let id = try await spawnLongRunningOneShot(supervisor: supervisor)
+    let first = Task {
+      try await supervisor.requestPermission(
+        agentID: id, toolName: "Write", isProviderPermission: true)
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.setProviderPermissionBypass(agentID: id, enabled: true)
+    #expect(try await first.value)
+    #expect(
+      try await supervisor.requestPermission(
+        agentID: id, toolName: "Bash", isProviderPermission: true))
+    #expect(await !supervisor.hasPendingPermission(agentID: id))
+
+    let account = Task {
+      try await supervisor.requestPermission(agentID: id, toolName: "browser.account")
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.resolvePermission(agentID: id, approved: false)
+    #expect(try await account.value == false)
+
+    try await supervisor.setProviderPermissionBypass(agentID: id, enabled: false)
+    let revoked = Task {
+      try await supervisor.requestPermission(
+        agentID: id, toolName: "Write", isProviderPermission: true)
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.resolvePermission(agentID: id, approved: false)
+    #expect(try await revoked.value == false)
+    try await supervisor.stop(agentID: id)
+  }
+
   @Test("Expired browser approvals clear the card and cannot be approved later")
   func browserApprovalExpires() async throws {
     let supervisor = AgentSupervisor()

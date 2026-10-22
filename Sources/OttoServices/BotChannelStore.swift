@@ -46,6 +46,19 @@ public final class BotChannelStore: ObservableObject {
     return try save(channel)
   }
 
+  /// Remembers the provider conversation of the profile's bound node. Sessions of other nodes,
+  /// such as task sessions started from the same profile, never replace it.
+  @discardableResult
+  public func recordProviderSession(profileID: UUID, nodeID: UUID, sessionID: String) throws
+    -> BotChannel?
+  {
+    guard var channel = canonicalChannel(for: profileID), channel.nodeID == nodeID,
+      !sessionID.isEmpty, channel.providerSessionID != sessionID
+    else { return nil }
+    channel.providerSessionID = sessionID
+    return try save(channel)
+  }
+
   @discardableResult
   public func save(_ candidate: BotChannel) throws -> BotChannel {
     var channel = candidate

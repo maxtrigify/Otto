@@ -16,6 +16,7 @@ public actor VoiceSession {
   private var eventTask: Task<Void, Never>?
   private var audioOutputTask: Task<Void, Never>?
   private var microphoneInputStarted = false
+  private var presentationEnabled = true
   private var delegationTasks: [String: Task<Void, Never>] = [:]
   private var current = VoiceSessionSnapshot()
   private var trace: [VoiceTraceEntry] = []
@@ -178,6 +179,12 @@ public actor VoiceSession {
     notificationPolicy = policy
   }
 
+  /// Hides a background space's audio without cancelling its in-flight tool calls.
+  public func setPresentationEnabled(_ enabled: Bool) async {
+    presentationEnabled = enabled
+    if !enabled { await audioTransport?.stopPlayback() }
+  }
+
   public func setMicrophoneEnabled(_ enabled: Bool) async {
     guard let streamingProvider = provider as? any StreamingVoiceProvider else { return }
     if enabled, !microphoneInputStarted {
@@ -193,7 +200,7 @@ public actor VoiceSession {
   }
 
   public func notify(_ notice: AgentVoiceNotice) async {
-    guard shouldAnnounce(notice) else { return }
+    guard presentationEnabled, shouldAnnounce(notice) else { return }
     // Before the first connection the session is technically `disconnected`, not `sleeping`.
     // Treat every inactive state the same so enabling voice cannot replay the whole workday.
     if !notificationPolicy.queueWhileSleeping,
@@ -930,7 +937,7 @@ public actor VoiceSession {
     audioOutputTask = Task {
       for await data in provider.audioOutput {
         guard !Task.isCancelled else { break }
-        guard shouldPlayProviderAudio else { continue }
+        guard presentationEnabled, shouldPlayProviderAudio else { continue }
         try? await audioTransport.play(data)
       }
     }

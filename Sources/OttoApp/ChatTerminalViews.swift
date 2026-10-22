@@ -98,7 +98,7 @@ struct ChatTerminalNotice: Identifiable, Equatable {
 }
 
 /// One terminal with everything a non-technical person needs around it: what it is, whether it
-/// is waiting for them, and Stop / Copy command. Used in the work panel and the Terminals place.
+/// is waiting for them, and Stop / Copy command. Used in the work drawer.
 struct ChatTerminalPane: View {
   @Environment(\.ottoPalette) private var palette
   let title: String
@@ -333,40 +333,5 @@ struct TerminalWaitingCard: View {
     .background(palette.amber.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
     .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.amber.opacity(0.22), lineWidth: 1))
     .accessibilityElement(children: .contain)
-  }
-}
-
-/// A row in the Terminals place list.
-struct ChatTerminalListRow: View {
-  @Environment(\.ottoPalette) private var palette
-  let title: String
-  let detail: String
-  let status: ChatTerminalStatus
-  let selected: Bool
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Circle()
-        .fill(status.color(palette))
-        .frame(width: 7, height: 7)
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.ottoDisplay(13).weight(selected ? .semibold : .regular))
-          .foregroundStyle(palette.paper)
-          .lineLimit(1)
-        Text(detail)
-          .font(.ottoDisplay(11))
-          .foregroundStyle(status.isWaiting ? palette.amber : palette.muted)
-          .lineLimit(1)
-      }
-      Spacer(minLength: 4)
-    }
-    .padding(.horizontal, 10)
-    .frame(height: 46)
-    .background(
-      selected ? palette.paper.opacity(0.08) : .clear,
-      in: RoundedRectangle(cornerRadius: 8)
-    )
-    .contentShape(Rectangle())
   }
 }

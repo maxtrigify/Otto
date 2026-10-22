@@ -6,6 +6,15 @@ import WebKit
 final class BrowserPopupWindows: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
   private(set) var windows: [ObjectIdentifier: NSWindowController] = [:]
 
+  /// A clicked target="_blank" link (Google's account switcher, app launchers) belongs in a new
+  /// Otto tab. Script-opened windows stay native popups because sign-in flows need window.opener.
+  nonisolated static func tabURL(navigationType: WKNavigationType, url: URL?) -> URL? {
+    guard navigationType == .linkActivated, let url,
+      let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http"
+    else { return nil }
+    return url
+  }
+
   func webView(
     _ opener: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
     for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures

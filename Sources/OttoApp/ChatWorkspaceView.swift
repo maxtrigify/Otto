@@ -62,6 +62,7 @@ func chatNavigationSelectingHiredBot(
 /// presents the same durable agent runtimes and supporting objects through a focused workspace.
 /// The Bots tab lists saved AgentProfiles and their canonical channels, not ad-hoc canvas nodes.
 struct ChatWorkspaceView: View {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   @Environment(\.ottoPalette) private var palette
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.openSettings) private var openSettings
@@ -133,9 +134,7 @@ struct ChatWorkspaceView: View {
     }
   }
   @State private var workTabs: [UUID: [WorkTab]] = [:]
-  /// Terminals already seen, so only ones started after Chat appeared open the work panel.
-  @State private var knownTerminalIDs: Set<UUID>?
-  @State private var selectedPlaceTerminalID: UUID?
+  @State private var standaloneTerminalID: UUID?
   /// Bumped to put keyboard focus in a terminal when it is revealed.
   @State private var terminalFocusTokens: [UUID: Int] = [:]
   @State private var selectedWorkTabIDs: [UUID: UUID] = [:]
@@ -383,6 +382,9 @@ struct ChatWorkspaceView: View {
               Rectangle().fill(palette.paper.opacity(0.06)).frame(width: 1)
             }
           }
+        if let terminal = terminalNodes.first(where: { $0.id == standaloneTerminalID }) {
+          standaloneTerminalDrawer(terminal)
+        }
       }
     }
     // The chat root sits directly over the theme backdrop, so matte themes let it breathe.
@@ -408,7 +410,7 @@ struct ChatWorkspaceView: View {
         applyTerminalReveal(request)
       }
     }
-    .onChange(of: terminalNodes.map(\.id)) { _, _ in noteNewTerminals() }
+    .onChange(of: terminalNodes.map(\.id)) { _, _ in restoreAgentTerminalAssociations() }
     .onChange(of: services.terminalRevealRequest) { _, request in
       if let request { applyTerminalReveal(request) }
     }
@@ -439,7 +441,12 @@ struct ChatWorkspaceView: View {
     .onChange(of: roster.map(\.id)) { _, _ in repairSelection() }
     .onChange(of: sessionAgents.map(\.id)) { _, _ in repairSelection() }
     .onChange(of: notificationVisibleNodeID, initial: true) { _, nodeID in
-      CompletionNotifications.shared.visibleConversations[notificationVisibilityID] = nodeID
+      CompletionNotifications.shared.visibleConversations[notificationVisibilityID] =
+        spaceVisible ? nodeID : nil
+    }
+    .onChange(of: spaceVisible) { _, visible in
+      CompletionNotifications.shared.visibleConversations[notificationVisibilityID] =
+        visible ? notificationVisibleNodeID : nil
     }
     .onDisappear {
       CompletionNotifications.shared.visibleConversations.removeValue(
@@ -664,12 +671,6 @@ struct ChatWorkspaceView: View {
           .routines, symbol: "clock", count: services.routines.routines.count)
         destinationRow(
           .browser, symbol: "globe", count: chatBrowserNode?.browserSession?.tabs.count ?? 0)
-        if !terminalNodes.isEmpty {
-          destinationRow(
-            .terminals, symbol: "terminal",
-            count: terminalNodes.count { terminalStatus($0).isLive },
-            attention: terminalNodes.contains { terminalStatus($0).isWaiting })
-        }
         destinationRow(
           .dashboards, symbol: "chart.bar.xaxis", count: services.homeCards.dashboards.count)
         destinationRow(
@@ -1083,15 +1084,13 @@ struct ChatWorkspaceView: View {
         page: { browser, chrome in chatBrowserBody(browser, chrome: chrome) },
         conversation: { nodeID in assistantConversation(nodeID) }
       )
-    case .terminals:
-      terminalsPlace
     }
   }
 
   // MARK: Terminals
 
   /// Every terminal in the workspace, newest first. Terminals started by agents live on whatever
-  /// canvas the agent used; Chat lists them all, like sessions.
+  /// canvas the agent used; their work tabs retain access across conversations.
   private var terminalNodes: [OttoNode] {
     store.snapshot.canvases.flatMap(\.nodes)
       .filter { $0.kind == .terminal }
@@ -1143,6 +1142,7 @@ struct ChatWorkspaceView: View {
     }
   }
 
+  /// Register terminals quietly. Only explicit user actions reveal the drawer or select a tab.
   private func restoreAgentTerminalAssociations() {
     for terminal in terminalNodes.reversed() {
       guard let ownerID = terminal.parentAgentID,
@@ -1151,41 +1151,10 @@ struct ChatWorkspaceView: View {
       workTabs[ownerID, default: []].append(
         WorkTab(surface: .terminal, title: terminal.displayName, terminalID: terminal.id))
     }
-    if knownTerminalIDs == nil { knownTerminalIDs = Set(terminalNodes.map(\.id)) }
   }
 
-  /// A terminal an agent just started opens in that conversation's work panel, once. Background
-  /// conversations get the tab without the panel stealing the screen; the Terminals place and
-  /// the "Needs you" signals cover them.
-  private func noteNewTerminals() {
-    let current = terminalNodes
-    guard let known = knownTerminalIDs else {
-      knownTerminalIDs = Set(current.map(\.id))
-      return
-    }
-    let fresh = current.filter { !known.contains($0.id) }
-    knownTerminalIDs = Set(current.map(\.id))
-    for terminal in fresh.reversed() {
-      guard let ownerID = terminal.parentAgentID else { continue }
-      let tab: WorkTab
-      if let existing = workTabs[ownerID]?.first(where: { $0.terminalID == terminal.id }) {
-        tab = existing
-      } else {
-        tab = WorkTab(surface: .terminal, title: terminal.displayName, terminalID: terminal.id)
-        workTabs[ownerID, default: []].append(tab)
-      }
-      selectedWorkTabIDs[ownerID] = tab.id
-      guard destination == .conversation, selectedAgent?.id == ownerID else { continue }
-      withAnimation(.easeOut(duration: 0.16)) {
-        showingWorkPanel = true
-        showingAgentDetails = false
-        showingEnvironment = false
-      }
-    }
-  }
-
-  /// Brings a terminal forward and puts the cursor in it: in its conversation's work panel when
-  /// that conversation is in Chat, otherwise in the Terminals place.
+  /// Brings a terminal forward in its conversation's work drawer. Terminals without a
+  /// visible conversation use the same right-hand drawer beside the current page.
   private func applyTerminalReveal(_ request: TerminalRevealRequest) {
     guard let terminal = terminalNodes.first(where: { $0.id == request.terminalID }) else {
       return
@@ -1194,10 +1163,11 @@ struct ChatWorkspaceView: View {
     guard let owner = terminalOwner(terminal), ownerIsVisibleInChat(owner),
       let canvasID = store.canvasID(containing: owner.id)
     else {
-      selectedPlaceTerminalID = terminal.id
-      destination = .terminals
+      showingWorkPanel = false
+      standaloneTerminalID = terminal.id
       return
     }
+    standaloneTerminalID = nil
     if let profileID = owner.agentDefinition?.profileID,
       roster.contains(where: { $0.profile.id == profileID && $0.nodeID == owner.id })
     {
@@ -1267,7 +1237,7 @@ struct ChatWorkspaceView: View {
         // In a conversation's work panel the tab's close button is enough.
         remove: showsOwner
           ? {
-            if selectedPlaceTerminalID == terminal.id { selectedPlaceTerminalID = nil }
+            if standaloneTerminalID == terminal.id { standaloneTerminalID = nil }
             Task { try? await services.closeNode(nodeID: terminal.id) }
           } : nil
       )
@@ -1275,64 +1245,29 @@ struct ChatWorkspaceView: View {
     .id(terminal.id)
   }
 
-  private func terminalListDetail(_ terminal: OttoNode) -> String {
-    let status = terminalStatus(terminal)
-    if let owner = terminalOwner(terminal) {
-      return "\(status.label) · \(owner.displayName)"
-    }
-    return status.label
-  }
-
-  /// Every terminal in one place, including ones started from conversations that are not open.
-  private var terminalsPlace: some View {
-    let terminals = terminalNodes
-    let selected =
-      terminals.first { $0.id == selectedPlaceTerminalID }
-      ?? terminals.first { terminalStatus($0).isWaiting } ?? terminals.first
-    return HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("TERMINALS")
-          .font(.ottoMicro).tracking(1.6)
-          .foregroundStyle(palette.muted)
-          .padding(.horizontal, 10)
-          .padding(.top, 14)
-          .padding(.bottom, 4)
-        ScrollView {
-          VStack(spacing: 2) {
-            ForEach(terminals) { terminal in
-              Button {
-                selectedPlaceTerminalID = terminal.id
-              } label: {
-                ChatTerminalListRow(
-                  title: terminal.displayName,
-                  detail: terminalListDetail(terminal),
-                  status: terminalStatus(terminal),
-                  selected: selected?.id == terminal.id)
-              }
-              .buttonStyle(.plain)
-            }
-          }
+  /// A terminal can outlive its conversation or be opened directly by the person.
+  /// Keep it accessible in the work drawer without introducing another navigation place.
+  private func standaloneTerminalDrawer(_ terminal: OttoNode) -> some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        Label(terminal.displayName, systemImage: "terminal")
+          .font(.ottoDisplay(12))
+          .lineLimit(1)
+        Spacer()
+        Button {
+          standaloneTerminalID = nil
+        } label: {
+          Image(systemName: "xmark")
         }
-        .ottoScrollChrome(showsThumb: false)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close work panel")
       }
-      .padding(.horizontal, 8)
-      .frame(width: 250)
-      Rectangle().fill(palette.paper.opacity(0.06)).frame(width: 1)
-      if let selected {
-        terminalPane(selected, showsOwner: true)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      } else {
-        VStack(spacing: 8) {
-          Image(systemName: "terminal").font(.system(size: 26, weight: .light))
-          Text("No terminals yet").font(.ottoDisplay(14))
-          Text("When an agent runs a command or a setup script, it shows up here.")
-            .font(.ottoDisplay(12))
-        }
-        .foregroundStyle(palette.muted)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
+      .padding(12)
+      Divider()
+      terminalPane(terminal, showsOwner: true)
     }
     .background(palette.paneSurface)
+    .frame(width: 420)
   }
 
   // MARK: Browser place
@@ -1914,6 +1849,9 @@ struct ChatWorkspaceView: View {
         resolvePermission: {
           approved in
           Task { await services.resolveAgentPermission(agentID: node.id, approved: approved) }
+        },
+        alwaysAllowPermission: {
+          Task { await services.alwaysAllowAgentPermission(agentID: node.id) }
         },
         resolveChoice: {
           answer in Task { await services.resolveAgentChoice(agentID: node.id, answer: answer) }
@@ -3611,7 +3549,8 @@ struct ChatWorkspaceView: View {
   }
 
   private func ensureBotNode(_ profile: AgentProfile) async -> UUID? {
-    if let nodeID = services.botChannels.canonicalChannel(for: profile.id)?.nodeID
+    if let nodeID = services.liveAgentNodeID(
+      services.botChannels.canonicalChannel(for: profile.id)?.nodeID)
       ?? roster.first(where: { $0.profile.id == profile.id })?.nodeID
     {
       return nodeID
@@ -4266,12 +4205,7 @@ struct ChatWorkspaceView: View {
   }
 
   private func setPermissionMode(_ mode: AgentPermissionMode, for nodeID: UUID) {
-    guard
-      var definition = store.activeCanvas.nodes.first(where: { $0.id == nodeID })?
-        .agentDefinition
-    else { return }
-    definition.permissionMode = mode.rawValue
-    store.dispatch(.setAgentDefinition(id: nodeID, definition: definition))
+    Task { await services.changeAgentPermissionMode(mode, agentID: nodeID) }
   }
 
   private func setModel(_ model: String?, effort: String?, for nodeID: UUID) {

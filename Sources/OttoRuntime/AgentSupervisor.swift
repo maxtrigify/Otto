@@ -153,6 +153,7 @@ public actor AgentSupervisor {
     /// Set when workspace trust was answered before the trust screen's navigation footer was
     /// read. That footer still arrives afterwards and must not be mistaken for a new prompt.
     var trustFooterPending = false
+    var bypassProviderPermissions = false
     let scheduledWorker: Bool
     /// Where the process runs, kept for harvesting the provider's on-disk session records.
     let workingDirectory: String
@@ -171,6 +172,7 @@ public actor AgentSupervisor {
     let id: UUID
     let reason: String
     let nonce: String
+    let isProviderPermission: Bool
     let requestedAt: Date
     let continuation: CheckedContinuation<Bool, any Error>
     let timeoutTask: Task<Void, Never>?
@@ -897,11 +899,13 @@ public actor AgentSupervisor {
     agentID: UUID,
     toolName: String,
     detail: String = "",
-    timeout: Duration? = nil
+    timeout: Duration? = nil,
+    isProviderPermission: Bool = false
   ) async throws -> Bool {
     guard let agent = agents[agentID], agent.snapshot.exitCode == nil else {
       throw RuntimeError.agentNotFound(agentID)
     }
+    if isProviderPermission && agent.bypassProviderPermissions { return true }
     let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
     let reason = sanitizedAttentionReason(
       trimmedDetail.isEmpty ? "Wants to use \(toolName)" : "\(toolName): \(trimmedDetail)"
@@ -921,6 +925,7 @@ public actor AgentSupervisor {
           id: requestID,
           reason: reason,
           nonce: UUID().uuidString.lowercased(),
+          isProviderPermission: isProviderPermission,
           requestedAt: .now,
           continuation: continuation,
           timeoutTask: timeoutTask
@@ -935,6 +940,34 @@ public actor AgentSupervisor {
       agents[agentID] = agent
       refreshDelegatingParent(agentID)
     }
+  }
+
+  /// Applies a user-selected provider policy to this run only. Separate Otto confirmations
+  /// (account access, consequential browser actions) continue to require an explicit answer.
+  public func setProviderPermissionBypass(agentID: UUID, enabled: Bool) throws {
+    guard var agent = agents[agentID], agent.snapshot.exitCode == nil else {
+      throw RuntimeError.agentNotFound(agentID)
+    }
+    agent.bypassProviderPermissions = enabled
+    let approved =
+      enabled
+      ? (pendingPermissions[agentID] ?? []).filter(\.isProviderPermission) : []
+    if !approved.isEmpty {
+      let remaining = (pendingPermissions[agentID] ?? []).filter { !$0.isProviderPermission }
+      pendingPermissions[agentID] = remaining.isEmpty ? nil : remaining
+      for pending in approved {
+        pending.timeoutTask?.cancel()
+        appendTranscript(.activity, kind: .notice, text: "Approved \(pending.reason)", to: &agent)
+      }
+      if let next = remaining.first {
+        agent.snapshot.attentionReason = next.reason
+      } else if agent.snapshot.state == .waitingPermission {
+        transition(&agent, to: .working, confidence: 1)
+      }
+    }
+    agents[agentID] = agent
+    refreshDelegatingParent(agentID)
+    for pending in approved { pending.continuation.resume(returning: true) }
   }
 
   /// Resolves the oldest pending permission request with the user's decision and returns the

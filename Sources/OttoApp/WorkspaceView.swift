@@ -16,6 +16,7 @@ extension Notification.Name {
 }
 
 struct WorkspaceView: View {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.openSettings) private var openSettings
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -136,10 +137,13 @@ struct WorkspaceView: View {
     } message: {
       Text(store.persistenceError ?? "Unknown database error")
     }
-    .alert("Conversation error", isPresented: Binding(
-      get: { conversationError != nil },
-      set: { if !$0 { conversationError = nil } }
-    )) {
+    .alert(
+      "Conversation error",
+      isPresented: Binding(
+        get: { conversationError != nil },
+        set: { if !$0 { conversationError = nil } }
+      )
+    ) {
       Button("Dismiss", role: .cancel) { conversationError = nil }
     } message: {
       Text(conversationError ?? "Could not open the conversation")
@@ -172,6 +176,7 @@ struct WorkspaceView: View {
         .environment(\.ottoPalette, palette)
     }
     .onReceive(NotificationCenter.default.publisher(for: .ottoSendFeedback)) { _ in
+      guard spaceVisible else { return }
       uiState.showsFeedback = true
     }
     .onAppear {
@@ -182,10 +187,12 @@ struct WorkspaceView: View {
       if requested { openRequestedBrowser() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .ottoReplayVoiceOnboarding)) { _ in
+      guard spaceVisible else { return }
       showingTour = false
       showingOnboarding = true
     }
     .onReceive(NotificationCenter.default.publisher(for: .ottoStartHomeTour)) { _ in
+      guard spaceVisible else { return }
       startTour()
     }
     .onReceive(MorningHome.leaving) { _ in
@@ -200,7 +207,11 @@ struct WorkspaceView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .ottoOpenCompletedConversation)) {
       notification in
-      if let nodeID = notification.object as? UUID { openHomeAgent(nodeID) }
+      if spaceVisible, let nodeID = notification.object as? UUID,
+        store.snapshot.canvases.contains(where: { $0.nodes.contains(where: { $0.id == nodeID }) })
+      {
+        openHomeAgent(nodeID)
+      }
     }
     .onChange(of: services.botNavigationRequest) { _, request in
       if request != nil { showingPersonalHome = false }
@@ -433,7 +444,7 @@ struct WorkspaceView: View {
       let node = canvas.nodes.first(where: { $0.id == id })
     else { return }
     if node.kind == .terminal {
-      // A waiting terminal in "Needs you": Chat opens it beside its conversation, or in Terminals.
+      // A waiting terminal in "Needs you": Chat opens it in the work drawer.
       services.revealTerminal(id)
       store.setWorkspaceSurface(.chat)
       showingPersonalHome = false
@@ -685,7 +696,8 @@ struct WorkspaceView: View {
         title: "Memory",
         subtitle: "Explore memories and their connections",
         symbol: "brain",
-        keywords: "memory brain graph connections sources entities topics inspector manage knowledge",
+        keywords:
+          "memory brain graph connections sources entities topics inspector manage knowledge",
         perform: { uiState.showsMemoryInspector = true }
       ),
     ]

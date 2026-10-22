@@ -282,6 +282,9 @@ public struct BotChannel: Codable, Equatable, Sendable, Identifiable {
   public var kind: BotConversationKind
   public var conversationID: UUID
   public var nodeID: UUID?
+  /// The provider conversation behind `nodeID`. If the node is lost, a replacement node resumes
+  /// this session so the bot's history comes back instead of opening blank.
+  public var providerSessionID: String?
   public var memberProfileIDs: [UUID]
   /// Display name for a group. One-to-one bot channels leave this nil.
   public var name: String?
@@ -306,6 +309,7 @@ public struct BotChannel: Codable, Equatable, Sendable, Identifiable {
     kind: BotConversationKind = .botChannel,
     conversationID: UUID = UUID(),
     nodeID: UUID? = nil,
+    providerSessionID: String? = nil,
     memberProfileIDs: [UUID] = [],
     name: String? = nil,
     instructions: String? = nil,
@@ -324,6 +328,7 @@ public struct BotChannel: Codable, Equatable, Sendable, Identifiable {
     self.kind = kind
     self.conversationID = conversationID
     self.nodeID = nodeID
+    self.providerSessionID = providerSessionID
     self.memberProfileIDs = memberProfileIDs
     self.name = name
     self.instructions = instructions

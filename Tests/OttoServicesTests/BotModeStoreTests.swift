@@ -45,6 +45,48 @@ struct BotModeStoreTests {
     #expect(services.agentProfiles.activeProfiles.count == 1)
   }
 
+  @Test("A bot whose channel names a lost node is not shown as that blank node")
+  func lostBotNodeIsNotSelected() async throws {
+    let root = temporaryWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let services = ApplicationServices(store: CanvasStore(), workspacePath: root.path)
+    let bot = try services.saveAgentProfile(
+      AgentProfile(name: "Lost", instructions: "Test", provider: .codex))
+    let live = try #require(
+      services.store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))).affectedNodeIDs
+        .first)
+    _ = try services.botChannels.bindNode(profileID: bot.id, nodeID: live)
+    #expect(services.botRoster().first { $0.profile.id == bot.id }?.nodeID == live)
+
+    let lost = UUID()
+    _ = try services.botChannels.bindNode(profileID: bot.id, nodeID: lost)
+    _ = services.store.dispatch(.closeNode(live))
+    #expect(services.liveAgentNodeID(lost) == nil)
+    #expect(services.botRoster().first { $0.profile.id == bot.id }?.nodeID == nil)
+  }
+
+  @Test("A bot channel remembers only its bound node's provider session")
+  func channelRemembersProviderSession() throws {
+    let root = temporaryWorkspace()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let channels = BotChannelStore(workspacePath: root.path)
+    let profileID = UUID()
+    let bound = UUID()
+    _ = try channels.bindNode(profileID: profileID, nodeID: bound)
+    #expect(
+      try channels.recordProviderSession(profileID: profileID, nodeID: UUID(), sessionID: "other")
+        == nil)
+    _ = try channels.recordProviderSession(profileID: profileID, nodeID: bound, sessionID: "s-1")
+    let reloaded = BotChannelStore(workspacePath: root.path)
+    #expect(reloaded.canonicalChannel(for: profileID)?.providerSessionID == "s-1")
+
+    // Channels saved before sessions were remembered still load.
+    let legacy = Data(
+      #"{"id":"9E11321F-0A78-4B64-B9FF-1C65F4A1E2AC","profileID":"431ADDEE-330F-4FB0-9EFD-1B1931B530A6","kind":"botChannel","conversationID":"26AE41EF-C27C-48D1-A4E3-BACB1F6BDA9C","memberProfileIDs":[],"archived":false,"createdAt":0,"updatedAt":0,"revision":1,"schemaVersion":1}"#
+        .utf8)
+    #expect(try JSONDecoder().decode(BotChannel.self, from: legacy).providerSessionID == nil)
+  }
+
   @Test(
     "Team approval is scoped to its live request and rejects stale decisions",
     arguments: [true, false])

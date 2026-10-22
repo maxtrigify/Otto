@@ -275,6 +275,35 @@ struct VoiceSessionTests {
     await session.sleep()
   }
 
+  @Test("Hiding a space preserves its in-flight voice tool delegation")
+  func backgroundSpacePreservesDelegation() async throws {
+    let gate = VoiceDelegationGate()
+    let registry = ToolRegistry()
+    try await registry.register(BlockingVoiceTool(gate: gate))
+    let provider = ScriptedVoiceProvider()
+    let session = VoiceSession(
+      registry: registry, context: ToolContext(actorID: "voice", scopes: []))
+    await session.connect(provider: provider)
+    try await waitUntil { await session.snapshot().state == .listening }
+    await provider.emit(
+      .toolCall(
+        id: "background-call", name: BlockingVoiceTool.definition.name,
+        arguments: .object([:])))
+    try await waitUntil { await gate.entered }
+    await session.setMicrophoneEnabled(false)
+    await session.setPresentationEnabled(false)
+    let resultTask = Task<VoiceToolResult, any Error> {
+      try await firstResult(from: provider.results)
+    }
+    await gate.release()
+    let result = try await resultTask.value
+    #expect(!result.isError)
+    #expect(result.callID == "background-call")
+    #expect(await session.snapshot().state != .sleeping)
+    await session.setPresentationEnabled(true)
+    await session.sleep()
+  }
+
   @Test("Audio capture, playback, interruption, and sleep share one session lifecycle")
   func audioLifecycle() async throws {
     let registry = ToolRegistry()

@@ -54,6 +54,7 @@ struct AgentConversationBody: View {
   let stop: () -> Void
   let restart: () -> Void
   let resolvePermission: (Bool) -> Void
+  let alwaysAllowPermission: () -> Void
   let resolveChoice: (String) -> Void
   let setPermissionMode: (AgentPermissionMode) -> Void
   /// Persists a model id and effort onto the node's launch configuration; nil returns to the
@@ -99,6 +100,8 @@ struct AgentConversationBody: View {
   @State private var showingChildRuns = false
   @State private var composerFocusTask: Task<Void, Never>?
   @State private var selectedMentionIndex = 0
+  @State private var welcomePointer: CGPoint?
+  @State private var welcomeBlinking = false
   @Namespace private var surfaceSelection
   @FocusState private var composerFocused: Bool
 
@@ -128,7 +131,8 @@ struct AgentConversationBody: View {
         }
         Group {
           switch presentation {
-          case .conversation: conversationSurface
+          case .conversation:
+            if showsWelcome { welcomeSurface } else { conversationSurface }
           case .terminal: terminalSurface
           case .files: filesSurface
           case .compact, .hidden: EmptyView()
@@ -137,8 +141,8 @@ struct AgentConversationBody: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The terminal surface IS the input — the live TUI takes keystrokes directly, so a chat
         // composer underneath would just be a second, dead text box.
-        if presentation != .terminal {
-          composer
+        if presentation != .terminal, !(presentation == .conversation && showsWelcome) {
+          composer()
         }
       }
 
@@ -650,70 +654,140 @@ struct AgentConversationBody: View {
     }
   }
 
-  /// The chat surface stays the same whether the last activity was a chat run or a terminal
-  /// session: prior conversation renders as usual, and an empty history gets the welcome
-  /// state. Typing a message always works — it launches a fresh structured run on the same
-  /// provider session, so there is nothing for an empty state to explain.
+  /// A conversation whose transcript is still empty while a run starts shows nothing extra; the
+  /// working row carries the state.
   @ViewBuilder private var emptyConversation: some View {
-    welcomeState
+    Color.clear.frame(height: 1)
   }
 
-  /// Blank-canvas welcome: a centered sans-serif question with tappable prompt cards that seed the
-  /// composer, replacing the old explanatory paragraph. Falls back to a compact variant (no
-  /// icon, two prompts) when the card is too short for the full grid.
-  private var welcomeState: some View {
-    ViewThatFits(in: .vertical) {
-      welcomeContent(compact: false)
-      welcomeContent(compact: true)
+  /// The blank chat ("Halo"): with no history and nothing running, the composer moves to the
+  /// middle under a live Otto and a greeting, with suggestions and the bots that can be
+  /// @mentioned. The first message turns it back into the normal transcript layout.
+  private var showsWelcome: Bool {
+    guard transcript.isEmpty, messageQueue.messages[node.id, default: []].isEmpty else {
+      return false
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    .containerRelativeFrame(.vertical) { length, _ in max(110, length - 44 * scale) }
+    switch snapshot?.state {
+    case .working, .starting, .waitingPermission, .waitingUser: return false
+    default: return !isAwaitingSignIn && !isAwaitingChoice
+    }
   }
 
-  private var welcomePrompts: [WelcomePrompt] {
-    [
-      WelcomePrompt(
-        symbol: "binoculars", color: palette.cyan, label: "Explore and understand code"),
-      WelcomePrompt(
-        symbol: "hammer", color: palette.signal, label: "Build a new feature, app, or tool"),
-      WelcomePrompt(
-        symbol: "text.magnifyingglass", color: palette.amber,
-        label: "Review code and suggest changes"),
-      WelcomePrompt(symbol: "ladybug", color: palette.red, label: "Fix issues and failures"),
-    ]
+  private var welcomeSuggestions: [WelcomeSuggestion] {
+    WelcomeSuggestion.forDirectory(node.agentDefinition?.workingDirectory)
   }
 
-  private func welcomeContent(compact: Bool) -> some View {
-    VStack(spacing: max(10, 14 * scale)) {
-      if !compact {
-        OttoMark(size: max(26, 36 * scale)).opacity(0.85)
+  private var welcomeSurface: some View {
+    GeometryReader { proxy in
+      let size = proxy.size
+      ZStack {
+        // A faint wash of light from the top; Otto's sparks stay the only colour on screen.
+        LinearGradient(
+          colors: [palette.paper.opacity(0.035), .clear],
+          startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.58)
+        )
+        .allowsHitTesting(false)
+        ViewThatFits(in: .vertical) {
+          welcomeColumn(size: size, compact: false)
+          welcomeColumn(size: size, compact: true)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-      Text("What should we build in Otto?")
-        .font(.ottoDisplay(max(15, 20 * scale)))
-        .foregroundStyle(palette.paper)
-        .multilineTextAlignment(.center)
-      LazyVGrid(
-        columns: [
-          GridItem(.adaptive(minimum: 108 * scale, maximum: 160 * scale), spacing: 8 * scale)
-        ],
-        alignment: .center,
-        spacing: 8 * scale
-      ) {
-        ForEach(compact ? Array(welcomePrompts.prefix(2)) : welcomePrompts) { prompt in
-          WelcomePromptCard(
-            symbol: prompt.symbol,
-            color: prompt.color,
-            label: prompt.label,
-            scale: scale
-          ) {
-            input = prompt.label
+      .contentShape(Rectangle())
+      .onContinuousHover(coordinateSpace: .local) { phase in
+        switch phase {
+        case .active(let location): welcomePointer = location
+        case .ended: welcomePointer = nil
+        }
+      }
+    }
+    .task(id: node.id) { await runWelcomeBlinks() }
+  }
+
+  private func welcomeColumn(size: CGSize, compact: Bool) -> some View {
+    VStack(spacing: 0) {
+      if !compact {
+        let face = 42 * scale
+        // Otto looks toward the pointer; his centre sits a little above the composer.
+        let center = CGPoint(x: size.width / 2, y: size.height * 0.5 - 120 * scale)
+        OttoFace(
+          size: face,
+          look: welcomeLook(from: center),
+          blinking: welcomeBlinking
+        )
+        .padding(.bottom, 14 * scale)
+      }
+      VStack(spacing: 5 * scale) {
+        Text(WelcomeGreeting.text())
+          .font(.ottoSerif(max(20, 27 * scale)))
+          .tracking(-0.2)
+          .foregroundStyle(palette.paper)
+        Text("What are we getting into?")
+          .font(.ottoDisplay(max(9, 11.5 * scale)))
+          .foregroundStyle(palette.muted)
+      }
+      .multilineTextAlignment(.center)
+      .padding(.bottom, 20 * scale)
+      composer(centered: true)
+        .frame(maxWidth: 480 * scale)
+      if !compact {
+        WelcomeChipFlow(spacing: 0) {
+          ForEach(Array(welcomeSuggestions.enumerated()), id: \.element.id) { index, suggestion in
+            WelcomeLink(label: suggestion.label, leadingDot: index > 0, scale: scale) {
+              input = suggestion.seed
+              composerFocused = true
+            }
+          }
+        }
+        .frame(maxWidth: 560 * scale)
+        .padding(.top, 12 * scale)
+        if !mentionProfiles.isEmpty {
+          welcomeCrew.padding(.top, 34 * scale)
+        }
+      }
+    }
+    .padding(.horizontal, 24 * scale)
+    .padding(.top, 16 * scale)
+    // Sit just above centre, where the eye rests.
+    .padding(.bottom, 56 * scale)
+  }
+
+  /// The bots this chat can @mention, as small faces; clicking one starts a mention.
+  private var welcomeCrew: some View {
+    HStack(spacing: 8 * scale) {
+      Text("Bring in")
+        .font(.ottoDisplay(max(8, 9.5 * scale)))
+        .foregroundStyle(palette.muted.opacity(0.8))
+      HStack(spacing: 4 * scale) {
+        ForEach(mentionProfiles.prefix(6)) { profile in
+          WelcomeCrewFace(profile: profile, scale: scale) {
+            input = "@\(profile.handle) "
             composerFocused = true
           }
         }
       }
-      .frame(maxWidth: 520 * scale)
     }
-    .padding(.vertical, 4 * scale)
+  }
+
+  private func welcomeLook(from center: CGPoint) -> CGSize {
+    guard let pointer = welcomePointer else { return .zero }
+    let dx = pointer.x - center.x
+    let dy = pointer.y - center.y
+    let distance = max(1, (dx * dx + dy * dy).squareRoot())
+    let reach = min(1, distance / 240)
+    return CGSize(width: dx / distance * reach, height: dy / distance * reach)
+  }
+
+  /// Otto blinks every few seconds; skipped under Reduce Motion.
+  private func runWelcomeBlinks() async {
+    guard !reduceMotion else { return }
+    while !Task.isCancelled {
+      try? await Task.sleep(for: .seconds(Double.random(in: 3.5...6)))
+      guard !Task.isCancelled else { return }
+      welcomeBlinking = true
+      try? await Task.sleep(for: .milliseconds(140))
+      welcomeBlinking = false
+    }
   }
 
   /// Summary of what the completed turn changed on disk — the reviewable receipt of the run.
@@ -1624,13 +1698,14 @@ struct AgentConversationBody: View {
             .font(.ottoLabel(max(5.5, 6.5 * scale)))
             .foregroundStyle(palette.muted)
         }
-        Button {
-          setPermissionMode(.unrestricted)
-          approvePermission()
-        } label: {
-          Text("Always allow — switch \(node.displayName) to bypass permissions")
-            .font(.ottoLabel(max(5.5, 6.5 * scale), weight: .medium))
-            .underline()
+        Button(action: alwaysAllowPermission) {
+          Text(
+            isOneShotRun
+              ? "Always allow — switch \(node.displayName) to bypass permissions"
+              : "Approve and use bypass permissions from the next run"
+          )
+          .font(.ottoLabel(max(5.5, 6.5 * scale), weight: .medium))
+          .underline()
         }
         .buttonStyle(.plain)
         .foregroundStyle(palette.muted)
@@ -2044,7 +2119,7 @@ struct AgentConversationBody: View {
     }
   }
 
-  private var composer: some View {
+  private func composer(centered: Bool = false) -> some View {
     VStack(spacing: 0) {
       queuedMessages
       AgentUsageLimitCard(nodeID: node.id, scale: scale)
@@ -2223,25 +2298,35 @@ struct AgentConversationBody: View {
         guard acceptsComposerInput else { return }
         composerFocused = true
       }
-      .background(palette.raised.opacity(0.92), in: RoundedRectangle(cornerRadius: 12 * scale))
-      .overlay(
-        RoundedRectangle(cornerRadius: 12 * scale)
-          .stroke(
-            composerFocused ? palette.signal.opacity(0.7) : palette.paper.opacity(0.08),
-            lineWidth: 1
-          )
+      .padding(.vertical, centered ? 5 * scale : 0)
+      .background(
+        palette.raised.opacity(centered ? 0.96 : 0.92),
+        in: RoundedRectangle(cornerRadius: (centered ? 15 : 12) * scale)
       )
-      .padding(.horizontal, 10 * scale)
+      .overlay {
+        if centered {
+          RoundedRectangle(cornerRadius: 15 * scale)
+            .stroke(palette.paper.opacity(composerFocused ? 0.16 : 0.07), lineWidth: 1)
+        } else {
+          RoundedRectangle(cornerRadius: 12 * scale)
+            .stroke(
+              composerFocused ? palette.signal.opacity(0.7) : palette.paper.opacity(0.08),
+              lineWidth: 1
+            )
+        }
+      }
+      .shadow(color: .black.opacity(centered ? 0.22 : 0), radius: 16, y: 8)
+      .padding(.horizontal, centered ? 0 : 10 * scale)
       .padding(.top, 9 * scale)
-      .background(palette.paneSurface)
-      composerStatusRow
+      .background(centered ? Color.clear : palette.paneSurface)
+      composerStatusRow(centered: centered)
     }
   }
 
   /// The strip under the composer, mirroring the provider CLIs' own footer: permission mode on
   /// the left, model and effort on the right. Both are live menus, so the agent's operating
   /// setup is adjustable exactly where the eye already checks it.
-  private var composerStatusRow: some View {
+  private func composerStatusRow(centered: Bool = false) -> some View {
     HStack(spacing: 8 * scale) {
       if let definition = node.agentDefinition, definition.provider != .shell {
         permissionMenu(definition)
@@ -2268,10 +2353,10 @@ struct AgentConversationBody: View {
           }
       }
     }
-    .padding(.horizontal, 12 * scale)
+    .padding(.horizontal, centered ? 4 * scale : 12 * scale)
     .padding(.top, 5 * scale)
     .padding(.bottom, 7 * scale)
-    .background(palette.paneSurface)
+    .background(centered ? Color.clear : palette.paneSurface)
   }
 
   private func executionStrategyMenu(_ definition: AgentDefinition) -> some View {
@@ -3201,6 +3286,7 @@ enum ChatComposerKeyPolicy {
 /// events pass through untouched, preserving ordinary editing and plain-Return submission. A nil
 /// `onPasteImage` leaves image paste to the field, for composers that do not accept images.
 struct ChatComposerKeyMonitor: NSViewRepresentable {
+  @Environment(\.ottoSpaceVisible) private var spaceVisible
   let isEnabled: Bool
   var onPasteImage: (() -> Void)? = nil
   let onPasteLargeText: () -> Void
@@ -3209,14 +3295,16 @@ struct ChatComposerKeyMonitor: NSViewRepresentable {
 
   func makeNSView(context: Context) -> NSView {
     context.coordinator.update(
-      isEnabled: isEnabled, onPasteImage: onPasteImage, onPasteLargeText: onPasteLargeText)
+      isEnabled: isEnabled && spaceVisible, onPasteImage: onPasteImage,
+      onPasteLargeText: onPasteLargeText)
     context.coordinator.install()
     return NSView(frame: .zero)
   }
 
   func updateNSView(_ view: NSView, context: Context) {
     context.coordinator.update(
-      isEnabled: isEnabled, onPasteImage: onPasteImage, onPasteLargeText: onPasteLargeText)
+      isEnabled: isEnabled && spaceVisible, onPasteImage: onPasteImage,
+      onPasteLargeText: onPasteLargeText)
   }
 
   static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
@@ -3833,57 +3921,6 @@ struct TurnReviewSheet: View {
 }
 
 /// One suggested opener for a blank agent card.
-private struct WelcomePrompt: Identifiable {
-  let symbol: String
-  let color: Color
-  let label: String
-  var id: String { label }
-}
-
-/// One welcome prompt suggestion: tinted glyph over a sans-serif label on a raised card, with the
-/// design system's soft hover wash. Clicking seeds the composer rather than sending, so the
-/// user can edit before committing.
-private struct WelcomePromptCard: View {
-  @Environment(\.ottoPalette) private var palette
-  let symbol: String
-  let color: Color
-  let label: String
-  let scale: Double
-  let pick: () -> Void
-  @State private var hovering = false
-
-  var body: some View {
-    Button(action: pick) {
-      VStack(alignment: .leading, spacing: max(7, 10 * scale)) {
-        Image(systemName: symbol)
-          .font(.system(size: max(10, 13 * scale), weight: .medium))
-          .foregroundStyle(color)
-        Text(label)
-          .font(.ottoDisplay(max(9, 11 * scale)))
-          .foregroundStyle(palette.paper)
-          .multilineTextAlignment(.leading)
-          .lineSpacing(2 * scale)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, max(8, 12 * scale))
-      .padding(.vertical, max(7, 10 * scale))
-      .background(
-        hovering ? palette.raised : palette.raised.opacity(0.82),
-        in: RoundedRectangle(cornerRadius: 12 * scale)
-      )
-      .overlay(
-        RoundedRectangle(cornerRadius: 12 * scale)
-          .stroke(palette.paper.opacity(hovering ? 0.16 : 0.06), lineWidth: 1)
-      )
-      .contentShape(RoundedRectangle(cornerRadius: 12 * scale))
-    }
-    .buttonStyle(.plain)
-    .onHover { hovering = $0 }
-    .accessibilityLabel("Use prompt: \(label)")
-  }
-}
-
 /// Pulses on its AppKit backing layer so the working label never publishes SwiftUI state.
 private struct ShimmerWord: View {
   @Environment(\.ottoPalette) private var palette
