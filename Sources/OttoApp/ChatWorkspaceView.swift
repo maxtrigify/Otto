@@ -1876,6 +1876,7 @@ struct ChatWorkspaceView: View {
           }
         },
         mentionProfiles: mentionableProfiles,
+        mentionAppearance: { services.botAppearance.appearance(for: $0) },
         waitingTerminals: waitingTerminalNotices(owner: node.id),
         openTerminal: { services.revealTerminal($0) }
       )
@@ -4430,9 +4431,9 @@ struct HireBotSheet: View {
   @State private var permissionMode = AgentPermissionMode.workspaceWrite
   @State private var colorHex: String?
   @State private var shape = "rounded"
-  /// A face by default. Initials were the old fallback and they made every new bot look the
-  /// same in the rail; the emoji grid in Advanced still overrides this.
-  @State private var icon: String? = BotFaceCatalog.all.first?.id
+  /// Nil draws the bot as a member of Otto's family with an accessory suggested by its name and
+  /// job; the accessory strip or the emoji grid in Advanced make an explicit choice.
+  @State private var icon: String?
   @State private var pendingPhotoURL: URL?
   @State private var existingPhotoPath: String?
   @State private var availability: [AgentProviderInfo] = []
@@ -4578,69 +4579,61 @@ struct HireBotSheet: View {
       .padding(.top, 18)
   }
 
+  private var hireTint: Color {
+    Color(hex: colorHex ?? colors.first ?? "") ?? palette.signal
+  }
+
+  private var hireAccessory: BotFamily.Accessory {
+    BotFamily.accessory(reference: icon, name: name, role: jobTitle)
+  }
+
   private var hireAvatarPreview: some View {
-    let tint = Color(hex: colorHex ?? colors.first ?? "") ?? palette.signal
-    let initial = name.trimmingCharacters(in: .whitespacesAndNewlines).first
-    return Group {
-      if shape == "circle" {
-        Circle().fill(tint)
+    Group {
+      if let icon, BotIconCatalog.symbols.contains(icon) {
+        RoundedRectangle(cornerRadius: 16, style: .continuous).fill(hireTint)
+          .overlay(Text(icon).font(.system(size: 26)))
       } else {
-        RoundedRectangle(cornerRadius: 16, style: .continuous).fill(tint)
+        OttoFace(bot: hireAccessory, color: hireTint, state: .idle, size: 56)
       }
     }
     .frame(width: 56, height: 56)
-    .overlay {
-      if BotFaceCatalog.contains(icon), let face = icon {
-        BotFaceAvatar(faceID: face, state: .idle, color: .white, size: 56)
-      } else if let icon, BotIconCatalog.symbols.contains(icon) {
-        Text(icon).font(.system(size: 26))
-      } else {
-        Text(initial.map { String($0).uppercased() } ?? "?")
-          .font(.ottoDisplay(22).weight(.semibold))
-          .foregroundStyle(.white)
-          .opacity(initial == nil ? 0.5 : 1)
-      }
-    }
-    .accessibilityLabel(
-      BotFaceCatalog.name(for: icon).map { "Avatar preview, \($0)" } ?? "Avatar preview")
+    .accessibilityLabel("Avatar preview, \(hireAccessory.name)")
   }
 
-  /// Faces are the first thing you choose, because picking one is the moment the bot stops
-  /// being a form and starts being someone. Each blinks on its own rhythm, so the strip reads
-  /// as a row of characters rather than a row of icons.
+  /// Every bot is one of Otto's family: same shape, its own colour, one accessory. Picking the
+  /// accessory is the moment the bot stops being a form and starts being someone.
   private var hireFacePicker: some View {
-    let tint = Color(hex: colorHex ?? colors.first ?? "") ?? palette.signal
-    return VStack(alignment: .leading, spacing: 8) {
-      Text("FACE")
+    VStack(alignment: .leading, spacing: 8) {
+      Text("LOOK")
         .font(.ottoMono(7, weight: .black))
         .tracking(1.4)
         .foregroundStyle(palette.muted)
       HStack(spacing: 8) {
-        ForEach(BotFaceCatalog.all) { face in
-          let selected = icon == face.id
+        ForEach(BotFamily.Accessory.allCases) { accessory in
+          let selected =
+            pendingPhotoURL == nil && !BotIconCatalog.symbols.contains(icon ?? "")
+            && hireAccessory == accessory
           Button {
-            icon = face.id
+            icon = accessory.reference
             pendingPhotoURL = nil
             existingPhotoPath = nil
           } label: {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-              .fill(tint.opacity(selected ? 1 : 0.35))
-              .frame(width: 38, height: 38)
-              .overlay {
-                BotFaceAvatar(
-                  faceID: face.id, state: .idle,
-                  color: selected ? .white : palette.paper.opacity(0.75), size: 38)
-              }
+            OttoFace(bot: accessory, color: hireTint, state: .idle, size: 34)
+              .opacity(selected ? 1 : 0.55)
+              .frame(width: 42, height: 42)
+              .background(
+                palette.raised.opacity(selected ? 1 : 0.5),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+              )
               .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                  .stroke(selected ? palette.signal : Color.clear, lineWidth: 2)
-                  .padding(-2)
+                  .stroke(selected ? palette.signal : Color.clear, lineWidth: 1.5)
               )
               .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
-          .help(face.name)
-          .accessibilityLabel("Face \(face.name)")
+          .help(accessory.name)
+          .accessibilityLabel("Look: \(accessory.name)")
           .accessibilityAddTraits(selected ? [.isSelected] : [])
         }
         Spacer(minLength: 0)

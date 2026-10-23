@@ -69,6 +69,8 @@ struct AgentConversationBody: View {
   let openBrowser: (String) -> Void
   /// Bots the composer can @mention. Empty hides suggestions.
   var mentionProfiles: [AgentProfile] = []
+  /// Each mentionable bot's look, so the welcome's crew row shows its real face and colour.
+  var mentionAppearance: (UUID) -> BotAppearance? = { _ in nil }
   /// Terminals this conversation started that are waiting on the person.
   var waitingTerminals: [ChatTerminalNotice] = []
   var openTerminal: (UUID) -> Void = { _ in }
@@ -688,8 +690,8 @@ struct AgentConversationBody: View {
         )
         .allowsHitTesting(false)
         ViewThatFits(in: .vertical) {
-          welcomeColumn(size: size, compact: false)
-          welcomeColumn(size: size, compact: true)
+          welcomeColumn(size: size, compact: false, zoom: welcomeZoom(for: size))
+          welcomeColumn(size: size, compact: true, zoom: welcomeZoom(for: size))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
@@ -704,8 +706,17 @@ struct AgentConversationBody: View {
     .task(id: node.id) { await runWelcomeBlinks() }
   }
 
-  private func welcomeColumn(size: CGSize, compact: Bool) -> some View {
-    VStack(spacing: 0) {
+  /// The welcome is designed for a pane of roughly 820×640; larger panes enlarge it (up to
+  /// 1.45×) so it never looks zoomed out on a big window. Smaller panes keep the base size and
+  /// fall back to the compact layout instead.
+  private func welcomeZoom(for size: CGSize) -> Double {
+    let fit = min(size.width / (820 * scale), size.height / (640 * scale))
+    return scale * min(1.45, max(1, fit))
+  }
+
+  private func welcomeColumn(size: CGSize, compact: Bool, zoom: Double) -> some View {
+    let scale = zoom
+    return VStack(spacing: 0) {
       if !compact {
         let face = 42 * scale
         // Otto looks toward the pointer; his centre sits a little above the composer.
@@ -728,7 +739,7 @@ struct AgentConversationBody: View {
       }
       .multilineTextAlignment(.center)
       .padding(.bottom, 20 * scale)
-      composer(centered: true)
+      composer(centered: true, zoom: zoom)
         .frame(maxWidth: 480 * scale)
       if !compact {
         WelcomeChipFlow(spacing: 0) {
@@ -742,7 +753,7 @@ struct AgentConversationBody: View {
         .frame(maxWidth: 560 * scale)
         .padding(.top, 12 * scale)
         if !mentionProfiles.isEmpty {
-          welcomeCrew.padding(.top, 34 * scale)
+          welcomeCrew(scale: scale).padding(.top, 34 * scale)
         }
       }
     }
@@ -753,14 +764,16 @@ struct AgentConversationBody: View {
   }
 
   /// The bots this chat can @mention, as small faces; clicking one starts a mention.
-  private var welcomeCrew: some View {
+  private func welcomeCrew(scale: Double) -> some View {
     HStack(spacing: 8 * scale) {
       Text("Bring in")
         .font(.ottoDisplay(max(8, 9.5 * scale)))
         .foregroundStyle(palette.muted.opacity(0.8))
       HStack(spacing: 4 * scale) {
         ForEach(mentionProfiles.prefix(6)) { profile in
-          WelcomeCrewFace(profile: profile, scale: scale) {
+          WelcomeCrewFace(
+            profile: profile, appearance: mentionAppearance(profile.id), scale: scale
+          ) {
             input = "@\(profile.handle) "
             composerFocused = true
           }
@@ -1766,8 +1779,9 @@ struct AgentConversationBody: View {
     providerAccountContext?.effectiveAccountID(node.id)
   }
 
-  private func modelMenu(_ definition: AgentDefinition) -> some View {
-    Button {
+  private func modelMenu(_ definition: AgentDefinition, zoom: Double? = nil) -> some View {
+    let scale = zoom ?? self.scale
+    return Button {
       showingModelPicker = true
     } label: {
       HStack(spacing: 4 * scale) {
@@ -2119,8 +2133,10 @@ struct AgentConversationBody: View {
     }
   }
 
-  private func composer(centered: Bool = false) -> some View {
-    VStack(spacing: 0) {
+  /// `zoom` overrides the card scale for the centered welcome composer, which grows with the pane.
+  private func composer(centered: Bool = false, zoom: Double? = nil) -> some View {
+    let scale = zoom ?? self.scale
+    return VStack(spacing: 0) {
       queuedMessages
       AgentUsageLimitCard(nodeID: node.id, scale: scale)
       // The context tray tucks 6pt behind the composer field so the two read as one
@@ -2319,29 +2335,30 @@ struct AgentConversationBody: View {
       .padding(.horizontal, centered ? 0 : 10 * scale)
       .padding(.top, 9 * scale)
       .background(centered ? Color.clear : palette.paneSurface)
-      composerStatusRow(centered: centered)
+      composerStatusRow(centered: centered, zoom: zoom)
     }
   }
 
   /// The strip under the composer, mirroring the provider CLIs' own footer: permission mode on
   /// the left, model and effort on the right. Both are live menus, so the agent's operating
   /// setup is adjustable exactly where the eye already checks it.
-  private func composerStatusRow(centered: Bool = false) -> some View {
-    HStack(spacing: 8 * scale) {
+  private func composerStatusRow(centered: Bool = false, zoom: Double? = nil) -> some View {
+    let scale = zoom ?? self.scale
+    return HStack(spacing: 8 * scale) {
       if let definition = node.agentDefinition, definition.provider != .shell {
-        permissionMenu(definition)
+        permissionMenu(definition, zoom: zoom)
       }
       if let definition = node.agentDefinition,
         definition.provider == .claudeCode || definition.provider == .codex
       {
-        executionStrategyMenu(definition)
+        executionStrategyMenu(definition, zoom: zoom)
       }
       AgentAccountChip(node: node, scale: scale)
       Spacer()
       if let definition = node.agentDefinition,
         AgentModelCatalog.supportsModelSelection(for: definition.provider)
       {
-        modelMenu(definition)
+        modelMenu(definition, zoom: zoom)
           // Warming here rather than in the popover means the CLI has usually answered long
           // before the chip is clicked, so the list is there on the first frame.
           // Keyed by account so switching Work ↔ Personal loads that account's catalog.
@@ -2359,7 +2376,10 @@ struct AgentConversationBody: View {
     .background(centered ? Color.clear : palette.paneSurface)
   }
 
-  private func executionStrategyMenu(_ definition: AgentDefinition) -> some View {
+  private func executionStrategyMenu(_ definition: AgentDefinition, zoom: Double? = nil)
+    -> some View
+  {
+    let scale = zoom ?? self.scale
     let current = definition.effectiveExecutionStrategy
     return Menu {
       ForEach(
@@ -2408,7 +2428,8 @@ struct AgentConversationBody: View {
     }
   }
 
-  private func permissionMenu(_ definition: AgentDefinition) -> some View {
+  private func permissionMenu(_ definition: AgentDefinition, zoom: Double? = nil) -> some View {
+    let scale = zoom ?? self.scale
     let mode = AgentPermissionMode(rawValue: definition.permissionMode) ?? .workspaceWrite
     return Menu {
       ForEach(AgentPermissionMode.allCases, id: \.self) { candidate in

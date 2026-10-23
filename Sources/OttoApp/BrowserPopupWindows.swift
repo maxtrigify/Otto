@@ -44,6 +44,13 @@ final class BrowserPopupWindows: NSObject, WKUIDelegate, WKNavigationDelegate, N
     window.makeKeyAndOrderFront(nil)
     return popup
   }
+  func webView(
+    _ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+    initiatedByFrame frame: WKFrameInfo,
+    completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
+  ) {
+    BrowserFilePicker.present(parameters, for: webView, completionHandler: completionHandler)
+  }
   func webViewDidClose(_ webView: WKWebView) {
     BrowserSignInDiagnostics.record("popup.scriptClosed")
     guard let controller = windows.removeValue(forKey: ObjectIdentifier(webView)) else { return }
@@ -77,6 +84,30 @@ final class BrowserPopupWindows: NSObject, WKUIDelegate, WKNavigationDelegate, N
     for controller in controllers {
       controller.window?.delegate = nil
       controller.close()
+    }
+  }
+}
+
+/// WKWebView on macOS shows no file chooser unless the UI delegate presents one, so an
+/// `<input type="file">` (LinkedIn's media upload, Gmail attachments) silently does nothing.
+@MainActor
+enum BrowserFilePicker {
+  static func present(
+    _ parameters: WKOpenPanelParameters, for webView: WKWebView,
+    completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
+  ) {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = parameters.allowsDirectories
+    panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+    panel.resolvesAliases = true
+    let finish: (NSApplication.ModalResponse) -> Void = { response in
+      completionHandler(response == .OK ? panel.urls : nil)
+    }
+    if let window = webView.window {
+      panel.beginSheetModal(for: window, completionHandler: finish)
+    } else {
+      panel.begin(completionHandler: finish)
     }
   }
 }

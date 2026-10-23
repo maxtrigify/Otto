@@ -906,6 +906,8 @@ private struct BrowserWebView: NSViewRepresentable {
     // show an unsupported-browser banner despite using the current system WebKit. This temporary
     // compatibility token goes away when the Chromium renderer becomes the default.
     configuration.applicationNameForUserAgent = safariCompatibilityToken()
+    // Without this WebKit hides the Fullscreen API, so video players' fullscreen buttons do nothing.
+    configuration.preferences.isElementFullscreenEnabled = true
     configuration.userContentController.add(
       coordinator, name: Coordinator.diagnosticMessageName)
     configuration.userContentController.add(
@@ -1282,6 +1284,14 @@ private struct BrowserWebView: NSViewRepresentable {
       return popupWindows.webView(
         webView, createWebViewWith: configuration,
         for: navigationAction, windowFeatures: windowFeatures)
+    }
+
+    func webView(
+      _ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+      initiatedByFrame frame: WKFrameInfo,
+      completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
+    ) {
+      BrowserFilePicker.present(parameters, for: webView, completionHandler: completionHandler)
     }
 
     func closePopupWindows() { popupWindows.closeAll() }

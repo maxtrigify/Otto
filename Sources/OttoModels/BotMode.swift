@@ -47,6 +47,58 @@ public enum BotFaceCatalog {
   }
 }
 
+/// Bots are drawn as members of Otto's family: Otto's two-body shape in the bot's own colour,
+/// wearing one accessory for its role. Only Otto keeps the dark body and the orange sparks.
+/// An accessory is stored in `BotAppearance.avatarRef` as `otto.<accessory>`; bots with no
+/// explicit choice (or a face from the retired catalog) get one inferred from name and role.
+public enum BotFamily {
+  public enum Accessory: String, CaseIterable, Identifiable, Sendable {
+    case none, glasses, headset, hardHat, beret, antenna
+
+    public var id: String { rawValue }
+    public var reference: String { "otto.\(rawValue)" }
+    public var name: String {
+      switch self {
+      case .none: "Plain"
+      case .glasses: "Glasses"
+      case .headset: "Headset"
+      case .hardHat: "Hard hat"
+      case .beret: "Beret"
+      case .antenna: "Antenna"
+      }
+    }
+  }
+
+  public static func isFamilyReference(_ reference: String?) -> Bool {
+    reference?.hasPrefix("otto.") == true
+  }
+
+  /// The accessory a bot wears. An explicit `otto.` choice wins; otherwise the role and name
+  /// suggest one, and failing that a stable pick from the name keeps every bot distinct.
+  public static func accessory(reference: String?, name: String, role: String? = nil)
+    -> Accessory
+  {
+    if let reference, reference.hasPrefix("otto."),
+      let chosen = Accessory(rawValue: String(reference.dropFirst(5)))
+    {
+      return chosen
+    }
+    let text = "\(role ?? "") \(name)".lowercased()
+    let hints: [(Accessory, [String])] = [
+      (.glasses, ["research", "analy", "scout", "study", "insight", "data"]),
+      (.antenna, ["code", "coder", "dev", "engineer", "build", "tech", "bug"]),
+      (.headset, ["inbox", "email", "mail", "support", "social", "reply", "sales", "outreach"]),
+      (.hardHat, ["ops", "automat", "deploy", "infra", "workflow", "admin"]),
+      (.beret, ["writ", "content", "copy", "design", "creative", "blog", "market"]),
+    ]
+    for (accessory, words) in hints where words.contains(where: text.contains) {
+      return accessory
+    }
+    let seed = name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
+    return Accessory.allCases[seed % Accessory.allCases.count]
+  }
+}
+
 public struct BotAppearance: Codable, Equatable, Sendable, Identifiable {
   public var id: UUID { profileID }
   public var profileID: UUID

@@ -52,6 +52,7 @@ struct ChatWelcomeTests {
     ]
     for (name, size, profiles) in [
       ("welcome-wide", CGSize(width: 1040, height: 700), bots),
+      ("welcome-large", CGSize(width: 1180, height: 830), bots),
       ("welcome-short", CGSize(width: 720, height: 380), bots),
       ("welcome-no-bots", CGSize(width: 900, height: 640), [AgentProfile]()),
     ] {

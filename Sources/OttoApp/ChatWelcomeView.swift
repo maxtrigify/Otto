@@ -39,72 +39,6 @@ extension Font {
   }
 }
 
-/// Otto drawn from the brand mark's geometry (two round bodies, big eyes, nub feet, sparks) so
-/// the pupils can move. `look` is a unit-ish vector toward where Otto should look.
-struct OttoFace: View {
-  var size: CGFloat
-  var look: CGSize = .zero
-  var body_: Color = Color(red: 0.11, green: 0.12, blue: 0.15)
-  var showsSparks = true
-  var blinking = false
-
-  var body: some View {
-    Canvas { context, canvasSize in
-      let k = canvasSize.width / 260
-      func circle(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat) -> Path {
-        Path(ellipseIn: CGRect(x: (x - r) * k, y: (y - r) * k, width: 2 * r * k, height: 2 * r * k))
-      }
-      let ink = GraphicsContext.Shading.color(body_)
-      let white = GraphicsContext.Shading.color(Color(red: 0.965, green: 0.957, blue: 0.933))
-
-      if showsSparks {
-        let spark = Color(red: 1, green: 0.353, blue: 0.122)
-        for (a, b) in [
-          (CGPoint(x: 206, y: 40), CGPoint(x: 211, y: 58)),
-          (CGPoint(x: 228, y: 54), CGPoint(x: 240, y: 44)),
-          (CGPoint(x: 232, y: 78), CGPoint(x: 250, y: 80)),
-        ] {
-          var line = Path()
-          line.move(to: CGPoint(x: a.x * k, y: a.y * k))
-          line.addLine(to: CGPoint(x: b.x * k, y: b.y * k))
-          context.stroke(line, with: .color(spark), style: StrokeStyle(lineWidth: 11 * k, lineCap: .round))
-        }
-      }
-      for foot in [CGRect(x: 58, y: 196, width: 42, height: 26), CGRect(x: 152, y: 196, width: 46, height: 26)] {
-        let r = CGRect(x: foot.minX * k, y: foot.minY * k, width: foot.width * k, height: foot.height * k)
-        context.fill(Path(roundedRect: r, cornerRadius: 13 * k), with: ink)
-      }
-      context.fill(circle(80, 150, 60), with: ink)
-      context.fill(circle(172, 124, 76), with: ink)
-
-      if blinking {
-        for (x, y, w) in [(CGFloat(74), CGFloat(152), CGFloat(30)), (168, 122, 40)] {
-          var lid = Path()
-          lid.move(to: CGPoint(x: (x - w) * k, y: y * k))
-          lid.addQuadCurve(
-            to: CGPoint(x: (x + w) * k, y: y * k), control: CGPoint(x: x * k, y: (y + 10) * k))
-          context.stroke(lid, with: white, style: StrokeStyle(lineWidth: 6 * k, lineCap: .round))
-        }
-        return
-      }
-      context.fill(circle(74, 152, 35), with: white)
-      context.fill(circle(168, 122, 48), with: white)
-      // Pupils rest up-and-right like the brand mark, then travel toward `look`.
-      let dx = max(-1, min(1, look.width)) * 12
-      let dy = max(-1, min(1, look.height)) * 12
-      context.fill(circle(74 + 4 + dx * 0.8, 152 - 6 + dy * 0.8, 18), with: ink)
-      context.fill(circle(74 + 11 + dx * 0.8, 152 - 14 + dy * 0.8, 5), with: white)
-      context.fill(circle(168 + 6 + dx, 122 - 8 + dy, 23), with: ink)
-      context.fill(circle(168 + 15 + dx, 122 - 18 + dy, 6.5), with: white)
-    }
-    .frame(width: size, height: size)
-    // The faint light edge from `OttoMark` keeps the ink body readable on dark themes.
-    .shadow(color: .white.opacity(0.45), radius: 0.6)
-    .shadow(color: .white.opacity(0.22), radius: 1.4)
-    .accessibilityHidden(true)
-  }
-}
-
 /// One suggestion under the centered composer: quiet text that brightens on hover, separated
 /// from its neighbour by a small dot. Seeds the composer rather than sending.
 struct WelcomeLink: View {
@@ -235,6 +169,7 @@ struct WelcomeChipFlow: Layout {
 struct WelcomeCrewFace: View {
   @Environment(\.ottoPalette) private var palette
   let profile: AgentProfile
+  var appearance: BotAppearance?
   let scale: Double
   let pick: () -> Void
   @State private var hovering = false
@@ -242,7 +177,7 @@ struct WelcomeCrewFace: View {
   var body: some View {
     Button(action: pick) {
       BotAvatarView(
-        presentation: BotAvatarPresentation(id: profile.id, name: profile.name),
+        presentation: BotAvatarPresentation(id: profile.id, name: profile.name, appearance: appearance),
         size: 18 * scale,
         showsStateBadge: false
       )

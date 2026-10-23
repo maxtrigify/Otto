@@ -185,7 +185,7 @@ extension ApplicationServices {
       .compactMap(\.first).map(String.init).joined().uppercased()
     return BotAppearance(
       profileID: profileID,
-      avatarRef: BotIconCatalog.symbols[seed % BotIconCatalog.symbols.count],
+      avatarRef: BotFamily.accessory(reference: nil, name: name).reference,
       shape: "rounded",
       colorHex: colors[seed % colors.count],
       initials: initials.isEmpty ? String(name.prefix(2)).uppercased() : initials

@@ -42,13 +42,39 @@ struct BotAvatarView: View {
   var size: CGFloat
   var showsStateBadge = true
 
-  /// List-sized avatars are a calm gradient circle with an initial; the detailed faces only
-  /// show where there is room to read them.
+  /// List-sized photo and emoji avatars are a calm gradient circle; family faces draw at every
+  /// size, since the silhouette and colour stay readable down to list rows.
   private var isCompact: Bool { size < 48 }
+
+  /// Photos and hand-picked emoji are the person's explicit choice; everything else is drawn as
+  /// a member of Otto's family.
+  private var familyAccessory: BotFamily.Accessory? {
+    if presentation.photoURL.flatMap({ NSImage(contentsOf: $0) }) != nil { return nil }
+    if let icon = presentation.appearance?.avatarRef, BotIconCatalog.symbols.contains(icon) {
+      return nil
+    }
+    return BotFamily.accessory(
+      reference: presentation.appearance?.avatarRef, name: presentation.name)
+  }
 
   var body: some View {
     ZStack(alignment: .bottomTrailing) {
-      if isCompact {
+      if let accessory = familyAccessory {
+        OttoFace(bot: accessory, color: baseColor, state: presentation.state, size: size)
+          .opacity(presentation.state == .offline ? 0.55 : 1)
+        if showsStateBadge {
+          if isCompact {
+            if let ring = statusRing {
+              Circle().fill(ring)
+                .frame(width: max(5, size * 0.28), height: max(5, size * 0.28))
+                .overlay(Circle().stroke(palette.ink, lineWidth: max(1, size * 0.06)))
+            }
+          } else if presentation.state != .idle {
+            // An idle face already says "idle"; the badge only appears when something happens.
+            stateBadge.offset(x: size * 0.04, y: size * 0.04)
+          }
+        }
+      } else if isCompact {
         compactAvatar
       } else {
         avatarContent
@@ -76,23 +102,8 @@ struct BotAvatarView: View {
     } else {
       plate
         .overlay {
-          if BotFaceCatalog.contains(presentation.appearance?.avatarRef),
-            let face = presentation.appearance?.avatarRef
-          {
-            BotFaceAvatar(
-              faceID: face,
-              state: presentation.state,
-              color: markColor,
-              size: size
-            )
-          } else if let icon = presentation.appearance?.avatarRef,
-            BotIconCatalog.symbols.contains(icon)
-          {
+          if let icon = presentation.appearance?.avatarRef {
             Text(icon).font(.system(size: max(11, size * 0.48)))
-          } else {
-            Text(presentation.initials)
-              .font(.ottoMono(max(7, size * 0.22), weight: .black))
-              .foregroundStyle(markColor)
           }
         }
     }
@@ -102,25 +113,9 @@ struct BotAvatarView: View {
     Group {
       if let photoURL = presentation.photoURL, let image = NSImage(contentsOf: photoURL) {
         Image(nsImage: image).resizable().scaledToFill()
-      } else if BotFaceCatalog.contains(presentation.appearance?.avatarRef),
-        let face = presentation.appearance?.avatarRef
-      {
-        // The bot's chosen face, drawn in white inside its colour circle.
-        Circle().fill(gradient)
-          .overlay(
-            BotFaceAvatar(faceID: face, state: presentation.state, color: .white, size: size * 0.86)
-          )
-      } else if let icon = presentation.appearance?.avatarRef,
-        BotIconCatalog.symbols.contains(icon)
-      {
-        Circle().fill(gradient)
-          .overlay(Text(icon).font(.system(size: size * 0.5)))
       } else {
         Circle().fill(gradient)
-          .overlay(
-            Text(String(presentation.name.prefix(1)).uppercased())
-              .font(.ottoDisplay(size * 0.46).weight(.semibold))
-              .foregroundStyle(.white.opacity(0.95)))
+          .overlay(Text(presentation.appearance?.avatarRef ?? "").font(.system(size: size * 0.5)))
       }
     }
     .frame(width: size, height: size)
@@ -172,9 +167,6 @@ struct BotAvatarView: View {
     colorIsDark ? palette.paper.opacity(0.16) : avatarColor.opacity(0.28)
   }
 
-  private var markColor: Color {
-    colorIsDark ? palette.paper : avatarColor
-  }
 
   private var avatarShape: AnyShape {
     switch presentation.appearance?.shape {
