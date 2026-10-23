@@ -107,23 +107,7 @@ struct AgentConversationBody: View {
   @Namespace private var surfaceSelection
   @FocusState private var composerFocused: Bool
 
-  struct PendingChatImage: Identifiable, Equatable {
-    let id = UUID()
-    let path: String
-    let name: String
-  }
-
-  private enum ChatImageAttachmentError: LocalizedError {
-    case notAFile
-    case fileTooLarge
-
-    var errorDescription: String? {
-      switch self {
-      case .notAFile: "Only image files can be attached"
-      case .fileTooLarge: "The image exceeds the 50 MB attachment limit"
-      }
-    }
-  }
+  typealias PendingChatImage = ChatImageAttachment
 
   private var conversationLayout: some View {
     HStack(spacing: 0) {
@@ -2534,58 +2518,23 @@ struct AgentConversationBody: View {
   }
 
   private func attachImageFile(_ url: URL) {
-    let accessed = url.startAccessingSecurityScopedResource()
-    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-    let destination = uniqueAttachmentPath(preferredName: url.lastPathComponent)
     do {
-      let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-      guard values.isRegularFile == true else {
-        throw ChatImageAttachmentError.notAFile
-      }
-      guard Int64(values.fileSize ?? 0) <= Self.maximumChatImageBytes else {
-        throw ChatImageAttachmentError.fileTooLarge
-      }
-      try FileManager.default.createDirectory(
-        atPath: chatAttachmentsDirectory, withIntermediateDirectories: true)
-      try FileManager.default.copyItem(atPath: url.path, toPath: destination)
-      pendingImages.append(
-        PendingChatImage(path: destination, name: (destination as NSString).lastPathComponent))
+      pendingImages.append(try imageAttachmentStore.saveFile(url))
     } catch {
       attachmentError = "Couldn’t attach \(url.lastPathComponent): \(error.localizedDescription)"
     }
   }
 
   private func attachImage(_ image: NSImage) {
-    guard let tiff = image.tiffRepresentation,
-      let bitmap = NSBitmapImageRep(data: tiff),
-      let data = bitmap.representation(using: .png, properties: [:])
-    else {
-      attachmentError = "Couldn’t read the image from the clipboard."
-      return
-    }
-    guard Int64(data.count) <= Self.maximumChatImageBytes else {
-      attachmentError = "The pasted image exceeds the 50 MB attachment limit."
-      return
-    }
-    let destination = uniqueAttachmentPath(preferredName: "pasted-image.png")
     do {
-      try FileManager.default.createDirectory(
-        atPath: chatAttachmentsDirectory, withIntermediateDirectories: true)
-      try data.write(to: URL(fileURLWithPath: destination), options: .atomic)
-      pendingImages.append(
-        PendingChatImage(path: destination, name: (destination as NSString).lastPathComponent))
+      pendingImages.append(try imageAttachmentStore.saveImage(image))
     } catch {
       attachmentError = "Couldn’t save the pasted image: \(error.localizedDescription)"
     }
   }
 
-  private static let maximumChatImageBytes: Int64 = 50 * 1_048_576
-
-  private func uniqueAttachmentPath(preferredName: String) -> String {
-    let stamp = Int(Date.now.timeIntervalSince1970)
-    let sanitized = preferredName.replacingOccurrences(of: "/", with: "-")
-    return (chatAttachmentsDirectory as NSString)
-      .appendingPathComponent("\(stamp)-\(UUID().uuidString.prefix(4))-\(sanitized)")
+  private var imageAttachmentStore: ChatImageAttachmentStore {
+    ChatImageAttachmentStore(directory: chatAttachmentsDirectory)
   }
 
   static func promptText(_ text: String, referencing imagePaths: [String]) -> String {

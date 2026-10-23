@@ -912,35 +912,8 @@ public struct WorkspaceSnapshot: Codable, Equatable, Sendable {
 
   public static var starter: WorkspaceSnapshot {
     let canvasID = UUID()
-    let nodes = [
-      OttoNode(
-        kind: .agent,
-        displayName: "Ada",
-        subtitle: "CLAUDE CODE · LOCAL",
-        frame: WorldRect(x: -470, y: -210, width: 420, height: 270),
-        zIndex: 0,
-        detail: "Awaiting a brief"
-      ),
-      OttoNode(
-        kind: .agent,
-        displayName: "Bowie",
-        subtitle: "CODEX · LOCAL",
-        frame: WorldRect(x: 0, y: -145, width: 420, height: 270),
-        zIndex: 1,
-        status: .working,
-        detail: "Mapping the workspace…"
-      ),
-      OttoNode(
-        kind: .markdown,
-        displayName: "Launch notes",
-        subtitle: "MARKDOWN · OTTO/GOALS.MD",
-        frame: WorldRect(x: -250, y: 150, width: 360, height: 300),
-        zIndex: 2,
-        detail: "3 open decisions"
-      ),
-    ]
     return WorkspaceSnapshot(
-      canvases: [OttoCanvas(id: canvasID, name: "First light", nodes: nodes)],
+      canvases: [OttoCanvas(id: canvasID, name: "Workspace")],
       activeCanvasID: canvasID,
       workspaceSurface: .chat
     )

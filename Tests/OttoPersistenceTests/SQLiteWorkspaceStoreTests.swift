@@ -6,6 +6,24 @@ import Testing
 
 @Suite("SQLite workspace persistence")
 struct SQLiteWorkspaceStoreTests {
+  // Persistence tests need real nodes; fresh production workspaces intentionally have none.
+  private func populatedWorkspace() -> WorkspaceSnapshot {
+    let nodes = [
+      OttoNode(
+        kind: .agent, displayName: "Idle session", subtitle: "LOCAL",
+        frame: WorldRect(x: 0, y: 0, width: 420, height: 270), zIndex: 0),
+      OttoNode(
+        kind: .agent, displayName: "Working session", subtitle: "LOCAL",
+        frame: WorldRect(x: 440, y: 0, width: 420, height: 270), zIndex: 1,
+        status: .working),
+      OttoNode(
+        kind: .markdown, displayName: "Notes", subtitle: "MARKDOWN",
+        frame: WorldRect(x: 0, y: 300, width: 360, height: 300), zIndex: 2),
+    ]
+    let canvas = OttoCanvas(name: "Persistence fixture", nodes: nodes)
+    return WorkspaceSnapshot(canvases: [canvas], activeCanvasID: canvas.id)
+  }
+
   @Test("Migrates and restores a workspace snapshot")
   func roundTrip() async throws {
     let directory = FileManager.default.temporaryDirectory
@@ -14,7 +32,7 @@ struct SQLiteWorkspaceStoreTests {
     defer { try? FileManager.default.removeItem(at: directory) }
 
     let store = SQLiteWorkspaceStore(path: directory.appending(path: "workspace.sqlite").path)
-    var expected = WorkspaceSnapshot.starter
+    var expected = populatedWorkspace()
     expected.canvases[0].nodes[0].agentDefinition = AgentDefinition(
       provider: .claudeCode,
       repositoryPath: "/code/otto",
@@ -72,7 +90,7 @@ struct SQLiteWorkspaceStoreTests {
     let encoder = JSONEncoder()
     let decoder = JSONDecoder()
     var object = try #require(
-      JSONSerialization.jsonObject(with: encoder.encode(WorkspaceSnapshot.starter))
+      JSONSerialization.jsonObject(with: encoder.encode(populatedWorkspace()))
         as? [String: Any])
     var canvases = try #require(object["canvases"] as? [[String: Any]])
     var nodes = try #require(canvases[0]["nodes"] as? [[String: Any]])
@@ -119,7 +137,7 @@ struct SQLiteWorkspaceStoreTests {
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = SQLiteWorkspaceStore(path: directory.appending(path: "workspace.sqlite").path)
 
-    try await store.save(.starter)
+    try await store.save(populatedWorkspace())
     #expect(try await store.schemaVersion() == 2)
     let counts = try await store.normalizedCounts()
     #expect(counts.canvases == 1)
@@ -145,7 +163,7 @@ struct SQLiteWorkspaceStoreTests {
 
     let store = SQLiteWorkspaceStore(path: path.path)
     #expect(try await store.schemaVersion() == 2)
-    let expected = WorkspaceSnapshot.starter
+    let expected = populatedWorkspace()
     try await store.save(expected)
     #expect(try await store.load() == expected)
     #expect(try await store.normalizedCounts() == (canvases: 1, nodes: 3))
@@ -178,7 +196,7 @@ struct SQLiteWorkspaceStoreTests {
       .appending(path: "otto-restore-\(UUID().uuidString).sqlite")
     defer { try? FileManager.default.removeItem(at: path) }
     let store = SQLiteWorkspaceStore(path: path.path)
-    try await store.save(.starter)
+    try await store.save(populatedWorkspace())
 
     let restored = try #require(try await store.loadForRestoration())
     #expect(restored.canvases[0].nodes[0].status == .idle)
@@ -196,7 +214,7 @@ struct SQLiteWorkspaceStoreTests {
       try? FileManager.default.removeItem(atPath: path.path + "-shm")
     }
     let store = SQLiteWorkspaceStore(path: path.path)
-    let baseline = WorkspaceSnapshot.starter
+    let baseline = populatedWorkspace()
     try await store.save(baseline)
 
     let process = Process()

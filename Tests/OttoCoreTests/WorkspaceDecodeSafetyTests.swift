@@ -11,6 +11,30 @@ import Testing
 @Suite("Workspace decode safety")
 @MainActor
 struct WorkspaceDecodeSafetyTests {
+  @Test("A fresh profile starts empty and stays empty after reopening")
+  func freshProfileStartsEmpty() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: "otto-fresh-profile-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let persistence = SQLiteWorkspaceStore(path: directory.appending(path: "workspace.sqlite").path)
+    let store = CanvasStore(persistence: persistence)
+
+    #expect(store.snapshot.canvases.count == 1)
+    #expect(store.activeCanvas.nodes.isEmpty)
+    await store.restore()
+    #expect(!store.isAwaitingRestore)
+    #expect(store.persistenceError == nil)
+    #expect(store.activeCanvas.nodes.isEmpty)
+    let saved = try #require(try await persistence.load())
+    #expect(saved == store.snapshot)
+
+    let reopened = CanvasStore(persistence: persistence)
+    await reopened.restore()
+    #expect(reopened.snapshot == saved)
+    #expect(reopened.activeCanvas.nodes.isEmpty)
+  }
+
   @Test("Navigation values from a newer Otto fall back instead of failing the workspace")
   func unknownNavigationValues() throws {
     var snapshot = WorkspaceSnapshot.starter

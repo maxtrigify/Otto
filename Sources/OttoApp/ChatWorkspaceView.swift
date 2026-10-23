@@ -402,7 +402,6 @@ struct ChatWorkspaceView: View {
       if sessionCanvasID == nil { sessionCanvasID = store.activeCanvas.id }
       repairSelection()
       restoreAgentBrowserAssociations()
-      restoreAgentTerminalAssociations()
       applyBotNavigation(services.botNavigationRequest)
       if let request = services.terminalRevealRequest,
         Date().timeIntervalSince(request.createdAt) < 5
@@ -410,7 +409,6 @@ struct ChatWorkspaceView: View {
         applyTerminalReveal(request)
       }
     }
-    .onChange(of: terminalNodes.map(\.id)) { _, _ in restoreAgentTerminalAssociations() }
     .onChange(of: services.terminalRevealRequest) { _, request in
       if let request { applyTerminalReveal(request) }
     }
@@ -1142,19 +1140,10 @@ struct ChatWorkspaceView: View {
     }
   }
 
-  /// Register terminals quietly. Only explicit user actions reveal the drawer or select a tab.
-  private func restoreAgentTerminalAssociations() {
-    for terminal in terminalNodes.reversed() {
-      guard let ownerID = terminal.parentAgentID,
-        !(workTabs[ownerID] ?? []).contains(where: { $0.terminalID == terminal.id })
-      else { continue }
-      workTabs[ownerID, default: []].append(
-        WorkTab(surface: .terminal, title: terminal.displayName, terminalID: terminal.id))
-    }
-  }
-
   /// Brings a terminal forward in its conversation's work drawer. Terminals without a
   /// visible conversation use the same right-hand drawer beside the current page.
+  /// Create command tabs only here, on an explicit user reveal. Registering all commands
+  /// still exposes routine terminals whenever a browser has already opened the work panel.
   private func applyTerminalReveal(_ request: TerminalRevealRequest) {
     guard let terminal = terminalNodes.first(where: { $0.id == request.terminalID }) else {
       return

@@ -27,6 +27,7 @@ struct PersonalHomeView: View {
   @State private var submitting = false
   @State private var error: String?
   @State private var pendingPastes: [ChatPastedText] = []
+  @State private var pendingImages: [ChatImageAttachment] = []
   @FocusState private var composerFocused: Bool
   @State private var addingTodo = false
   @State private var briefError: String?
@@ -285,18 +286,43 @@ struct PersonalHomeView: View {
 
   private var composer: some View {
     VStack(alignment: .leading, spacing: 14) {
-      if !pendingPastes.isEmpty {
-        HStack(spacing: 7) {
-          ForEach(pendingPastes) { paste in
-            ChatPastedTextChip(
-              paste: paste, scale: 1.3, foreground: cardPalette.muted,
-              background: cardPalette.paper.opacity(0.08)
-            ) {
-              pendingPastes.removeAll { $0.id == paste.id }
+      if !pendingPastes.isEmpty || !pendingImages.isEmpty {
+        ScrollView(.horizontal) {
+          HStack(spacing: 7) {
+            ForEach(pendingPastes) { paste in
+              ChatPastedTextChip(
+                paste: paste, scale: 1.3, foreground: cardPalette.muted,
+                background: cardPalette.paper.opacity(0.08)
+              ) {
+                pendingPastes.removeAll { $0.id == paste.id }
+              }
+            }
+            ForEach(pendingImages) { image in
+              HStack(spacing: 6) {
+                if let thumbnail = NSImage(contentsOfFile: image.path) {
+                  Image(nsImage: thumbnail)
+                    .resizable().scaledToFill()
+                    .frame(width: 34, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                Text(image.name).font(.ottoDisplay(10)).lineLimit(1)
+                Button {
+                  pendingImages.removeAll { $0.id == image.id }
+                } label: {
+                  Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(image.name)")
+              }
+              .foregroundStyle(cardPalette.muted)
+              .padding(7)
+              .background(cardPalette.paper.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
             }
           }
-          Spacer()
         }
+        .scrollIndicators(.hidden)
+        .frame(height: 48)
+        .disabled(submitting)
       }
       TextField(composerPlaceholder, text: $draft, axis: .vertical)
         .font(.ottoDisplay(15))
@@ -315,6 +341,7 @@ struct PersonalHomeView: View {
         .background {
           ChatComposerKeyMonitor(
             isEnabled: composerFocused && !submitting,
+            onPasteImage: attachImagesFromPasteboard,
             onPasteLargeText: attachTextFromPasteboard
           )
         }
@@ -850,7 +877,20 @@ struct PersonalHomeView: View {
 
   private var composedPrompt: String? {
     let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    return ChatPastedText.compose(typed: typed.isEmpty ? nil : typed, pastes: pendingPastes)
+    return ChatImageAttachmentStore.compose(
+      typed: typed.isEmpty ? nil : typed, pastes: pendingPastes, images: pendingImages)
+  }
+
+  private func attachImagesFromPasteboard() {
+    error = nil
+    let directory = (services.defaultWorkspacePath as NSString).appendingPathComponent(
+      ".otto/chat-attachments")
+    do {
+      pendingImages.append(
+        contentsOf: try ChatImageAttachmentStore(directory: directory).paste(from: .general))
+    } catch {
+      self.error = "Couldn’t attach image: \(error.localizedDescription)"
+    }
   }
 
   private func attachTextFromPasteboard() {
@@ -898,6 +938,7 @@ struct PersonalHomeView: View {
         try await submit(target, selectedProvider, prompt)
         draft = ""
         pendingPastes.removeAll()
+        pendingImages.removeAll()
       } catch {
         self.error = error.localizedDescription
       }
