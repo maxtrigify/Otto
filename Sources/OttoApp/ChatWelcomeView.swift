@@ -186,8 +186,27 @@ struct WelcomeCrewFace: View {
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
+    // The name appears straight away on hover, above the face, so there is no need to click (or
+    // wait for a system tooltip) to see who is who.
+    .overlay(alignment: .top) {
+      if hovering {
+        Text(profile.name)
+          .font(.ottoDisplay(max(8, 9.5 * scale)).weight(.medium))
+          .foregroundStyle(palette.paper)
+          .lineLimit(1)
+          .fixedSize()
+          .padding(.horizontal, 7 * scale)
+          .padding(.vertical, 3 * scale)
+          .background(palette.raised, in: Capsule())
+          .overlay(Capsule().stroke(palette.paper.opacity(0.1), lineWidth: 1))
+          .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+          .offset(y: -24 * scale)
+          .transition(.opacity.combined(with: .offset(y: 3)))
+          .allowsHitTesting(false)
+      }
+    }
+    .zIndex(hovering ? 1 : 0)
     .animation(.easeOut(duration: 0.16), value: hovering)
-    .help("@\(profile.handle) · \(profile.role)")
     .accessibilityLabel("Mention \(profile.name)")
   }
 }

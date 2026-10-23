@@ -4,6 +4,27 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.3 — 2026-10-23
+
+### New
+
+- **A calmer place to start.** A new chat now opens on a quiet welcome: a small Otto who follows your cursor and blinks, a greeting for the time of day, the message box in the middle of the screen, and a few suggestions (Brief me on today, Draft a doc, Research a website, Automate something). In a code project you get coding suggestions instead. It scales with your window, and once you send a message the chat goes back to normal.
+- **Your bots are part of Otto's family.** Bots now look like Otto: his shape in their own colour, wearing one accessory for their job (glasses, headset, hard hat, beret or antenna). Their eyes show what they're up to: glancing up while working, crossed when something went wrong and closed when offline. Pick a different look in the bot editor; photos and emoji you chose yourself are kept.
+- **Bring a bot into any chat.** The new-chat screen shows your bots under "Bring in". Hover to see who's who, and click one to @mention it.
+- **Videos go fullscreen in the Browser,** and file upload buttons on websites now open a file picker.
+
+### Changes
+
+- **Switching spaces keeps everything running.** Moving between your spaces no longer restarts Otto: agents keep working, and drafts stay where you left them.
+- **Terminals live in the work drawer.** Agent and bot terminals sit in the panel on the right of Chat instead of a separate page, and the drawer only opens when you choose to look.
+- **Links that open a new window now open as a Browser tab** inside Otto, instead of in another browser.
+- **"Always allow" applies straight away.** Choosing Always allow on an approval now covers the run that's already going, and is remembered for that bot.
+
+### Fixes
+
+- **Bots no longer open blank.** If a bot's conversation lost its place, Otto now reopens the saved conversation instead of an empty chat.
+- **Fixed a rare freeze** when waiting work was cancelled.
+
 ## 0.2.2 — 2026-10-21
 
 ### New
