@@ -41,6 +41,28 @@ binary_dir=$("$script_dir/otto-swift" build \
 /usr/bin/install -m 755 "$binary_dir/otto-openai-agent" "$app_bundle/Contents/MacOS/otto-openai-agent"
 /usr/bin/install -m 755 "$binary_dir/otto-hookd" "$app_bundle/Contents/MacOS/otto-hookd"
 /usr/bin/install -m 755 "$binary_dir/ottod" "$app_bundle/Contents/MacOS/ottod"
+
+# Newer toolchains link back-deployment libraries such as libswiftCompatibilitySpan
+# through @rpath. macOS 26+ ships them, older supported systems need the bundled copy.
+toolchain_swift_dir=$(/usr/bin/xcrun --find swift)
+toolchain_swift_dir=${toolchain_swift_dir:h:h}/lib
+for executable in "$app_bundle"/Contents/MacOS/*(.); do
+  for library in ${(f)"$(/usr/bin/otool -L "$executable" | /usr/bin/awk '$1 ~ /^@rpath\/libswift.*\.dylib$/ { sub("@rpath/", "", $1); print $1 }')"}; do
+    [[ -f $app_bundle/Contents/MacOS/$library ]] && continue
+    source_library=( "$toolchain_swift_dir"/swift-*/macosx/$library(N) )
+    (( ${#source_library} )) || {
+      print -u2 "${executable:t} needs $library, which is not in the toolchain at $toolchain_swift_dir"
+      exit 2
+    }
+    /usr/bin/install -m 755 "${source_library[-1]}" "$app_bundle/Contents/MacOS/$library"
+  done
+  # Drop rpaths that only exist on the build machine (Xcode, Metal toolchain cryptex).
+  for rpath in ${(f)"$(/usr/bin/otool -l "$executable" | /usr/bin/awk '/cmd LC_RPATH/ { getline; getline; print $2 }')"}; do
+    [[ $rpath == @* || $rpath == /usr/lib/* ]] && continue
+    /usr/bin/install_name_tool -delete_rpath "$rpath" "$executable"
+  done
+done
+
 /usr/bin/install -m 644 "$repository_root/packaging/Info.plist" "$app_bundle/Contents/Info.plist"
 /usr/bin/install -m 644 "$repository_root/packaging/AppIcon.icns" \
   "$app_bundle/Contents/Resources/AppIcon.icns"
@@ -66,6 +88,9 @@ else
   codesign_options=(--force --sign "$signing_identity" --timestamp --options runtime)
 fi
 
+for library in "$app_bundle"/Contents/MacOS/*.dylib(N); do
+  /usr/bin/codesign "${codesign_options[@]}" "$library"
+done
 /usr/bin/codesign "${codesign_options[@]}" "$app_bundle/Contents/MacOS/ottoctl"
 /usr/bin/codesign "${codesign_options[@]}" "$app_bundle/Contents/MacOS/otto-mcp"
 /usr/bin/codesign "${codesign_options[@]}" "$app_bundle/Contents/MacOS/otto-hermes-bridge"

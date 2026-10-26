@@ -23,6 +23,26 @@ test -x "$app_bundle/Contents/MacOS/otto-openai-agent"
 test -x "$app_bundle/Contents/MacOS/otto-hookd"
 test -x "$app_bundle/Contents/MacOS/ottod"
 test -f "$app_bundle/Contents/Resources/THIRD_PARTY_NOTICES.md"
+# Every @rpath library must be in the bundle: the build Mac's OS and Xcode can hide a
+# missing one (libswiftCompatibilitySpan crashed 0.2.6 at launch on macOS 15).
+for executable in "$app_bundle"/Contents/MacOS/*(.); do
+  for library in ${(f)"$(/usr/bin/otool -L "$executable" | /usr/bin/awk 'NR > 1 && $1 ~ /^@/ { print $1 }')"}; do
+    case $library in
+      @rpath/*|@loader_path/*|@executable_path/*)
+        test -f "$app_bundle/Contents/MacOS/${library#@*/}" || {
+          print -u2 "${executable:t} links $library, which is not bundled"
+          exit 1
+        } ;;
+      *) print -u2 "${executable:t} links unsupported $library"; exit 1 ;;
+    esac
+  done
+  for rpath in ${(f)"$(/usr/bin/otool -l "$executable" | /usr/bin/awk '/cmd LC_RPATH/ { getline; getline; print $2 }')"}; do
+    [[ $rpath == @* || $rpath == /usr/lib/* ]] || {
+      print -u2 "${executable:t} has build-machine rpath $rpath"
+      exit 1
+    }
+  done
+done
 # Resource bundles are flat with older toolchains and have Contents/Resources with newer ones.
 bundle_file() {
   local bundle=$app_bundle/Contents/Resources/$1

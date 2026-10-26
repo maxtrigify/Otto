@@ -4,6 +4,12 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.7 — 2026-10-26
+
+### Fixes
+
+- **Otto opens on macOS 15 again.** Otto 0.2.6 closed straight away at launch on macOS Sequoia because a system library it needs wasn't included in the download. It's now bundled with the app, and release checks catch any library that's missing.
+
 ## 0.2.6 — 2026-10-26
 
 ### Fixes
