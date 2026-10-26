@@ -56,6 +56,11 @@ struct BrowserPopupTests {
       BrowserPopupWindows.tabURL(
         navigationType: .linkActivated, url: URL(string: "mailto:a@example.com")) == nil)
     #expect(BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: nil) == nil)
+    let login = URL(string: "https://app.heyreach.io/account/login")!
+    #expect(BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: login) == login)
+    #expect(
+      BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: login, isMainFrame: false)
+        == login)
   }
   @Test func scriptOpenedConfiguratorReachesTheTabOwnerWithoutAWindow() async throws {
     _ = NSApplication.shared

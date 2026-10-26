@@ -6,14 +6,15 @@ import WebKit
 final class BrowserPopupWindows: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
   private(set) var windows: [ObjectIdentifier: NSWindowController] = [:]
 
-  /// Ordinary pages belong in tabs, even when opened by JavaScript. Embedded sign-in
-  /// windows and explicit authentication endpoints retain WebKit's opener configuration.
+  /// Ordinary pages belong in tabs, even when opened by JavaScript. Clicked links always
+  /// do, including "Log in" links to a login page (heyreach.io); only script-opened
+  /// embedded and authentication windows retain WebKit's opener configuration.
   nonisolated static func tabURL(
     navigationType: WKNavigationType, url: URL?, isMainFrame: Bool = true
   ) -> URL? {
-    guard let url, ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
-      navigationType == .linkActivated || isMainFrame, !isAuthenticationURL(url)
-    else { return nil }
+    guard let url, ["https", "http"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+    if navigationType == .linkActivated { return url }
+    guard isMainFrame, !isAuthenticationURL(url) else { return nil }
     return url
   }
 

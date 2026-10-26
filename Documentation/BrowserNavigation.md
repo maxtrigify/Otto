@@ -3,8 +3,9 @@
 The Browser place keeps ordinary website windows in its tab strip. Both clicked
 `target="_blank"` links and top-level JavaScript `window.open(url)` calls route
 through `BrowserLinkTabRequest`; the Zodiac PRO 5.5 configurator uses the latter.
-Embedded script popups and recognizable authentication endpoints retain WebKit's
-supplied configuration and opener for sign-in callbacks. Blank script windows
+Clicked links always open as tabs, even to login pages such as HeyReach's
+`/account/login`. Embedded script popups and script-opened authentication
+endpoints retain WebKit's supplied configuration and opener for sign-in callbacks. Blank script windows
 also retain their opener. These authentication exceptions still use native windows.
 
 Gmail and Google Calendar account links reuse the current tab only when the

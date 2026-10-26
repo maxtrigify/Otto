@@ -4,6 +4,12 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.6 — 2026-10-26
+
+### Fixes
+
+- **Log in links open in a Browser tab.** Clicking a website's "Log in" link (such as HeyReach's) now opens the login page as a tab inside Otto instead of a separate window. Sign-in windows that a site opens itself, such as "Continue with Google", still open separately so they can finish signing you in.
+
 ## 0.2.5 — 2026-10-26
 
 ### New
