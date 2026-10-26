@@ -58,9 +58,10 @@ public struct MemoryGraph: Equatable, Sendable {
   }
 
   public func neighbors(of id: String) -> Set<String> {
-    Set(edges.compactMap { edge in
-      edge.from == id ? edge.to : (edge.to == id ? edge.from : nil)
-    })
+    Set(
+      edges.compactMap { edge in
+        edge.from == id ? edge.to : (edge.to == id ? edge.from : nil)
+      })
   }
 
   public static func recordID(_ record: MemoryRecord) -> String {
@@ -94,14 +95,18 @@ public struct MemoryGraph: Equatable, Sendable {
       if $0.updatedAt != $1.updatedAt { return $0.updatedAt > $1.updatedAt }
       return recordID($0) < recordID($1)
     }
-    let user = (layer == .all || layer == .personal)
+    let user =
+      (layer == .all || layer == .personal)
       ? personal.filter { matches($0.text + "\n" + $0.source) } : []
-    let workspace = (layer == .all || layer == .operating)
+    let workspace =
+      (layer == .all || layer == .operating)
       ? operating.filter { matches($0.text + "\n" + $0.source) } : []
     let maximum = max(1, min(memoryLimit, max(1, nodeLimit)))
     let compact = (user.map { ($0, Kind.personal) } + workspace.map { ($0, Kind.operating) })
       .sorted { "\($0.1.rawValue):\($0.0.id)" < "\($1.1.rawValue):\($1.0.id)" }
-    let compactSlots = eligible.isEmpty ? maximum
+    let compactSlots =
+      eligible.isEmpty
+      ? maximum
       : max(0, maximum - min(eligible.count, max(1, maximum * 2 / 3)))
     let chosenCompact = Array(compact.prefix(compactSlots))
     let chosen = Array(eligible.prefix(maximum - chosenCompact.count))
@@ -130,7 +135,8 @@ public struct MemoryGraph: Equatable, Sendable {
       let id = "\(kind.rawValue):\(entry.id)"
       nodes[id] = Node(
         id: id, title: entry.text, detail: entry.text, kind: kind,
-        context: kind == .personal ? "User context · always loaded when confirmed"
+        context: kind == .personal
+          ? "User context · always loaded when confirmed"
           : "Operating memory · always loaded when confirmed",
         confidence: entry.confidence, updatedAt: entry.lastConfirmedAt, status: "active")
     }
@@ -156,24 +162,38 @@ public struct MemoryGraph: Equatable, Sendable {
     }
     for record in chosen {
       let id = recordID(record)
-      let owner = record.scope == .agentRole
+      let owner =
+        record.scope == .agentRole
         ? "bot:\(record.profileID?.uuidString ?? "unknown")" : "project"
-      connect(id, hub("layer:\(owner)", layerName(record), .layer,
-        "Membership comes from the memory's saved scope."), .belongsTo)
+      connect(
+        id,
+        hub(
+          "layer:\(owner)", layerName(record), .layer,
+          "Membership comes from the memory's saved scope."), .belongsTo)
       for entity in Set(record.entityIDs).sorted() where !entity.isEmpty {
-        connect(id, hub("entity:\(entity)", entity, .entity,
-          "Memories explicitly associated with this entity ID."), .mentions)
+        connect(
+          id,
+          hub(
+            "entity:\(entity)", entity, .entity,
+            "Memories explicitly associated with this entity ID."), .mentions)
       }
       for tag in Set(record.tags.map { $0.lowercased() }).sorted() where !tag.isEmpty {
-        connect(id, hub("topic:\(tag)", tag, .topic,
-          "Memories carrying this saved tag. A shared tag is not a factual claim."), .tagged)
+        connect(
+          id,
+          hub(
+            "topic:\(tag)", tag, .topic,
+            "Memories carrying this saved tag. A shared tag is not a factual claim."), .tagged)
       }
       for source in Set(record.sourceIDs).sorted() where !source.isEmpty {
         if let other = reference(source, for: record), let target = nodes[recordID(other)] {
           connect(id, target, .cites)
         } else {
-          connect(id, hub("source:\(source)", source, .source,
-            "Source citation as stored in memory. A citation does not independently verify a claim."), .cites)
+          connect(
+            id,
+            hub(
+              "source:\(source)", source, .source,
+              "Source citation as stored in memory. A citation does not independently verify a claim."
+            ), .cites)
         }
       }
       for previous in Set(record.supersedes).sorted() {
@@ -187,11 +207,17 @@ public struct MemoryGraph: Equatable, Sendable {
     for (entry, kind) in chosenCompact {
       let id = "\(kind.rawValue):\(entry.id)"
       let label = kind == .personal ? "About you" : "Working together"
-      connect(id, hub("layer:\(kind.rawValue)", label, .layer,
-        "Compact context supplied to agents automatically when confirmed."), .belongsTo)
+      connect(
+        id,
+        hub(
+          "layer:\(kind.rawValue)", label, .layer,
+          "Compact context supplied to agents automatically when confirmed."), .belongsTo)
       if !entry.source.isEmpty {
-        connect(id, hub("source:\(entry.source)", entry.source, .source,
-          "The recorded origin of this compact memory."), .cites)
+        connect(
+          id,
+          hub(
+            "source:\(entry.source)", entry.source, .source,
+            "The recorded origin of this compact memory."), .cites)
       }
     }
     graph.nodes = nodes.values.sorted { $0.id < $1.id }

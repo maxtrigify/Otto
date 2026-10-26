@@ -123,8 +123,9 @@ struct VoiceToolContractTests {
       "layout.organize", "layout.set", "layout.set_snap",
     ]
     #expect(retired.isDisjoint(with: names))
-    #expect(!names.contains { name in
-      ["canvas.", "widget.", "whiteboard.", "recipe.", "layout."].contains { name.hasPrefix($0) }
-    })
+    #expect(
+      !names.contains { name in
+        ["canvas.", "widget.", "whiteboard.", "recipe.", "layout."].contains { name.hasPrefix($0) }
+      })
   }
 }

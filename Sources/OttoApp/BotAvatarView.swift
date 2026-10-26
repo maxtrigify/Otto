@@ -167,7 +167,6 @@ struct BotAvatarView: View {
     colorIsDark ? palette.paper.opacity(0.16) : avatarColor.opacity(0.28)
   }
 
-
   private var avatarShape: AnyShape {
     switch presentation.appearance?.shape {
     case "circle": AnyShape(Circle())

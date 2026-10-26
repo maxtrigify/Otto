@@ -86,14 +86,19 @@ struct WelcomeSuggestion: Identifiable {
       symbol: "sun.max", label: "Brief me on today",
       seed: "Brief me on today: my calendar, inbox and anything waiting on me."),
     .init(symbol: "doc.text", label: "Draft a doc", seed: "Draft a doc about "),
-    .init(symbol: "globe", label: "Research a website", seed: "Research this website and summarise it: "),
+    .init(
+      symbol: "globe", label: "Research a website", seed: "Research this website and summarise it: "
+    ),
     .init(symbol: "bolt", label: "Automate something", seed: "Set up an automation that "),
   ]
 
   static let code: [WelcomeSuggestion] = [
-    .init(symbol: "binoculars", label: "Explore this code", seed: "Explore and explain this codebase."),
+    .init(
+      symbol: "binoculars", label: "Explore this code", seed: "Explore and explain this codebase."),
     .init(symbol: "hammer", label: "Build a feature", seed: "Build "),
-    .init(symbol: "text.magnifyingglass", label: "Review my changes", seed: "Review my uncommitted changes and suggest improvements."),
+    .init(
+      symbol: "text.magnifyingglass", label: "Review my changes",
+      seed: "Review my uncommitted changes and suggest improvements."),
     .init(symbol: "ladybug", label: "Fix a failure", seed: "Find and fix "),
   ]
 
@@ -138,12 +143,14 @@ struct WelcomeChipFlow: Layout {
   func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
     let width = min(proposal.width ?? 600, 10_000)
     let lines = rows(width: width, subviews: subviews)
-    let height = lines.reduce(CGFloat(0)) { total, line in
-      total + (line.map(\.1.height).max() ?? 0)
-    } + spacing * CGFloat(max(0, lines.count - 1))
-    let widest = lines.map { line in
-      line.reduce(CGFloat(0)) { $0 + $1.1.width } + spacing * CGFloat(max(0, line.count - 1))
-    }.max() ?? 0
+    let height =
+      lines.reduce(CGFloat(0)) { total, line in
+        total + (line.map(\.1.height).max() ?? 0)
+      } + spacing * CGFloat(max(0, lines.count - 1))
+    let widest =
+      lines.map { line in
+        line.reduce(CGFloat(0)) { $0 + $1.1.width } + spacing * CGFloat(max(0, line.count - 1))
+      }.max() ?? 0
     return CGSize(width: min(widest, width), height: height)
   }
 
@@ -177,7 +184,8 @@ struct WelcomeCrewFace: View {
   var body: some View {
     Button(action: pick) {
       BotAvatarView(
-        presentation: BotAvatarPresentation(id: profile.id, name: profile.name, appearance: appearance),
+        presentation: BotAvatarPresentation(
+          id: profile.id, name: profile.name, appearance: appearance),
         size: 18 * scale,
         showsStateBadge: false
       )

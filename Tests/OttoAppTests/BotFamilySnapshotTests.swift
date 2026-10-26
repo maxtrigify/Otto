@@ -47,7 +47,9 @@ struct BotFamilySnapshotTests {
         ForEach([16, 20, 28, 40] as [CGFloat], id: \.self) { size in
           HStack(spacing: 6) {
             ForEach(Array(bots.prefix(4).enumerated()), id: \.offset) { _, bot in
-              BotAvatarView(presentation: presentation(bot, state: bot.0 == "Coder" ? .needsUser : .idle), size: size)
+              BotAvatarView(
+                presentation: presentation(bot, state: bot.0 == "Coder" ? .needsUser : .idle),
+                size: size)
             }
           }
         }

@@ -235,6 +235,90 @@ public final class ProviderAccountStore: ObservableObject {
     }
   }
 
+  // MARK: - Login identity
+
+  /// Who the account's own provider login belongs to, when the provider records it in a file.
+  public func loginIdentity(accountID: UUID, provider: AgentProvider) -> ProviderLoginIdentity? {
+    let data = providerDataDirectory(accountID: accountID, provider: provider)
+    return Self.readIdentity(
+      provider: provider, in: data, claudeState: data.appending(path: ".claude.json"))
+  }
+
+  /// Who this Mac's own (non-account) provider login belongs to.
+  public func macLoginIdentity(provider: AgentProvider) -> ProviderLoginIdentity? {
+    guard let defaultPath = ProviderAccountIsolation.descriptor(for: provider).defaultHomePath
+    else { return nil }
+    // Claude keeps its default state next to the home folder, not inside it.
+    return Self.readIdentity(
+      provider: provider, in: userHome.appending(path: defaultPath, directoryHint: .isDirectory),
+      claudeState: userHome.appending(path: ".claude.json"))
+  }
+
+  /// Signed in, and to a different provider account than the Mac's own login. A browser that is
+  /// already signed in silently approves the same account again, so a completed login alone
+  /// does not prove the account is separate.
+  public func loginStatus(accountID: UUID, provider: AgentProvider) -> ProviderLoginStatus {
+    guard hasProviderLogin(accountID: accountID, provider: provider) else { return .signedOut }
+    let identity = loginIdentity(accountID: accountID, provider: provider)
+    if let identity, let mac = macLoginIdentity(provider: provider), identity.isSameAccount(as: mac)
+    {
+      return .sameAsMac(identity)
+    }
+    return .signedIn(identity)
+  }
+
+  /// Whether the account adds a login this Mac does not already have.
+  public func hasDistinctProviderLogin(accountID: UUID, provider: AgentProvider) -> Bool {
+    if case .signedIn = loginStatus(accountID: accountID, provider: provider) { return true }
+    return false
+  }
+
+  nonisolated static func readIdentity(
+    provider: AgentProvider, in directory: URL, claudeState: URL
+  ) -> ProviderLoginIdentity? {
+    switch provider {
+    case .claudeCode:
+      guard
+        let data = try? Data(contentsOf: claudeState),
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let account = object["oauthAccount"] as? [String: Any]
+      else { return nil }
+      return ProviderLoginIdentity(
+        email: account["emailAddress"] as? String,
+        organization: account["organizationName"] as? String,
+        accountKey: account["accountUuid"] as? String,
+        organizationKey: account["organizationUuid"] as? String)
+    case .codex:
+      guard
+        let data = try? Data(contentsOf: directory.appending(path: "auth.json")),
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let tokens = object["tokens"] as? [String: Any],
+        let idToken = tokens["id_token"] as? String,
+        let claims = jwtClaims(idToken)
+      else { return nil }
+      let auth = claims["https://api.openai.com/auth"] as? [String: Any]
+      return ProviderLoginIdentity(
+        email: claims["email"] as? String,
+        organization: nil,
+        accountKey: (auth?["chatgpt_user_id"] as? String) ?? (claims["sub"] as? String),
+        organizationKey: (auth?["chatgpt_account_id"] as? String)
+          ?? (tokens["account_id"] as? String))
+    default:
+      return nil
+    }
+  }
+
+  /// Decodes a JWT payload without verifying it: used only to label the login, never to trust it.
+  private nonisolated static func jwtClaims(_ token: String) -> [String: Any]? {
+    let parts = token.split(separator: ".")
+    guard parts.count >= 2 else { return nil }
+    var payload = parts[1].replacingOccurrences(of: "-", with: "+")
+      .replacingOccurrences(of: "_", with: "/")
+    payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+    guard let data = Data(base64Encoded: payload) else { return nil }
+    return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+  }
+
   // MARK: - Launch
 
   /// Environment and credentials for one agent launch on `accountID`. Returns nil when the

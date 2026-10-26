@@ -35,7 +35,8 @@ struct MemoryGraphView: View {
   }
 
   private var request: Request {
-    Request(records: records, personal: personal, operating: operating, botNames: botNames,
+    Request(
+      records: records, personal: personal, operating: operating, botNames: botNames,
       query: query, layer: layer, activity: includeActivity, history: includeHistory)
   }
 
@@ -90,8 +91,12 @@ struct MemoryGraphView: View {
           .textFieldStyle(.plain).font(.ottoDisplay(13))
           .accessibilityLabel("Search memory graph")
         if !query.isEmpty {
-          Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
-            .buttonStyle(.plain).accessibilityLabel("Clear memory search")
+          Button {
+            query = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain).accessibilityLabel("Clear memory search")
         }
       }
       .padding(9).background(palette.raised, in: RoundedRectangle(cornerRadius: 8))
@@ -103,17 +108,23 @@ struct MemoryGraphView: View {
       Menu {
         Section("Connections") {
           ForEach(MemoryGraph.Relationship.allCases, id: \.self) { relationship in
-            Toggle(connectionFilterTitle(relationship), isOn: Binding(
-              get: { relationships.contains(relationship) },
-              set: { show in
-                if show { relationships.insert(relationship) }
-                else { relationships.remove(relationship) }
-                refreshNeighbors()
-                if let selectedID, !visibleNodes.contains(where: { $0.id == selectedID }) {
-                  self.selectedID = nil; neighborhoodOnly = false
-                }
-                resetCamera()
-              }))
+            Toggle(
+              connectionFilterTitle(relationship),
+              isOn: Binding(
+                get: { relationships.contains(relationship) },
+                set: { show in
+                  if show {
+                    relationships.insert(relationship)
+                  } else {
+                    relationships.remove(relationship)
+                  }
+                  refreshNeighbors()
+                  if let selectedID, !visibleNodes.contains(where: { $0.id == selectedID }) {
+                    self.selectedID = nil
+                    neighborhoodOnly = false
+                  }
+                  resetCamera()
+                }))
           }
         }
         Section("Memories") {
@@ -121,12 +132,15 @@ struct MemoryGraphView: View {
           Toggle("Include archived, replaced and expired memories", isOn: $includeHistory)
         }
       } label: {
-        Label(filterCount == 0 ? "Filters" : "Filters · \(filterCount)",
+        Label(
+          filterCount == 0 ? "Filters" : "Filters · \(filterCount)",
           systemImage: "line.3.horizontal.decrease")
       }
       .menuStyle(.borderlessButton).fixedSize()
       Spacer(minLength: 0)
-      Button { listMode.toggle() } label: {
+      Button {
+        listMode.toggle()
+      } label: {
         Image(systemName: listMode ? "point.3.connected.trianglepath.dotted" : "list.bullet")
       }
       .help(listMode ? "Show graph" : "Browse accessible memory list")
@@ -137,7 +151,8 @@ struct MemoryGraphView: View {
   }
 
   private var map: some View {
-    MemoryGraphSurface(nodes: visibleNodes, edges: visibleEdges, positions: $positions,
+    MemoryGraphSurface(
+      nodes: visibleNodes, edges: visibleEdges, positions: $positions,
       selectedID: selectedID, neighbors: neighbors, neighborIndex: neighborIndex,
       bounds: worldBounds, resetID: cameraReset, neighborhoodOnly: neighborhoodOnly,
       emptyTitle: query.isEmpty ? "Your map starts here" : "No matching memories",
@@ -145,14 +160,19 @@ struct MemoryGraphView: View {
         ? "Connections appear as Otto saves memories with sources, entities and tags."
         : "Try another search, layer, or include activity and history.",
       loading: loading, select: select,
-      focus: { neighborhoodOnly.toggle(); resetCamera() }, fit: resetCamera)
+      focus: {
+        neighborhoodOnly.toggle()
+        resetCamera()
+      }, fit: resetCamera)
   }
 
   private var nodeList: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 2) {
         ForEach(visibleNodes) { node in
-          Button { select(node.id) } label: {
+          Button {
+            select(node.id)
+          } label: {
             HStack(spacing: 10) {
               Circle().fill(color(node.kind)).frame(width: 7, height: 7)
               VStack(alignment: .leading, spacing: 3) {
@@ -163,7 +183,8 @@ struct MemoryGraphView: View {
               Text("\(connectionCount(node.id))").font(.ottoMono(9))
             }
             .foregroundStyle(palette.paper).padding(12)
-            .background(selectedID == node.id ? palette.signal.opacity(0.1) : .clear,
+            .background(
+              selectedID == node.id ? palette.signal.opacity(0.1) : .clear,
               in: RoundedRectangle(cornerRadius: 8))
           }.buttonStyle(.plain)
         }
@@ -181,17 +202,24 @@ struct MemoryGraphView: View {
             Spacer()
             Button {
               let wasFocused = neighborhoodOnly
-              selectedID = nil; neighborhoodOnly = false
+              selectedID = nil
+              neighborhoodOnly = false
               if wasFocused { resetCamera() }
-            } label: { Image(systemName: "xmark") }
-              .buttonStyle(.plain).accessibilityLabel("Clear selected memory")
+            } label: {
+              Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain).accessibilityLabel("Clear selected memory")
           }
           Text(node.title).font(.ottoDisplay(21).weight(.semibold)).textSelection(.enabled)
           Text(node.context).font(.ottoDisplay(11)).foregroundStyle(palette.muted)
           if let confidence = node.confidence {
-            Label(confidence == .confirmed ? "Confirmed" : "\(confidence.rawValue.capitalized) · unconfirmed",
-              systemImage: confidence == .confirmed ? "checkmark.seal" : "circle.dashed")
-              .font(.ottoDisplay(11)).foregroundStyle(confidence == .confirmed ? palette.signal : palette.amber)
+            Label(
+              confidence == .confirmed
+                ? "Confirmed" : "\(confidence.rawValue.capitalized) · unconfirmed",
+              systemImage: confidence == .confirmed ? "checkmark.seal" : "circle.dashed"
+            )
+            .font(.ottoDisplay(11)).foregroundStyle(
+              confidence == .confirmed ? palette.signal : palette.amber)
             if confidence != .confirmed {
               Text("Not included as confirmed automatic context.")
                 .font(.ottoDisplay(11)).foregroundStyle(palette.muted)
@@ -216,26 +244,36 @@ struct MemoryGraphView: View {
             .font(.system(size: 32, weight: .ultraLight)).foregroundStyle(palette.signal)
             .padding(.top, 12)
           Text("Follow a thought.").font(.ottoDisplay(25).weight(.semibold))
-          Text("Select a dot to explore its memory, source and connections. Two-finger scroll or drag the background to move. Pinch to zoom; use the mouse wheel or ⌘-scroll to zoom at the pointer. Drag dots to rearrange.")
-            .font(.ottoDisplay(12)).lineSpacing(4).foregroundStyle(palette.muted)
+          Text(
+            "Select a dot to explore its memory, source and connections. Two-finger scroll or drag the background to move. Pinch to zoom; use the mouse wheel or ⌘-scroll to zoom at the pointer. Drag dots to rearrange."
+          )
+          .font(.ottoDisplay(12)).lineSpacing(4).foregroundStyle(palette.muted)
           Divider()
           Text("MOST CONNECTED").font(.ottoMono(9, weight: .bold)).foregroundStyle(palette.muted)
-          ForEach(visibleNodes.sorted {
-            let a = connectionCount($0.id), b = connectionCount($1.id)
-            return a == b ? $0.id < $1.id : a > b
-          }.prefix(5)) { node in
-            Button { select(node.id) } label: {
+          ForEach(
+            visibleNodes.sorted {
+              let a = connectionCount($0.id)
+              let b = connectionCount($1.id)
+              return a == b ? $0.id < $1.id : a > b
+            }.prefix(5)
+          ) { node in
+            Button {
+              select(node.id)
+            } label: {
               HStack {
                 Circle().fill(color(node.kind)).frame(width: 6, height: 6)
                 Text(shortTitle(node)).font(.ottoDisplay(12)).lineLimit(1)
                 Spacer()
-                Text("\(connectionCount(node.id))").font(.ottoMono(9)).foregroundStyle(palette.muted)
+                Text("\(connectionCount(node.id))").font(.ottoMono(9)).foregroundStyle(
+                  palette.muted)
               }.foregroundStyle(palette.paper)
             }.buttonStyle(.plain)
           }
           Divider()
-          Text("Memory dots: solid means confirmed; hollow means unconfirmed. Lines show saved sources, tags, entities and layer membership—not guessed associations.")
-            .font(.ottoDisplay(11)).lineSpacing(3).foregroundStyle(palette.muted)
+          Text(
+            "Memory dots: solid means confirmed; hollow means unconfirmed. Lines show saved sources, tags, entities and layer membership—not guessed associations."
+          )
+          .font(.ottoDisplay(11)).lineSpacing(3).foregroundStyle(palette.muted)
         }
       }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
     }
@@ -246,7 +284,9 @@ struct MemoryGraphView: View {
     let outgoing = edge.from == selected.id
     let otherID = outgoing ? edge.to : edge.from
     let other = graph.nodes.first { $0.id == otherID }
-    return Button { select(otherID) } label: {
+    return Button {
+      select(otherID)
+    } label: {
       VStack(alignment: .leading, spacing: 3) {
         Text(relationshipLabel(edge.relationship, outgoing: outgoing))
           .font(.ottoMono(8)).foregroundStyle(palette.muted)
@@ -269,11 +309,17 @@ struct MemoryGraphView: View {
         }
       }
       Spacer()
-      Text("\(visibleMemoryCount) of \(graph.matchingMemoryCount) \(graph.matchingMemoryCount == 1 ? "memory" : "memories") · \(visibleEdges.count) \(visibleEdges.count == 1 ? "link" : "links")")
-        .font(.ottoMono(8))
+      Text(
+        "\(visibleMemoryCount) of \(graph.matchingMemoryCount) \(graph.matchingMemoryCount == 1 ? "memory" : "memories") · \(visibleEdges.count) \(visibleEdges.count == 1 ? "link" : "links")"
+      )
+      .font(.ottoMono(8))
       if graph.visibleMemoryCount < graph.matchingMemoryCount || graph.omittedConnections > 0 {
-        Text("Sampled · search or filter for more").font(.ottoMono(8)).foregroundStyle(palette.amber)
-          .help("Some memories or links are outside the current sample. Search, or include history in Filters, to explore more.")
+        Text("Sampled · search or filter for more").font(.ottoMono(8)).foregroundStyle(
+          palette.amber
+        )
+        .help(
+          "Some memories or links are outside the current sample. Search, or include history in Filters, to explore more."
+        )
       }
     }
     .foregroundStyle(palette.muted).padding(.horizontal, 20).padding(.vertical, 11)
@@ -366,10 +412,14 @@ struct MemoryGraphView: View {
 
   private func calculateBounds() -> CGRect {
     let points = visibleNodes.compactMap { positions[$0.id] }
-    let minX = points.map(\.x).min() ?? -100, maxX = points.map(\.x).max() ?? 100
-    let minY = points.map(\.y).min() ?? -100, maxY = points.map(\.y).max() ?? 100
-    let width = max(200, maxX - minX), height = max(180, maxY - minY)
-    return CGRect(x: (minX + maxX - width) / 2, y: (minY + maxY - height) / 2,
+    let minX = points.map(\.x).min() ?? -100
+    let maxX = points.map(\.x).max() ?? 100
+    let minY = points.map(\.y).min() ?? -100
+    let maxY = points.map(\.y).max() ?? 100
+    let width = max(200, maxX - minX)
+    let height = max(180, maxY - minY)
+    return CGRect(
+      x: (minX + maxX - width) / 2, y: (minY + maxY - height) / 2,
       width: width, height: height)
   }
 
@@ -377,18 +427,22 @@ struct MemoryGraphView: View {
     do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
     loading = true
     let result = await Task.detached(priority: .userInitiated) {
-      let graph = MemoryGraph.build(records: request.records, personal: request.personal,
+      let graph = MemoryGraph.build(
+        records: request.records, personal: request.personal,
         operating: request.operating, botNames: request.botNames, query: request.query,
         layer: request.layer, includeActivity: request.activity, includeHistory: request.history)
       return (graph, MemoryGraphLayout.positions(for: graph))
     }.value
     guard !Task.isCancelled else { return }
-    graph = result.0; positions = result.1
+    graph = result.0
+    positions = result.1
     refreshNeighbors()
     if !graph.nodes.contains(where: { $0.id == selectedID }) {
-      selectedID = nil; neighborhoodOnly = false
+      selectedID = nil
+      neighborhoodOnly = false
     }
     worldBounds = calculateBounds()
-    cameraReset = UUID(); loading = false
+    cameraReset = UUID()
+    loading = false
   }
 }

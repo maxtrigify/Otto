@@ -59,8 +59,9 @@ struct FeedbackClientTests {
   @Test func leavesOutEnvironmentAndScreenshotWhenNotChosen() throws {
     let draft = FeedbackDraft(
       kind: .bug, description: "Something broke here.", includeEnvironment: false)
-    let body = try JSONSerialization.jsonObject(
-      with: try #require(try client().request(for: draft).httpBody)) as? [String: Any]
+    let body =
+      try JSONSerialization.jsonObject(
+        with: try #require(try client().request(for: draft).httpBody)) as? [String: Any]
     #expect(body?["environment"] == nil)
     #expect(body?["screenshot"] == nil)
     #expect(body?["kind"] as? String == "bug")
@@ -69,20 +70,25 @@ struct FeedbackClientTests {
   @Test func validatesTheDraft() {
     #expect(FeedbackDraft(description: "too short").validationMessage != nil)
     #expect(FeedbackDraft(description: "        short      ").validationMessage != nil)
-    #expect(FeedbackDraft(description: String(repeating: "x", count: 5_001)).validationMessage != nil)
+    #expect(
+      FeedbackDraft(description: String(repeating: "x", count: 5_001)).validationMessage != nil)
     #expect(
       FeedbackDraft(title: String(repeating: "t", count: 121), description: "Long enough text")
         .validationMessage != nil)
     #expect(FeedbackDraft(description: "Long enough text").validationMessage == nil)
-    #expect(FeedbackDraft(description: String(repeating: "x", count: 5_000)).validationMessage == nil)
-    #expect(throws: FeedbackError.self) { try client().request(for: FeedbackDraft(description: "no")) }
+    #expect(
+      FeedbackDraft(description: String(repeating: "x", count: 5_000)).validationMessage == nil)
+    #expect(throws: FeedbackError.self) {
+      try client().request(for: FeedbackDraft(description: "no"))
+    }
   }
 
   @Test func environmentContainsOnlyVersionsAndModel() throws {
     let current = FeedbackEnvironment.current()
     let data = try JSONEncoder().encode(current)
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
-    #expect(Set(object.keys).isSubset(of: ["appVersion", "build", "macOS", "architecture", "model"]))
+    #expect(
+      Set(object.keys).isSubset(of: ["appVersion", "build", "macOS", "architecture", "model"]))
     #expect(current.macOS.wholeMatch(of: /[0-9]{1,3}(\.[0-9]{1,3}){0,2}/) != nil)
     #expect(["arm64", "x86_64"].contains(current.architecture))
     let text = String(decoding: data, as: UTF8.self)
@@ -103,7 +109,10 @@ struct FeedbackClientTests {
     #expect(odd.appVersion == "1.0Usersmax")
     #expect(odd.build == "unknown")
     #expect(odd.model == nil)
-    #expect(Self.environment.summaryLines == ["Otto 0.2.0 (build 42)", "macOS 26.1", "Mac15,6 · Apple silicon"])
+    #expect(
+      Self.environment.summaryLines == [
+        "Otto 0.2.0 (build 42)", "macOS 26.1", "Mac15,6 · Apple silicon",
+      ])
   }
 
   @Test func installIDIsStableAndAnonymous() throws {
@@ -123,7 +132,8 @@ struct FeedbackClientTests {
     #expect(rejected == FeedbackClient.configuredEndpoint(bundle: .main, processEnvironment: [:]))
     #expect(
       FeedbackClient.configuredEndpoint(bundle: .main, processEnvironment: [:]).scheme == "https")
-    #expect(FeedbackClient.fallbackEndpoint.absoluteString == "https://feedback.openotto.io/v1/feedback")
+    #expect(
+      FeedbackClient.fallbackEndpoint.absoluteString == "https://feedback.openotto.io/v1/feedback")
   }
 
   @Test func decodesSuccess() async throws {
@@ -143,13 +153,19 @@ struct FeedbackClientTests {
       ({ _ in throw URLError(.cannotFindHost) }, .offline),
       ({ _ in throw URLError(.timedOut) }, .timedOut),
       ({ _ in Self.response(429, #"{"error":"Too many"}"#) }, .rateLimited),
-      ({ _ in Self.response(400, #"{"error":"description is required."}"#) },
-       .rejected("description is required.")),
-      ({ _ in Self.response(503, #"{"error":"Screenshots are not configured yet."}"#) },
-       .unavailable("Screenshots are not configured yet.")),
+      (
+        { _ in Self.response(400, #"{"error":"description is required."}"#) },
+        .rejected("description is required.")
+      ),
+      (
+        { _ in Self.response(503, #"{"error":"Screenshots are not configured yet."}"#) },
+        .unavailable("Screenshots are not configured yet.")
+      ),
       ({ _ in Self.response(502, #"{"error":"GitHub"}"#) }, .server),
       ({ _ in Self.response(201, #"{"unexpected":true}"#) }, .server),
-      ({ _ in Self.response(201, #"{"issueNumber":1,"issueURL":"javascript:alert(1)"}"#) }, .server),
+      (
+        { _ in Self.response(201, #"{"issueNumber":1,"issueURL":"javascript:alert(1)"}"#) }, .server
+      ),
     ]
     for (transport, expected) in cases {
       await #expect(throws: expected) { try await client(transport).send(draft) }

@@ -36,7 +36,8 @@ struct FeedbackSheetSnapshotTests {
         "feedback-sheet-sent", draft,
         .sent(
           FeedbackSubmission(
-            issueNumber: 17, issueURL: URL(string: "https://github.com/maxtrigify/Otto/issues/17")!))
+            issueNumber: 17, issueURL: URL(string: "https://github.com/maxtrigify/Otto/issues/17")!)
+        )
       ),
     ]
     for (name, draft, phase) in states {

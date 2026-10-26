@@ -39,10 +39,13 @@ struct RoutineAccountPicker: View {
     _ account: ProviderAccount, provider: AgentProvider?, accounts: ProviderAccountStore
   ) -> String {
     guard let provider, provider.supportsProviderAccounts,
-      account.credentialMode(for: provider) == .login,
-      !accounts.hasProviderLogin(accountID: account.id, provider: provider)
+      account.credentialMode(for: provider) == .login
     else { return account.name }
-    return "\(account.name) (not signed in to \(provider.rawValue))"
+    switch accounts.loginStatus(accountID: account.id, provider: provider) {
+    case .signedIn: return account.name
+    case .signedOut: return "\(account.name) (not signed in to \(provider.rawValue))"
+    case .sameAsMac: return "\(account.name) (same \(provider.rawValue) login as this Mac)"
+    }
   }
 
   private struct HiddenLabel: ViewModifier {

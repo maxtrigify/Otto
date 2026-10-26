@@ -391,6 +391,10 @@ struct ApplicationControlPlaneTests {
   @Test("Destructive close-all requires explicit confirmation and reports exact count")
   func closeAllConfirmation() async throws {
     let store = await CanvasStore()
+    // Fresh workspaces no longer contain demo nodes. Seed the exact deletion fixture.
+    for _ in 0..<3 {
+      _ = await store.dispatch(.createNode(kind: .markdown, at: WorldPoint(x: 0, y: 0)))
+    }
     let supervisor = AgentSupervisor()
     let registry = ToolRegistry()
     try await ApplicationToolBootstrap.register(
@@ -739,7 +743,6 @@ struct ApplicationControlPlaneTests {
     // Terminal paint from the replaced interactive harness must never leak into chat.
     #expect(!final.transcript.contains { $0.text.contains("/skills") })
   }
-
 
   @Test("Resource catalogue shares one deterministic state path")
   func spatialCatalogue() async throws {
@@ -1121,7 +1124,6 @@ struct ApplicationControlPlaneTests {
         return false
       })
   }
-
 
   @Test("Editing agent launches in an isolated worktree with safe diff and cleanup")
   func isolatedAgentWorktree() async throws {

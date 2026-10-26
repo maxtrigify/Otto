@@ -32,14 +32,21 @@ struct MemoryInspectorView: View {
         }
         Spacer()
         if showingManage {
-          Button { showingManage = false } label: {
+          Button {
+            showingManage = false
+          } label: {
             Label("Back to graph", systemImage: "arrow.left")
           }
         }
         Menu {
           Button("Review and edit memories…") { showingManage = true }
-          Button("Refresh memory") { notice = nil; reload() }.disabled(loadingRecords)
-        } label: { Image(systemName: "ellipsis.circle") }
+          Button("Refresh memory") {
+            notice = nil
+            reload()
+          }.disabled(loadingRecords)
+        } label: {
+          Image(systemName: "ellipsis.circle")
+        }
         .menuStyle(.borderlessButton).fixedSize()
         .accessibilityLabel("Memory options")
         if loadingRecords { ProgressView().controlSize(.small) }
@@ -53,13 +60,15 @@ struct MemoryInspectorView: View {
       ZStack {
         MemoryGraphView(
           records: graphRecords, personal: personalEntries, operating: operatingEntries,
-          botNames: Dictionary(uniqueKeysWithValues: Set(graphRecords.compactMap(\.profileID)).map {
-            ($0, services.agentProfiles.profile(id: $0)?.name ?? "Unnamed bot")
-          }))
-          .opacity(showingManage ? 0 : 1)
-          .allowsHitTesting(!showingManage)
-          .disabled(showingManage)
-          .accessibilityHidden(showingManage)
+          botNames: Dictionary(
+            uniqueKeysWithValues: Set(graphRecords.compactMap(\.profileID)).map {
+              ($0, services.agentProfiles.profile(id: $0)?.name ?? "Unnamed bot")
+            })
+        )
+        .opacity(showingManage ? 0 : 1)
+        .allowsHitTesting(!showingManage)
+        .disabled(showingManage)
+        .accessibilityHidden(showingManage)
         if showingManage { managementContent }
       }
     }
@@ -96,7 +105,6 @@ struct MemoryInspectorView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
   }
-
 
   private var budgetSection: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -329,8 +337,10 @@ struct MemoryInspectorView: View {
       proposals = await services.memoryInbox.proposals()
       if let brain = services.brain {
         let all: [MemoryRecord]
-        do { all = try await brain.allRecords() }
-        catch { notice = "Could not refresh project memory: \(error.localizedDescription)"; return }
+        do { all = try await brain.allRecords() } catch {
+          notice = "Could not refresh project memory: \(error.localizedDescription)"
+          return
+        }
         graphRecords = all
         brainProposals = all.filter { $0.confidence != .confirmed && $0.isAvailable() }
         projectMemories = all.filter {

@@ -4,6 +4,25 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.4 — 2026-10-26
+
+### New
+
+- **See which account is signed in.** Provider accounts show their signed-in identity, making it easier to choose the right account for agents and automations.
+- **Paste images into Home.** Add screenshots and other images directly to the Home message box, with attachment previews before you send.
+
+### Changes
+
+- **Fresh spaces start clean,** without sample chats or demo sessions.
+- **Routine commands stay out of your tabs.** Background agent commands no longer add terminal tabs to Chat's work drawer. Open a terminal explicitly when you want to see it; commands waiting for your input remain easy to find.
+- **Pin your favourite sites more easily.** The Browser now has a visible pin/unpin button, and saved shortcuts scroll so every pinned site stays reachable.
+
+### Fixes
+
+- **More website buttons open in Browser tabs.** JavaScript buttons such as Zodiac's boat configurator now open a tab inside Otto. Sign-in windows keep the connection they need to complete authentication.
+- **Google account switches stay in the current tab.** Switching between Gmail accounts or between Calendar accounts reuses that product's tab. Opening a different Google app still opens a separate tab.
+- **Back navigation blocks old start-page URLs.** The Browser rejects legacy Muse start-page addresses during history navigation and skips internal pages when using Back or Forward.
+
 ## 0.2.3 — 2026-10-23
 
 ### New

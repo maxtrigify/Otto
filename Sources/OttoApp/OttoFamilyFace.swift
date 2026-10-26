@@ -63,8 +63,11 @@ struct OttoFace: View {
         stroke(line, spark, 11)
       }
     }
-    for foot in [CGRect(x: 58, y: 196, width: 42, height: 26), CGRect(x: 152, y: 196, width: 46, height: 26)] {
-      let rect = CGRect(x: foot.minX * k, y: foot.minY * k, width: foot.width * k, height: foot.height * k)
+    for foot in [
+      CGRect(x: 58, y: 196, width: 42, height: 26), CGRect(x: 152, y: 196, width: 46, height: 26),
+    ] {
+      let rect = CGRect(
+        x: foot.minX * k, y: foot.minY * k, width: foot.width * k, height: foot.height * k)
       context.fill(Path(roundedRect: rect, cornerRadius: 13 * k), with: fill)
     }
     context.fill(circle(80, 150, 60), with: fill)
@@ -134,7 +137,9 @@ struct OttoFace: View {
       band.addQuadCurve(to: point(236, 80), control: point(172, 12))
       stroke(band, light, 10)
       context.fill(
-        Path(roundedRect: CGRect(x: 226 * k, y: 86 * k, width: 22 * k, height: 44 * k), cornerRadius: 10 * k),
+        Path(
+          roundedRect: CGRect(x: 226 * k, y: 86 * k, width: 22 * k, height: 44 * k),
+          cornerRadius: 10 * k),
         with: .color(light))
       var mic = Path()
       mic.move(to: point(238, 128))
@@ -149,10 +154,14 @@ struct OttoFace: View {
       dome.closeSubpath()
       context.fill(dome, with: .color(yellow))
       context.fill(
-        Path(roundedRect: CGRect(x: 98 * k, y: 64 * k, width: 150 * k, height: 14 * k), cornerRadius: 7 * k),
+        Path(
+          roundedRect: CGRect(x: 98 * k, y: 64 * k, width: 150 * k, height: 14 * k),
+          cornerRadius: 7 * k),
         with: .color(yellow))
       context.fill(
-        Path(roundedRect: CGRect(x: 166 * k, y: 22 * k, width: 12 * k, height: 44 * k), cornerRadius: 6 * k),
+        Path(
+          roundedRect: CGRect(x: 166 * k, y: 22 * k, width: 12 * k, height: 44 * k),
+          cornerRadius: 6 * k),
         with: .color(Color(red: 0.9, green: 0.7, blue: 0)))
     case .beret:
       let pink = Color(red: 1, green: 0.48, blue: 0.66)
@@ -160,9 +169,11 @@ struct OttoFace: View {
       beret.translateBy(x: 160 * k, y: 52 * k)
       beret.rotate(by: .degrees(-14))
       beret.fill(
-        Path(ellipseIn: CGRect(x: -70 * k, y: -16 * k, width: 140 * k, height: 44 * k)), with: .color(pink))
+        Path(ellipseIn: CGRect(x: -70 * k, y: -16 * k, width: 140 * k, height: 44 * k)),
+        with: .color(pink))
       beret.fill(
-        Path(ellipseIn: CGRect(x: -8 * k, y: -26 * k, width: 16 * k, height: 16 * k)), with: .color(pink))
+        Path(ellipseIn: CGRect(x: -8 * k, y: -26 * k, width: 16 * k, height: 16 * k)),
+        with: .color(pink))
     case .antenna:
       var stalk = Path()
       stalk.move(to: point(64, 92))
@@ -178,7 +189,9 @@ extension OttoFace {
   init(bot accessory: BotFamily.Accessory, color: Color, state: BotAvatarState, size: CGFloat) {
     self.init(
       size: size,
-      look: state == .working ? CGSize(width: 0.7, height: -0.7) : state == .needsUser ? CGSize(width: -0.4, height: 0.5) : .zero,
+      look: state == .working
+        ? CGSize(width: 0.7, height: -0.7)
+        : state == .needsUser ? CGSize(width: -0.4, height: 0.5) : .zero,
       bodyColor: color,
       showsSparks: false,
       accessory: accessory,

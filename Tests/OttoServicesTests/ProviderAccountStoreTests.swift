@@ -196,6 +196,105 @@ struct ProviderAccountStoreTests {
     #expect(script.contains("'Signing in to Claude Code for the Personal account in Otto.'"))
   }
 
+  @Test func loginsToTheMacsOwnAccountAreFlaggedRatherThanCountedAsSeparate() throws {
+    let fixture = fixture()
+    defer { fixture.cleanUp() }
+    try FileManager.default.createDirectory(at: fixture.home, withIntermediateDirectories: true)
+    func claudeState(_ email: String, org: String) -> Data {
+      Data(
+        """
+        {"oauthAccount":{"emailAddress":"\(email)","accountUuid":"user-\(email.lowercased())",
+        "organizationUuid":"\(org)","organizationName":"Org \(org)"}}
+        """.utf8)
+    }
+    try claudeState("work@example.com", org: "acme").write(
+      to: fixture.home.appending(path: ".claude.json"))
+    let store = fixture.store()
+    let personal = try store.create(name: "Personal")
+    let data = try store.prepareProviderHome(accountID: personal.id, provider: .claudeCode)
+    #expect(store.loginStatus(accountID: personal.id, provider: .claudeCode) == .signedOut)
+
+    // The browser was still signed in to work, so the "Personal" login is the work account.
+    try claudeState("WORK@example.com", org: "acme").write(to: data.appending(path: ".claude.json"))
+    let status = store.loginStatus(accountID: personal.id, provider: .claudeCode)
+    guard case .sameAsMac(let same) = status else {
+      Issue.record("expected sameAsMac, got \(status)")
+      return
+    }
+    #expect(same.label == "WORK@example.com · Org acme")
+    #expect(!store.hasDistinctProviderLogin(accountID: personal.id, provider: .claudeCode))
+    #expect(store.hasProviderLogin(accountID: personal.id, provider: .claudeCode))
+
+    // Same email in a different organization is a different seat.
+    try claudeState("work@example.com", org: "home").write(to: data.appending(path: ".claude.json"))
+    #expect(store.hasDistinctProviderLogin(accountID: personal.id, provider: .claudeCode))
+
+    try claudeState("me@example.com", org: "home").write(to: data.appending(path: ".claude.json"))
+    #expect(
+      store.loginStatus(accountID: personal.id, provider: .claudeCode)
+        == .signedIn(
+          ProviderLoginIdentity(
+            email: "me@example.com", organization: "Org home", accountKey: "user-me@example.com",
+            organizationKey: "home")))
+  }
+
+  @Test func codexIdentityComesFromTheRecordedIDToken() throws {
+    let fixture = fixture()
+    defer { fixture.cleanUp() }
+    func auth(_ email: String, user: String) throws -> Data {
+      let claims = try JSONSerialization.data(withJSONObject: [
+        "email": email,
+        "https://api.openai.com/auth": ["chatgpt_user_id": user, "chatgpt_account_id": "ws"],
+      ])
+      let payload = claims.base64EncodedString().replacingOccurrences(of: "=", with: "")
+        .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+      return try JSONSerialization.data(withJSONObject: [
+        "tokens": ["id_token": "e30.\(payload).sig", "access_token": "never-read"]
+      ])
+    }
+    let macCodex = fixture.home.appending(path: ".codex")
+    try FileManager.default.createDirectory(at: macCodex, withIntermediateDirectories: true)
+    try auth("mac@example.com", user: "u1").write(to: macCodex.appending(path: "auth.json"))
+    let store = fixture.store()
+    let personal = try store.create(name: "Personal")
+    let home = try store.prepareProviderHome(accountID: personal.id, provider: .codex)
+    try auth("mac@example.com", user: "u1").write(to: home.appending(path: "auth.json"))
+    #expect(
+      store.loginStatus(accountID: personal.id, provider: .codex)
+        == .sameAsMac(
+          ProviderLoginIdentity(email: "mac@example.com", accountKey: "u1", organizationKey: "ws")))
+    try auth("me@example.com", user: "u2").write(to: home.appending(path: "auth.json"))
+    #expect(store.hasDistinctProviderLogin(accountID: personal.id, provider: .codex))
+    #expect(
+      store.loginIdentity(accountID: personal.id, provider: .codex)?.label == "me@example.com")
+  }
+
+  @Test func codeLoginFallsBackToBrowserLoginAndWarnsAboutTheExistingAccount() async {
+    let guidance = ApplicationServices.loginGuidance(
+      provider: "Codex", account: "Personal", macLogin: "mac@example.com", usesCodeLogin: true)
+    #expect(guidance.contains("already uses Codex as mac@example.com"))
+    #expect(guidance.contains("private browser window"))
+    let script = ApplicationServices.loginScript(
+      provider: "Codex", account: "Personal", command: "codex login --device-auth",
+      fallbackCommand: "codex login", guidance: guidance)
+    // Run it with a failing code login and a working fallback.
+    let ran = ApplicationServices.loginScript(
+      provider: "Codex", account: "Personal", command: "false", fallbackCommand: "true",
+      guidance: guidance
+    ).replacingOccurrences(of: "\nclear\n", with: "\n")
+    let output = await ExecutableLocator.captureOutput(
+      executable: "/bin/zsh", arguments: ["-c", ran], environment: [:])
+    #expect(output?.contains("Trying the standard browser sign-in") == true)
+    #expect(output?.contains("Done. Return to Otto") == true)
+    let device = try! #require(script.range(of: "codex login --device-auth"))
+    let fallback = try! #require(script.range(of: "\n  codex login\n"))
+    #expect(device.upperBound < fallback.lowerBound)
+    #expect(script.contains("if (( login_status != 0 )); then"))
+    #expect(
+      ProviderAccountIsolation.descriptor(for: .codex).codeLoginArguments
+        == ["login", "--device-auth"])
+  }
+
   @Test func isolatedModesScrubHostCredentialsButSystemDefaultDoesNot() async throws {
     let fixture = fixture()
     defer { fixture.cleanUp() }

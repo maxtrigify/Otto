@@ -34,7 +34,7 @@ struct ConversationRenderPolicyTests {
     #expect(InlineMarkdownCache.parse("a **b**") == InlineMarkdownCache.parse("a **b**"))
   }
 
-  @Test("The chat layout boundary contains no frame-driven SwiftUI source")
+  @Test("The active transcript contains no frame-driven SwiftUI source")
   func noFrameDrivenChatLayout() throws {
     let repository = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()
@@ -46,7 +46,12 @@ struct ConversationRenderPolicyTests {
     )
     let start = try #require(source.range(of: "// CHAT_LAYOUT_BOUNDARY_BEGIN"))
     let end = try #require(source.range(of: "// CHAT_LAYOUT_BOUNDARY_END"))
-    let chatBoundary = source[start.upperBound..<end.lowerBound]
+    var chatBoundary = String(source[start.upperBound..<end.lowerBound])
+    // The empty-chat welcome sizes itself to the pane. It is absent once a transcript
+    // exists, so exclude that static layout from the active-transcript policy.
+    let welcomeStart = try #require(chatBoundary.range(of: "private var welcomeSurface: some View"))
+    let welcomeEnd = try #require(chatBoundary.range(of: "private func welcomeZoom"))
+    chatBoundary.removeSubrange(welcomeStart.lowerBound..<welcomeEnd.lowerBound)
 
     #expect(!chatBoundary.contains("TimelineView("))
     #expect(!chatBoundary.contains("repeatForever"))

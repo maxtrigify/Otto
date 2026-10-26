@@ -43,7 +43,8 @@ final class HomePinsStore: ObservableObject {
 
   func add(_ source: HomePin.Source) {
     guard case .markdown = source,
-      !pins.contains(where: { $0.source == source }) else { return }
+      !pins.contains(where: { $0.source == source })
+    else { return }
     pins.append(HomePin(source: source))
     save()
   }

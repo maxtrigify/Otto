@@ -17,12 +17,17 @@ struct ChatWelcomeTests {
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: folder) }
 
-    #expect(WelcomeSuggestion.forDirectory(folder.path).map(\.label) == WelcomeSuggestion.workspace.map(\.label))
-    #expect(WelcomeSuggestion.forDirectory(nil).map(\.label) == WelcomeSuggestion.workspace.map(\.label))
+    #expect(
+      WelcomeSuggestion.forDirectory(folder.path).map(\.label)
+        == WelcomeSuggestion.workspace.map(\.label))
+    #expect(
+      WelcomeSuggestion.forDirectory(nil).map(\.label) == WelcomeSuggestion.workspace.map(\.label))
 
     try FileManager.default.createDirectory(
       at: folder.appendingPathComponent(".git"), withIntermediateDirectories: true)
-    #expect(WelcomeSuggestion.forDirectory(folder.path).map(\.label) == WelcomeSuggestion.code.map(\.label))
+    #expect(
+      WelcomeSuggestion.forDirectory(folder.path).map(\.label)
+        == WelcomeSuggestion.code.map(\.label))
   }
 
   @Test func greetingFollowsTheTimeOfDay() {

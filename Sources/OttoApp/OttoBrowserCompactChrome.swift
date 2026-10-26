@@ -53,28 +53,31 @@ struct OttoBrowserTabStrip: View {
           help: state?.isLoading == true ? "Stop loading" : "Reload", action: reloadOrStop)
       }
 
-      HStack(spacing: 4) {
-        ForEach(pinned.prefix(6)) { bookmark in
-          Button {
-            navigate(bookmark.url)
-          } label: {
-            BrowserFavicon(url: bookmark.url, size: 14)
-              .frame(width: 30, height: 30)
-              .background(palette.paper.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-              .contentShape(RoundedRectangle(cornerRadius: 8))
-          }
-          .buttonStyle(.plain)
-          .help("\(bookmark.title) — pinned site")
-          .accessibilityLabel("\(bookmark.title), pinned site")
-          .contextMenu {
-            Button("Open") { navigate(bookmark.url) }
-            Button("Open in New Tab") { openInNewTab(bookmark.url) }
-            Divider()
-            Button("Unpin") { unpin(bookmark) }
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 4) {
+          ForEach(pinned) { bookmark in
+            Button {
+              navigate(bookmark.url)
+            } label: {
+              BrowserFavicon(url: bookmark.url, size: 14)
+                .frame(width: 30, height: 30)
+                .background(palette.paper.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .help("\(bookmark.title) — pinned site")
+            .accessibilityLabel("\(bookmark.title), pinned site")
+            .contextMenu {
+              Button("Open") { navigate(bookmark.url) }
+              Button("Open in New Tab") { openInNewTab(bookmark.url) }
+              Divider()
+              Button("Unpin") { unpin(bookmark) }
+            }
           }
         }
       }
-      .padding(.horizontal, 4)
+      .frame(maxWidth: pinned.isEmpty ? 0 : 210)
+      .padding(.horizontal, pinned.isEmpty ? 0 : 4)
 
       if !pinned.isEmpty {
         // Separates pinned sites (shortcuts) from open tabs.
@@ -115,6 +118,21 @@ struct OttoBrowserTabStrip: View {
       }
 
       Spacer(minLength: 4)
+      if let tab = session.activeTab {
+        let existing = pinned.first { Self.sameSite($0.url, tab.url) }
+        Button {
+          if let existing { unpin(existing) } else { pin(tab) }
+        } label: {
+          Image(systemName: existing == nil ? "pin" : "pin.fill")
+            .font(.system(size: 11, weight: .semibold))
+            .frame(width: 28, height: 28)
+        }
+        .buttonStyle(.ottoChrome)
+        .foregroundStyle(palette.paper.opacity(0.7))
+        .disabled(!["http", "https"].contains(URL(string: tab.url)?.scheme ?? ""))
+        .help(existing == nil ? "Pin site to shortcuts" : "Unpin site from shortcuts")
+        .accessibilityLabel(existing == nil ? "Pin site to shortcuts" : "Unpin site from shortcuts")
+      }
       BrowserPasswordsButton(tabID: session.activeTabID)
 
       Button(action: showImport) {

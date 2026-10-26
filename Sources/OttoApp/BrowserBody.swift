@@ -879,7 +879,7 @@ internal enum BrowserRendererPool {
   }
 }
 
-private struct BrowserWebView: NSViewRepresentable {
+struct BrowserWebView: NSViewRepresentable {
   let state: BrowserRuntimeState
   let tabID: UUID
   let tabURL: String
@@ -985,14 +985,18 @@ private struct BrowserWebView: NSViewRepresentable {
         requestedURL: state.url
       )
     case .back:
-      if webView.canGoBack {
+      if let item = webView.backForwardList.backList.last(where: {
+        BrowserHistoryNavigation.isPage($0.url)
+      }) {
         coordinator.track(
-          webView.goBack(), revision: state.revision, requestedURL: state.url)
+          webView.go(to: item), revision: state.revision, requestedURL: state.url)
       }
     case .forward:
-      if webView.canGoForward {
+      if let item = webView.backForwardList.forwardList.first(where: {
+        BrowserHistoryNavigation.isPage($0.url)
+      }) {
         coordinator.track(
-          webView.goForward(), revision: state.revision, requestedURL: state.url)
+          webView.go(to: item), revision: state.revision, requestedURL: state.url)
       }
     case .refresh:
       coordinator.track(
@@ -1274,12 +1278,18 @@ private struct BrowserWebView: NSViewRepresentable {
       for navigationAction: WKNavigationAction,
       windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-      if navigationAction.targetFrame == nil,
-        let url = BrowserPopupWindows.tabURL(
-          navigationType: navigationAction.navigationType, url: navigationAction.request.url)
-      {
-        BrowserLinkTabRequest.post(nodeID: nodeID, url: url.absoluteString)
-        return nil
+      if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+        if BrowserPopupWindows.switchesAccount(from: webView.url, to: url) {
+          webView.load(navigationAction.request)
+          return nil
+        }
+        if let url = BrowserPopupWindows.tabURL(
+          navigationType: navigationAction.navigationType, url: url,
+          isMainFrame: navigationAction.sourceFrame.isMainFrame)
+        {
+          BrowserLinkTabRequest.post(nodeID: nodeID, url: url.absoluteString)
+          return nil
+        }
       }
       return popupWindows.webView(
         webView, createWebViewWith: configuration,
@@ -1292,6 +1302,23 @@ private struct BrowserWebView: NSViewRepresentable {
       completionHandler: @escaping @MainActor @Sendable ([URL]?) -> Void
     ) {
       BrowserFilePicker.present(parameters, for: webView, completionHandler: completionHandler)
+    }
+
+    func webView(
+      _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+      decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+      // Native new-tab surfaces never belong in page history. This also cancels swipe
+      // navigation to legacy internal URLs retained by an older renderer.
+      if let url = navigationAction.request.url,
+        OttoNames.isAppURLScheme(url.scheme)
+          || (navigationAction.navigationType == .backForward
+            && !BrowserHistoryNavigation.isPage(url))
+      {
+        decisionHandler(.cancel)
+        return
+      }
+      decisionHandler(.allow)
     }
 
     func closePopupWindows() { popupWindows.closeAll() }
@@ -1707,8 +1734,12 @@ private struct BrowserWebView: NSViewRepresentable {
         BrowserPageReport(
           url: url,
           title: webView.title,
-          canGoBack: webView.canGoBack,
-          canGoForward: webView.canGoForward,
+          canGoBack: webView.backForwardList.backList.contains {
+            BrowserHistoryNavigation.isPage($0.url)
+          },
+          canGoForward: webView.backForwardList.forwardList.contains {
+            BrowserHistoryNavigation.isPage($0.url)
+          },
           isLoading: webView.isLoading,
           errorMessage: errorDescription,
           expectedRevision: context.revision
@@ -1971,7 +2002,7 @@ struct BrowserAgentControlAura: View {
   }
 }
 
-private struct BrowserPageReport {
+struct BrowserPageReport {
   var url: String
   var title: String?
   var canGoBack: Bool
@@ -2039,4 +2070,11 @@ struct BrowserLinkTabRequest {
   }
 
   static func claim(_ id: UUID) -> Bool { claimed.insert(id).inserted }
+}
+
+/// Shared by toolbar history and WebKit's swipe-navigation policy.
+enum BrowserHistoryNavigation {
+  static func isPage(_ url: URL) -> Bool {
+    !OttoNames.isAppURLScheme(url.scheme) && url.absoluteString != BrowserDefaults.blankURL
+  }
 }

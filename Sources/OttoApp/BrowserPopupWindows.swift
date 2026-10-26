@@ -6,13 +6,46 @@ import WebKit
 final class BrowserPopupWindows: NSObject, WKUIDelegate, WKNavigationDelegate, NSWindowDelegate {
   private(set) var windows: [ObjectIdentifier: NSWindowController] = [:]
 
-  /// A clicked target="_blank" link (Google's account switcher, app launchers) belongs in a new
-  /// Otto tab. Script-opened windows stay native popups because sign-in flows need window.opener.
-  nonisolated static func tabURL(navigationType: WKNavigationType, url: URL?) -> URL? {
-    guard navigationType == .linkActivated, let url,
-      let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http"
+  /// Ordinary pages belong in tabs, even when opened by JavaScript. Embedded sign-in
+  /// windows and explicit authentication endpoints retain WebKit's opener configuration.
+  nonisolated static func tabURL(
+    navigationType: WKNavigationType, url: URL?, isMainFrame: Bool = true
+  ) -> URL? {
+    guard let url, ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+      navigationType == .linkActivated || isMainFrame, !isAuthenticationURL(url)
     else { return nil }
     return url
+  }
+
+  nonisolated static func isAuthenticationURL(_ url: URL) -> Bool {
+    let host = url.host?.lowercased() ?? ""
+    let path = url.path.lowercased()
+    return host == "accounts.google.com" || host == "appleid.apple.com"
+      || path.contains("oauth") || path.contains("authorize")
+      || path.contains("signin") || path.contains("login")
+  }
+
+  /// Match account navigation within the current Google product, never app-launcher links.
+  nonisolated static func switchesAccount(from source: URL?, to destination: URL) -> Bool {
+    guard let source, source.scheme == "https", destination.scheme == "https",
+      let host = source.host?.lowercased(),
+      ["mail.google.com", "calendar.google.com"].contains(host)
+    else { return false }
+    if destination.host?.lowercased() == host {
+      let prefix = host == "mail.google.com" ? "/mail/u/" : "/calendar/u/"
+      let path = destination.path
+      return path.hasPrefix(prefix)
+        && !(path.dropFirst(prefix.count).split(separator: "/").first?.isEmpty ?? true)
+    }
+    if destination.host?.lowercased() == "accounts.google.com",
+      destination.path.lowercased() == "/accountchooser",
+      let value = URLComponents(url: destination, resolvingAgainstBaseURL: false)?
+        .queryItems?.first(where: { $0.name == "continue" })?.value,
+      let continuation = URL(string: value)
+    {
+      return switchesAccount(from: source, to: continuation)
+    }
+    return false
   }
 
   func webView(

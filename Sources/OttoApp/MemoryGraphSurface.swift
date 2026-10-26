@@ -32,23 +32,33 @@ struct MemoryGraphSurface: View {
   var body: some View {
     GeometryReader { geometry in
       ZStack {
-        RadialGradient(colors: [palette.signal.opacity(0.065), palette.surface],
+        RadialGradient(
+          colors: [palette.signal.opacity(0.065), palette.surface],
           center: .center, startRadius: 0, endRadius: 450)
         Canvas { context, size in
           for x in stride(from: 16.0, to: size.width, by: 28) {
             for y in stride(from: 16.0, to: size.height, by: 28) {
-              context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 1)),
+              context.fill(
+                Path(ellipseIn: CGRect(x: x, y: y, width: 1, height: 1)),
                 with: .color(palette.paper.opacity(0.07)))
             }
           }
           for edge in edges {
             guard let from = positions[edge.from], let to = positions[edge.to] else { continue }
-            let a = screen(from, in: size), b = screen(to, in: size)
+            let a = screen(from, in: size)
+            let b = screen(to, in: size)
             let active = edge.from == selectedID || edge.to == selectedID
-            var line = Path(); line.move(to: a); line.addLine(to: b)
-            context.stroke(line, with: .color(active ? palette.signal.opacity(0.72)
-              : palette.paper.opacity(selectedID == nil ? 0.055 : 0.025)),
-              style: StrokeStyle(lineWidth: active ? 1.4 : 0.7,
+            var line = Path()
+            line.move(to: a)
+            line.addLine(to: b)
+            context.stroke(
+              line,
+              with: .color(
+                active
+                  ? palette.signal.opacity(0.72)
+                  : palette.paper.opacity(selectedID == nil ? 0.055 : 0.025)),
+              style: StrokeStyle(
+                lineWidth: active ? 1.4 : 0.7,
                 dash: edge.relationship == .supersedes ? [4, 4] : []))
           }
         }
@@ -59,7 +69,8 @@ struct MemoryGraphSurface: View {
           }
         }
         if nodes.isEmpty && !loading {
-          ContentUnavailableView(emptyTitle,
+          ContentUnavailableView(
+            emptyTitle,
             systemImage: "point.3.connected.trianglepath.dotted",
             description: Text(emptyDescription))
         }
@@ -67,7 +78,8 @@ struct MemoryGraphSurface: View {
       .background {
         MemoryGraphInputMonitor(isEnabled: isEnabled) { input, anchor in
           // Direct input must track fingers without implicit animation or spring lag.
-          var transaction = Transaction(); transaction.disablesAnimations = true
+          var transaction = Transaction()
+          transaction.disablesAnimations = true
           withTransaction(transaction) {
             switch input {
             case .pan(let delta): camera.panBy(delta)
@@ -92,7 +104,8 @@ struct MemoryGraphSurface: View {
   }
 
   private func changeZoom(by factor: CGFloat) {
-    camera.zoom(by: factor, at: CGPoint(x: viewport.width / 2, y: viewport.height / 2), in: viewport)
+    camera.zoom(
+      by: factor, at: CGPoint(x: viewport.width / 2, y: viewport.height / 2), in: viewport)
   }
 
   private func drag(in size: CGSize) -> some Gesture {
@@ -101,31 +114,40 @@ struct MemoryGraphSurface: View {
         if dragStart == nil {
           dragStart = value.startLocation
           let hit = nodes.min { a, b in
-            distance(a, from: value.startLocation, in: size) < distance(b, from: value.startLocation, in: size)
+            distance(a, from: value.startLocation, in: size)
+              < distance(b, from: value.startLocation, in: size)
           }
           if let hit, distance(hit, from: value.startLocation, in: size) < 16 {
-            draggedID = hit.id; dragOrigin = positions[hit.id]
+            draggedID = hit.id
+            dragOrigin = positions[hit.id]
           }
           initialPan = camera.pan
         }
-        var transaction = Transaction(); transaction.disablesAnimations = true
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
         withTransaction(transaction) {
           if let id = draggedID, let origin = dragOrigin {
             let factor = camera.scale(bounds: bounds, viewport: size)
-            positions[id] = .init(x: origin.x + value.translation.width / factor,
+            positions[id] = .init(
+              x: origin.x + value.translation.width / factor,
               y: origin.y + value.translation.height / factor)
           } else {
-            camera.pan = CGSize(width: initialPan.width + value.translation.width,
+            camera.pan = CGSize(
+              width: initialPan.width + value.translation.width,
               height: initialPan.height + value.translation.height)
           }
         }
       }
       .onEnded { _ in
-        draggedID = nil; dragOrigin = nil; dragStart = nil
+        draggedID = nil
+        dragOrigin = nil
+        dragStart = nil
       }
   }
 
-  private func distance(_ node: MemoryGraph.Node, from location: CGPoint, in size: CGSize) -> CGFloat {
+  private func distance(_ node: MemoryGraph.Node, from location: CGPoint, in size: CGSize)
+    -> CGFloat
+  {
     guard let point = positions[node.id] else { return .infinity }
     let p = screen(point, in: size)
     return hypot(p.x - location.x, p.y - location.y)
@@ -134,29 +156,40 @@ struct MemoryGraphSurface: View {
   private func graphNode(_ node: MemoryGraph.Node) -> some View {
     let emphasized = selectedID == node.id || hoveredID == node.id
     let related = selectedID == nil || selectedID == node.id || neighbors.contains(node.id)
-    let showLabel = emphasized || (related && (camera.zoom > 2 || nodes.count < 22
-      || (selectedID != nil && neighbors.count < 15) || node.kind == .layer
-      || (node.kind == .topic && (neighborIndex[node.id]?.count ?? 0) >= 4)))
+    let showLabel =
+      emphasized
+      || (related
+        && (camera.zoom > 2 || nodes.count < 22
+          || (selectedID != nil && neighbors.count < 15) || node.kind == .layer
+          || (node.kind == .topic && (neighborIndex[node.id]?.count ?? 0) >= 4)))
     let diameter: CGFloat = node.kind == .layer ? 18 : (node.kind == .memory ? 10 : 8)
-    return Button { select(node.id) } label: {
+    return Button {
+      select(node.id)
+    } label: {
       ZStack {
         Circle().fill(color(node.kind).opacity(emphasized ? 0.14 : 0))
           .frame(width: 34, height: 34)
-        Circle().fill(node.confidence == nil || node.confidence == .confirmed
-          ? color(node.kind) : palette.surface)
-          .frame(width: diameter, height: diameter)
-          .overlay(Circle().strokeBorder(color(node.kind), lineWidth: 1.5))
-          .shadow(color: color(node.kind).opacity(emphasized ? 0.6 : 0.2), radius: emphasized ? 9 : 3)
+        Circle().fill(
+          node.confidence == nil || node.confidence == .confirmed
+            ? color(node.kind) : palette.surface
+        )
+        .frame(width: diameter, height: diameter)
+        .overlay(Circle().strokeBorder(color(node.kind), lineWidth: 1.5))
+        .shadow(color: color(node.kind).opacity(emphasized ? 0.6 : 0.2), radius: emphasized ? 9 : 3)
       }
       .frame(width: 26, height: 26)
       .overlay(alignment: .top) {
         if showLabel {
-          Text(shortTitle(node)).font(.ottoDisplay(emphasized ? 12 : 10).weight(emphasized ? .semibold : .regular))
-            .lineLimit(1).truncationMode(.middle)
-            .frame(width: emphasized ? 190 : 120).foregroundStyle(palette.paper.opacity(emphasized ? 1 : 0.7))
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(palette.surface.opacity(emphasized ? 0.95 : 0.15), in: Capsule())
-            .offset(y: 25).allowsHitTesting(false)
+          Text(shortTitle(node)).font(
+            .ottoDisplay(emphasized ? 12 : 10).weight(emphasized ? .semibold : .regular)
+          )
+          .lineLimit(1).truncationMode(.middle)
+          .frame(width: emphasized ? 190 : 120).foregroundStyle(
+            palette.paper.opacity(emphasized ? 1 : 0.7)
+          )
+          .padding(.horizontal, 5).padding(.vertical, 2)
+          .background(palette.surface.opacity(emphasized ? 0.95 : 0.15), in: Capsule())
+          .offset(y: 25).allowsHitTesting(false)
         }
       }
       .opacity(related ? 1 : 0.22)
@@ -176,11 +209,19 @@ struct MemoryGraphSurface: View {
       .disabled(selectedID == nil).help("Focus the selected node and its connections")
       .accessibilityLabel("Focus connections")
       Divider().frame(height: 14)
-      Button { changeZoom(by: 1 / 1.25) } label: { Image(systemName: "minus") }
-        .accessibilityLabel("Zoom out")
+      Button {
+        changeZoom(by: 1 / 1.25)
+      } label: {
+        Image(systemName: "minus")
+      }
+      .accessibilityLabel("Zoom out")
       Text("\(Int(camera.zoom * 100))%").font(.ottoMono(9)).frame(width: 35)
-      Button { changeZoom(by: 1.25) } label: { Image(systemName: "plus") }
-        .accessibilityLabel("Zoom in")
+      Button {
+        changeZoom(by: 1.25)
+      } label: {
+        Image(systemName: "plus")
+      }
+      .accessibilityLabel("Zoom in")
       Button(action: fit) { Image(systemName: "arrow.up.left.and.arrow.down.right") }
         .help("Fit graph").accessibilityLabel("Fit memory graph")
     }
@@ -242,7 +283,8 @@ private struct MemoryGraphInputMonitor: NSViewRepresentable {
     var perform: ((MemoryGraphInput, CGPoint) -> Void)?
     private var monitor: Any?
     func install() {
-      monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
+      monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) {
+        [weak self] event in
         guard let self, self.isEnabled, let view = self.view,
           let window = view.window, event.window === window, window.isKeyWindow,
           !view.isHiddenOrHasHiddenAncestor
@@ -252,11 +294,13 @@ private struct MemoryGraphInputMonitor: NSViewRepresentable {
         if event.type == .magnify {
           self.perform?(.zoom(exp(event.magnification)), point)
         } else if !event.hasPreciseScrollingDeltas
-          || !event.modifierFlags.intersection([.command, .control]).isEmpty {
+          || !event.modifierFlags.intersection([.command, .control]).isEmpty
+        {
           let sensitivity: CGFloat = event.hasPreciseScrollingDeltas ? 0.008 : 0.08
           self.perform?(.zoom(exp(event.scrollingDeltaY * sensitivity)), point)
         } else {
-          self.perform?(.pan(CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)), point)
+          self.perform?(
+            .pan(CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY)), point)
         }
         return nil
       }

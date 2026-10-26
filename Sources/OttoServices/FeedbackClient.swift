@@ -93,7 +93,8 @@ public struct FeedbackEnvironment: Codable, Equatable, Sendable {
       }
       var bytes = [CChar](repeating: 0, count: size)
       guard sysctlbyname("hw.model", &bytes, &size, nil, 0) == 0 else { return nil }
-      let value = String(decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+      let value = String(
+        decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
       return validModel(value)
     #else
       return nil

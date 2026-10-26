@@ -92,7 +92,7 @@ struct HomePinnedCards: View {
           Button {
             switch pin.source {
             case .markdown(let path): openMarkdown(path)
-            case .widget: break // Legacy pins are decoded but not displayed.
+            case .widget: break  // Legacy pins are decoded but not displayed.
             }
           } label: {
             Image(systemName: "arrow.up.right")
@@ -104,7 +104,7 @@ struct HomePinnedCards: View {
       case .markdown(let path):
         HomeMarkdownPreview(path: path, documents: services.documents)
       case .widget:
-        EmptyView() // Compatibility with saved pins; filtered from visiblePins.
+        EmptyView()  // Compatibility with saved pins; filtered from visiblePins.
       }
       Spacer(minLength: 0)
     }

@@ -107,7 +107,8 @@ extension ApplicationServices {
   /// that just uses the Mac's own login adds nothing new.
   private func briefCanUse(_ account: ProviderAccount, provider: AgentProvider) async -> Bool {
     switch account.credentialMode(for: provider) {
-    case .login: providerAccounts.hasProviderLogin(accountID: account.id, provider: provider)
+    case .login:
+      providerAccounts.hasDistinctProviderLogin(accountID: account.id, provider: provider)
     case .apiKey: await providerAccounts.hasAPIKey(accountID: account.id, provider: provider)
     case .systemDefault: false
     }

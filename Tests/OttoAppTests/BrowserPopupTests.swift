@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OttoBrowser
 import Testing
 import WebKit
 
@@ -47,15 +48,112 @@ struct BrowserPopupTests {
     #expect(popups.windows.isEmpty)
   }
 
-  @Test func clickedNewWindowLinksOpenAsTabsButScriptPopupsDoNot() {
+  @Test func ordinaryLinksAndScriptWindowsOpenAsTabs() {
     let account = URL(string: "https://mail.google.com/mail/u/1/")!
     #expect(BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: account) == account)
-    #expect(BrowserPopupWindows.tabURL(navigationType: .other, url: account) == nil)
+    #expect(BrowserPopupWindows.tabURL(navigationType: .other, url: account) == account)
     #expect(
       BrowserPopupWindows.tabURL(
         navigationType: .linkActivated, url: URL(string: "mailto:a@example.com")) == nil)
     #expect(BrowserPopupWindows.tabURL(navigationType: .linkActivated, url: nil) == nil)
   }
+  @Test func scriptOpenedConfiguratorReachesTheTabOwnerWithoutAWindow() async throws {
+    _ = NSApplication.shared
+    let server = try PopupFixtureServer()
+    defer { server.stop() }
+    let coordinator = BrowserWebView.Coordinator(
+      nodeID: UUID(), tabID: UUID(), runtime: BrowserRuntime(),
+      requestedURL: server.url.absoluteString, requestedRevision: 0, report: { _ in })
+    let config = WKWebViewConfiguration()
+    config.websiteDataStore = .nonPersistent()
+    config.preferences.javaScriptCanOpenWindowsAutomatically = true
+    let opener = WKWebView(
+      frame: NSRect(x: 0, y: 0, width: 800, height: 500), configuration: config)
+    opener.uiDelegate = coordinator
+    opener.navigationDelegate = coordinator
+    let window = NSWindow(
+      contentRect: opener.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = opener
+    defer {
+      window.close()
+      coordinator.closePopupWindows()
+    }
+    let received = TabRequestBox()
+    let observer = NotificationCenter.default.addObserver(
+      forName: BrowserLinkTabRequest.name, object: nil, queue: .main
+    ) { notification in
+      let nodeID = notification.userInfo?["nodeID"] as? UUID
+      let url = notification.userInfo?["url"] as? String
+      MainActor.assumeIsolated {
+        received.nodeID = nodeID
+        received.url = url
+      }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    opener.load(URLRequest(url: server.url))
+    for _ in 0..<200 {
+      if (try? await opener.evaluateJavaScript("window.fixtureReady === true")) as? Bool == true {
+        break
+      }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    _ = try await opener.evaluateJavaScript("window.open('/configurator', '_blank'); undefined")
+    for _ in 0..<200 {
+      if received.url != nil { break }
+      try await Task.sleep(for: .milliseconds(25))
+    }
+    #expect(received.nodeID == coordinator.nodeID)
+    #expect(
+      received.url == server.url.appendingPathComponent("configurator").absoluteString)
+    #expect(coordinator.popupWindows.windows.isEmpty)
+    opener.load(URLRequest(url: URL(string: "muse://start")!))
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(
+      opener.url == server.url || opener.url?.absoluteString == server.url.absoluteString + "/")
+    #expect(opener.backForwardList.backList.allSatisfy { BrowserHistoryNavigation.isPage($0.url) })
+  }
+
+  @Test func authenticationAndEmbeddedPopupsKeepTheirOpener() {
+    let oauth = URL(string: "https://accounts.google.com/o/oauth2/auth?client_id=fixture")!
+    #expect(BrowserPopupWindows.tabURL(navigationType: .other, url: oauth) == nil)
+    #expect(
+      BrowserPopupWindows.tabURL(
+        navigationType: .other, url: URL(string: "https://example.com/provider"),
+        isMainFrame: false) == nil)
+    let configurator = URL(string: "https://configure.zodiac-nautic.com/")!
+    #expect(BrowserPopupWindows.tabURL(navigationType: .other, url: configurator) == configurator)
+  }
+
+  @Test func accountSwitchesStayWithinTheCurrentGoogleProduct() {
+    let mail = URL(string: "https://mail.google.com/mail/u/0/#inbox")!
+    let calendar = URL(string: "https://calendar.google.com/calendar/u/0/r")!
+    for (source, target) in [
+      (mail, "https://mail.google.com/mail/u/1/"),
+      (calendar, "https://calendar.google.com/calendar/u/2/r"),
+      (
+        mail,
+        "https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fmail.google.com%2Fmail%2Fu%2F1%2F"
+      ),
+    ] {
+      #expect(BrowserPopupWindows.switchesAccount(from: source, to: URL(string: target)!))
+    }
+    for target in [
+      "https://calendar.google.com/calendar/u/1/r", "https://mail.google.com.evil.test/mail/u/1/",
+      "https://accounts.google.com/o/oauth2/auth", "https://mail.google.com/mail/",
+      "https://accounts.google.com/AccountChooser?continue=https%3A%2F%2Fevil.test%2F",
+    ] {
+      #expect(!BrowserPopupWindows.switchesAccount(from: mail, to: URL(string: target)!))
+    }
+  }
+
+  @Test func internalPagesAreExcludedFromHistory() {
+    for raw in ["muse://start", "muse:start", "otto://start", "otto:start", "about:blank"] {
+      #expect(!BrowserHistoryNavigation.isPage(URL(string: raw)!))
+    }
+    #expect(BrowserHistoryNavigation.isPage(URL(string: "https://example.com")!))
+  }
+
 }
 
 private final class PopupFixtureServer {
@@ -100,4 +198,9 @@ private final class PopupFixtureServer {
       process.waitUntilExit()
     }
   }
+}
+
+@MainActor private final class TabRequestBox {
+  var nodeID: UUID?
+  var url: String?
 }

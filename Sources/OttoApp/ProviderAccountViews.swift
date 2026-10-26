@@ -475,8 +475,10 @@ private struct ProviderAccountSection: View {
     let isolation = ProviderAccountIsolation.descriptor(for: provider)
     let mode = account.credentialMode(for: provider)
     let _ = loginTick
-    let signedIn =
-      mode == .login && store.hasProviderLogin(accountID: account.id, provider: provider)
+    let status =
+      mode == .login
+      ? store.loginStatus(accountID: account.id, provider: provider) : .signedOut
+    let signedIn = status != .signedOut
     VStack(alignment: .leading, spacing: 6) {
       HStack {
         AgentProviderLogo(provider: provider, size: 14, color: .primary)
@@ -491,19 +493,21 @@ private struct ProviderAccountSection: View {
         .frame(maxWidth: 260)
         Spacer()
         if mode == .login {
-          Label(
-            signedIn ? "Signed in" : "Not signed in",
-            systemImage: signedIn
-              ? "checkmark.circle.fill" : "person.crop.circle.badge.exclamationmark"
-          )
-          .font(.caption)
-          .foregroundStyle(signedIn ? Color.green : Color.orange)
+          loginBadge(status)
           Button(signedIn ? "Log in again" : "Log in") { startLogin(provider) }
         }
       }
       Text(modeExplanation(mode, provider: provider))
         .font(.caption)
         .foregroundStyle(.secondary)
+      if case .sameAsMac(let identity) = status {
+        Text(
+          "This is the same \(provider.rawValue) account this Mac already uses\(identity.label.map { " (\($0))" } ?? ""), so \(account.name) isn't separate. Your browser was probably still signed in to it. Choose Log in again and sign in to the other account in a private browser window."
+        )
+        .font(.caption)
+        .foregroundStyle(Color.orange)
+        .fixedSize(horizontal: false, vertical: true)
+      }
       if let note = loginNotes[provider], !(signedIn && !loginErrors.contains(provider)) {
         Text(note)
           .font(.caption)
@@ -518,6 +522,29 @@ private struct ProviderAccountSection: View {
       }
     }
     .id("\(provider.rawValue)-\(refreshToken)")
+  }
+
+  @ViewBuilder private func loginBadge(_ status: ProviderLoginStatus) -> some View {
+    switch status {
+    case .signedOut:
+      Label("Not signed in", systemImage: "person.crop.circle.badge.exclamationmark")
+        .font(.caption)
+        .foregroundStyle(Color.orange)
+    case .signedIn(let identity):
+      Label(
+        identity?.label.map { "Signed in as \($0)" } ?? "Signed in",
+        systemImage: "checkmark.circle.fill"
+      )
+      .font(.caption)
+      .foregroundStyle(Color.green)
+      .lineLimit(1)
+      .truncationMode(.middle)
+      .help(identity?.label ?? "Signed in")
+    case .sameAsMac:
+      Label("Same as this Mac's login", systemImage: "exclamationmark.triangle.fill")
+        .font(.caption)
+        .foregroundStyle(Color.orange)
+    }
   }
 
   private func modeExplanation(_ mode: ProviderAccountCredentialMode, provider: AgentProvider)
@@ -583,7 +610,7 @@ private struct ProviderAccountSection: View {
       do {
         try await services.startProviderLogin(accountID: account.id, provider: provider)
         loginNotes[provider] =
-          "Finish signing in in the Terminal window (it may open your browser). This updates to Signed in automatically."
+          "Finish signing in in the Terminal window. Use a private browser window so you don't reuse the account your browser is already signed in to. This updates automatically."
       } catch {
         loginErrors.insert(provider)
         loginNotes[provider] = error.localizedDescription

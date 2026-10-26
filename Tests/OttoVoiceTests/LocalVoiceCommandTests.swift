@@ -104,8 +104,6 @@ struct LocalVoiceCommandTests {
     #expect(!fixture.store.activeCanvas.nodes.contains { $0.id == terminal.id })
   }
 
-
-
   @Test("Ambiguous and destructive phrases never guess a target")
   @MainActor
   func ambiguityAndAdversarialCommands() async throws {

@@ -178,11 +178,20 @@ extension ApplicationServices {
     }
     let environment = try providerAccounts.loginEnvironment(
       accountID: accountID, provider: provider)
+    let command = { (arguments: [String]) in
+      Self.loginCommand(
+        environment: environment, executable: executable, arguments: arguments,
+        removingEnvironmentVariables: isolation.credentialEnvironmentVariables)
+    }
+    let codeLogin = isolation.codeLoginArguments.map(command)
     let script = Self.loginScript(
       provider: provider.rawValue, account: account.name,
-      command: Self.loginCommand(
-        environment: environment, executable: executable, arguments: isolation.loginArguments,
-        removingEnvironmentVariables: isolation.credentialEnvironmentVariables))
+      command: codeLogin ?? command(isolation.loginArguments),
+      fallbackCommand: codeLogin == nil ? nil : command(isolation.loginArguments),
+      guidance: Self.loginGuidance(
+        provider: provider.rawValue, account: account.name,
+        macLogin: providerAccounts.macLoginIdentity(provider: provider)?.label,
+        usesCodeLogin: codeLogin != nil))
     // The script holds only paths and the login command, never credentials.
     let file = providerAccounts.accountDirectory(accountID)
       .appending(path: "\(provider.accountCredentialName)-login.command")
@@ -212,24 +221,54 @@ extension ApplicationServices {
       .joined(separator: " ")
   }
 
-  nonisolated static func loginScript(provider: String, account: String, command: String)
-    -> String
-  {
-    """
-    #!/bin/zsh
-    clear
-    print -r -- \(shellQuoted("Signing in to \(provider) for the \(account) account in Otto."))
-    print
-    \(command)
-    login_status=$?
-    print
-    if (( login_status == 0 )); then
-      print -r -- "Done. Return to Otto: this account now shows Signed in. You can close this window."
-    else
-      print -r -- "The login exited with status $login_status. Close this window and try again from Otto."
-    fi
+  /// Browsers silently approve the account they are already signed in to, which would give
+  /// the new account the Mac's existing login. Point the user at a private window instead.
+  nonisolated static func loginGuidance(
+    provider: String, account: String, macLogin: String?, usesCodeLogin: Bool
+  ) -> String {
+    let existing =
+      macLogin.map { "This Mac already uses \(provider) as \($0). " }
+      ?? "Your browser may already be signed in to \(provider). "
+    let action =
+      usesCodeLogin
+      ? "Open the link below in a private browser window (Shift-Command-N), sign in to the account you want for \(account), then enter the code."
+      : "If your browser opens already signed in to that account, close the tab and open the link printed below in a private browser window (Shift-Command-N) instead, then sign in to the account you want for \(account)."
+    return existing + action
+  }
 
-    """
+  nonisolated static func loginScript(
+    provider: String, account: String, command: String, fallbackCommand: String? = nil,
+    guidance: String? = nil
+  ) -> String {
+    let guidanceLines = guidance.map { "print -r -- \(shellQuoted($0))\nprint\n" } ?? ""
+    let fallback =
+      fallbackCommand.map {
+        """
+        if (( login_status != 0 )); then
+          print
+          print -r -- "Code sign-in didn't complete. Trying the standard browser sign-in instead."
+          print
+          \($0)
+          login_status=$?
+        fi
+
+        """
+      } ?? ""
+    return """
+      #!/bin/zsh
+      clear
+      print -r -- \(shellQuoted("Signing in to \(provider) for the \(account) account in Otto."))
+      print
+      \(guidanceLines)\(command)
+      login_status=$?
+      \(fallback)print
+      if (( login_status == 0 )); then
+        print -r -- "Done. Return to Otto and check the account shows the email you expect. You can close this window."
+      else
+        print -r -- "The login exited with status $login_status. Close this window and try again from Otto."
+      fi
+
+      """
   }
 
   private nonisolated static func shellQuoted(_ value: String) -> String {

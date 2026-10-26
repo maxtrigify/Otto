@@ -269,7 +269,9 @@ struct FeedbackSheet: View {
         guard let url = urls.first(where: \.isFileURL) else { return false }
         load(url)
         return true
-      } isTargeted: { dropTargeted = $0 }
+      } isTargeted: {
+        dropTargeted = $0
+      }
       if let imageMessage {
         Text(imageMessage)
           .font(.ottoDisplay(11))
@@ -335,7 +337,8 @@ struct FeedbackSheet: View {
           .foregroundStyle(palette.muted)
           .padding(.leading, 20)
           .textSelection(.enabled)
-          .accessibilityLabel("Will send: \(client.environment.summaryLines.joined(separator: ", "))")
+          .accessibilityLabel(
+            "Will send: \(client.environment.summaryLines.joined(separator: ", "))")
       }
     }
   }

@@ -102,6 +102,58 @@ public enum ProviderAccountCredentialMode: String, Codable, CaseIterable, Sendab
   case systemDefault
 }
 
+/// The provider account a CLI login belongs to, as recorded by the CLI itself.
+public struct ProviderLoginIdentity: Equatable, Sendable {
+  public var email: String?
+  public var organization: String?
+  /// Provider user ID, when recorded.
+  public var accountKey: String?
+  /// Provider organization or workspace ID, when recorded: one person can hold both a work
+  /// and a personal seat under the same email.
+  public var organizationKey: String?
+
+  public init(
+    email: String?, organization: String? = nil, accountKey: String? = nil,
+    organizationKey: String? = nil
+  ) {
+    self.email = email
+    self.organization = organization
+    self.accountKey = accountKey
+    self.organizationKey = organizationKey
+  }
+
+  /// "me@example.com · Example Inc", or nil when the CLI recorded nothing readable.
+  public var label: String? {
+    let parts = [email, organization].compactMap { value -> String? in
+      let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return trimmed.isEmpty ? nil : trimmed
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
+  /// Same person and same organization. Unknown fields are not treated as a difference.
+  public func isSameAccount(as other: ProviderLoginIdentity) -> Bool {
+    func matches(_ a: String?, _ b: String?, caseInsensitive: Bool = false) -> Bool? {
+      guard let a, let b, !a.isEmpty, !b.isEmpty else { return nil }
+      return caseInsensitive ? a.caseInsensitiveCompare(b) == .orderedSame : a == b
+    }
+    let person =
+      matches(accountKey, other.accountKey)
+      ?? matches(
+        email, other.email, caseInsensitive: true)
+    guard person == true else { return false }
+    return matches(organizationKey, other.organizationKey) ?? true
+  }
+}
+
+public enum ProviderLoginStatus: Equatable, Sendable {
+  case signedOut
+  /// Signed in to an account other than the Mac's own login (identity unknown for some CLIs).
+  case signedIn(ProviderLoginIdentity?)
+  /// Signed in, but to the very account this Mac already uses, so nothing is separated.
+  case sameAsMac(ProviderLoginIdentity)
+}
+
 /// What happens when a run stops because its account hit a usage limit.
 public enum ProviderUsageLimitPolicy: String, Codable, CaseIterable, Sendable {
   /// Show the limit in the conversation and let the user choose another account or wait.
@@ -139,6 +191,10 @@ public struct ProviderAccountIsolation: Equatable, Sendable {
   public var apiKeyVariable: String?
   /// Arguments appended to the provider's executable to start its own login flow.
   public var loginArguments: [String]
+  /// A login that prints a link and one-time code instead of opening the default browser, so
+  /// the user can sign in from a private window rather than whichever account the browser
+  /// already holds. `loginArguments` is the fallback when this flow is unavailable.
+  public var codeLoginArguments: [String]?
   /// Entries in the default home that are safe to share between accounts. Credentials and
   /// per-account state (sessions, `.claude.json` account metadata) are deliberately excluded.
   public var sharedEntries: [String]
@@ -151,6 +207,7 @@ public struct ProviderAccountIsolation: Equatable, Sendable {
     defaultHomePath: String? = nil,
     apiKeyVariable: String? = nil,
     loginArguments: [String] = [],
+    codeLoginArguments: [String]? = nil,
     sharedEntries: [String] = [],
     homeSubdirectory: String? = nil
   ) {
@@ -158,6 +215,7 @@ public struct ProviderAccountIsolation: Equatable, Sendable {
     self.defaultHomePath = defaultHomePath
     self.apiKeyVariable = apiKeyVariable
     self.loginArguments = loginArguments
+    self.codeLoginArguments = codeLoginArguments
     self.sharedEntries = sharedEntries
     self.homeSubdirectory = homeSubdirectory
   }
@@ -197,6 +255,7 @@ public struct ProviderAccountIsolation: Equatable, Sendable {
         defaultHomePath: ".codex",
         apiKeyVariable: "CODEX_API_KEY",
         loginArguments: ["login"],
+        codeLoginArguments: ["login", "--device-auth"],
         sharedEntries: ["config.toml", "AGENTS.md", "skills", "prompts", "rules", "hooks.json"]
       )
     case .grok:

@@ -121,7 +121,8 @@ public struct NodeCreateTool: OttoTool {
   {
     guard [.agent, .terminal, .browser, .markdown, .media].contains(input.kind) else {
       throw ToolRegistryError.invalidInput(
-        "This resource type is retired. Use docs.create for documents and home.add_card for dashboard cards.")
+        "This resource type is retired. Use docs.create for documents and home.add_card for dashboard cards."
+      )
     }
     let receipt = try await store.dispatch(
       .createNode(kind: input.kind, at: WorldPoint(x: input.x, y: input.y)),
@@ -211,7 +212,8 @@ extension JSONValue {
 
 private func nodeMutationDefinition(name: String, description: String) -> ToolDefinition {
   let inputSchema: JSONValue
-  inputSchema = name == "node.focus"
+  inputSchema =
+    name == "node.focus"
     ? nodeIDSchema(description: "Stable UUID of the resource to focus") : .objectSchema()
   return ToolDefinition(
     name: name,
@@ -240,4 +242,3 @@ private func nodeIDSchema(description: String) -> JSONValue {
     required: ["nodeID"]
   )
 }
-
