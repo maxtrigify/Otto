@@ -56,6 +56,7 @@ struct SpaceSwitchingTests {
     let runID = services.fleet[nodeID]?.runID
     let socket = services.controlSocketPath
     try await controller.switchTo(b)
+    #expect(controller.switcherProfiles.map(\.id) == [b.id, a.id])
     let second = controller.active
     await second.ready()
     #expect(second !== original)
@@ -66,6 +67,7 @@ struct SpaceSwitchingTests {
     #expect(services.fleet[nodeID]?.processID == pid)
     try await controller.switchTo(a)
     #expect(controller.active === original)
+    #expect(controller.switcherProfiles.map(\.id) == [a.id, b.id])
     #expect(services.fleet[nodeID]?.processID == pid)
     #expect(services.fleet[nodeID]?.runID == runID)
     try await controller.switchTo(b)
@@ -129,6 +131,7 @@ struct SpaceSwitchingTests {
     #expect(controller.active === runtime)
     #expect(controller.opened.count == 1)
     #expect(registry.active == originalProfile)
+    #expect(controller.switcherProfiles.first?.id == originalProfile?.id)
     #expect(try Data(contentsOf: path) == originalBytes)
 
   }

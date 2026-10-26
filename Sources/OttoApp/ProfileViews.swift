@@ -62,7 +62,7 @@ struct ProfileSwitcherMenu: View {
     .fixedSize()
     .accessibilityLabel("Space")
     .accessibilityValue(current?.name ?? "")
-    .help("Switch space: each one has its own bots, chats, memory and brief")
+    .help("Switch space (⌥Tab): each one has its own bots, chats, memory and brief")
     .sheet(item: $sheet) { sheet in
       Group {
         switch sheet {

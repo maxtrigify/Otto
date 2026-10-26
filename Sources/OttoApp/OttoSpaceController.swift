@@ -71,6 +71,15 @@ final class OttoSpaceController: ObservableObject {
   private let presentationEnabled: Bool
   private var presentation: Task<Void, Never>?
   private var isSwitching = false
+  private var recentProfileIDs: [UUID] = []
+
+  var switcherProfiles: [OttoProfile] {
+    let profiles = registry?.profiles ?? []
+    let current = registry?.profile(workspacePath: active.id)?.id
+    let ids = [current].compactMap { $0 } + recentProfileIDs.filter { $0 != current }
+    return ids.compactMap { id in profiles.first { $0.id == id } }
+      + profiles.filter { !ids.contains($0.id) }
+  }
 
   init(
     initial: OttoSpaceRuntime, registry: OttoProfileRegistry?,
@@ -123,7 +132,12 @@ final class OttoSpaceController: ObservableObject {
     } else {
       runtime = try await makeRuntime(profile: target, registry: registry)
     }
+    let previousProfileID = registry.profile(workspacePath: active.id)?.id
     try registry.setActive(target.id)
+    if let previousProfileID {
+      recentProfileIDs.removeAll { $0 == previousProfileID }
+      recentProfileIDs.insert(previousProfileID, at: 0)
+    }
     let previous = active
     if !opened.contains(where: { $0.id == key }) { opened.append(runtime) }
     NSApp?.keyWindow?.makeFirstResponder(nil)
@@ -215,6 +229,10 @@ struct SpaceWorkspace: View {
 /// Keep each view mounted: composer drafts, selection and drawer state belong to its space.
 struct SpaceWorkspaceStack: View {
   @ObservedObject var spaces: OttoSpaceController
+  @State private var selection = ProfileCycleSelection()
+  @State private var switchError: String?
+  @State private var switching = false
+
   var body: some View {
     ZStack {
       ForEach(spaces.opened) { runtime in
@@ -227,6 +245,57 @@ struct SpaceWorkspaceStack: View {
           .environment(\.ottoSpaceVisible, runtime.id == spaces.active.id)
           .environment(\.ottoSwitchSpace, { profile in try await spaces.switchTo(profile) })
       }
+    }
+    .overlay {
+      if !selection.profiles.isEmpty {
+        ProfileCycleOverlay(profiles: selection.profiles, selectedID: selection.selectedID) { id in
+          selection.selectedID = id
+          commitSelection()
+        } cancel: {
+          selection.cancel()
+        }
+        .zIndex(10)
+      }
+    }
+    .background {
+      ProfileShortcutEvents(handle: handleShortcut, cancel: { selection.cancel() })
+    }
+    .onChange(of: spaces.active.id) { _, _ in selection.cancel() }
+    .alert(
+      "Couldn’t switch space",
+      isPresented: Binding(
+        get: { switchError != nil }, set: { if !$0 { switchError = nil } }
+      )
+    ) {
+      Button("OK", role: .cancel) { switchError = nil }
+    } message: {
+      Text(switchError ?? "")
+    }
+  }
+
+  private func handleShortcut(_ event: NSEvent) -> Bool {
+    guard !switching else {
+      let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+      return event.type == .keyDown && event.keyCode == 48
+        && (flags == .option || flags == [.option, .shift])
+    }
+    switch selection.handle(event, available: spaces.switcherProfiles) {
+    case .ignored: return false
+    case .consumed: return true
+    case .commit:
+      commitSelection()
+      return event.type == .keyDown
+    }
+  }
+
+  private func commitSelection() {
+    let profile = selection.profiles.first { $0.id == selection.selectedID }
+    selection.cancel()
+    guard let profile, !switching else { return }
+    switching = true
+    Task { @MainActor in
+      defer { switching = false }
+      do { try await spaces.switchTo(profile) } catch { switchError = error.localizedDescription }
     }
   }
 }

@@ -39,6 +39,14 @@ struct ShortcutsSettingsView: View {
         Shortcut(keys: "Esc", action: "Close the palette"),
       ]),
     ShortcutGroup(
+      title: "Spaces",
+      shortcuts: [
+        Shortcut(keys: "⌥Tab", action: "Switch to the last space; hold ⌥ and tap Tab to choose"),
+        Shortcut(keys: "⇧⌥Tab", action: "Cycle spaces backwards"),
+        Shortcut(keys: "Release ⌥", action: "Open the highlighted space"),
+        Shortcut(keys: "Esc", action: "Cancel space switching"),
+      ]),
+    ShortcutGroup(
       title: "Browser",
       shortcuts: [
         Shortcut(keys: "⌘B", action: "Go to Browser (Bold while editing document text)"),
