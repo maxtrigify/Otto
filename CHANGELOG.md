@@ -4,6 +4,13 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.5 — 2026-10-26
+
+### New
+
+- **Switch spaces with Option–Tab.** Hold Option and tap Tab to cycle through your recently used spaces, then release Option to switch. Tap once to return to your previous space, or add Shift to cycle backwards. The switcher shows each space’s icon and name; Escape cancels.
+- **Keep work running as you switch.** The keyboard switcher uses Otto’s existing space navigation, keeping running agents, drafts and each space’s state in place. The shortcuts are listed in Settings → Shortcuts.
+
 ## 0.2.4 — 2026-10-26
 
 ### New
