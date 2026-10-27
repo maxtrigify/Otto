@@ -4,6 +4,18 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.8 — 2026-10-27
+
+### Fixes
+
+- **Approval requests stay on screen until you answer them.** In Ask to approve mode, the approval card could flash up and vanish while the agent kept waiting, leaving it stuck. It now stays until you click Approve or Deny, for chats and bots alike, and the agent carries on as soon as you do. Questions an agent asks you stay put the same way.
+- **No more approval cards that can't be answered.** An agent's own message that happened to mention an approval could show up as a card where Approve did nothing. Those false cards no longer appear, and if one ever does, Approve or Deny now clears it.
+- **Text is readable on every theme.** Terminal output from agents is adjusted to stay readable against your theme, so white text on light themes and black text on dark ones no longer disappear. The sidebar, activity notes and tool steps get a soft backing over theme artwork, and header icons and buttons hold their contrast too.
+
+### New
+
+- **Rename, move or delete a space.** Open the space menu and choose Manage spaces to rename a space, point it at a different folder, or delete it. Deleting moves Otto's own data for that space to the Trash and never touches your files. You can't delete or move the space you're in, so switch to another one first.
+
 ## 0.2.7 — 2026-10-26
 
 ### Fixes

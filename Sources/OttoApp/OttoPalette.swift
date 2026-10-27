@@ -17,6 +17,23 @@ struct OttoPalette: Equatable {
   let amber: Color
   let red: Color
   let cyan: Color
+  /// Text on a `signal` → `cyan` gradient fill; never a hard-coded white.
+  let onAccentGradient: Color
+  /// Header bands that float over artwork: a theme-ink tint dense enough that
+  /// `chromeForeground` keeps body contrast over any backdrop pixel, light or dark.
+  let chromeBand: Color
+  /// Text and glyphs on `chromeBand`. Follows the theme, so a light theme gets dark header
+  /// controls instead of white ones on a pale strip.
+  let chromeForeground: Color
+  /// Behind text that sits straight on theme artwork (the Chat sidebar column, transcript
+  /// notices and step rows): the header band's ink tint, dense enough that `paper`, resting
+  /// `paper` and `muted` keep their contrast floors over any backdrop pixel.
+  let artworkWash: Color
+  /// Set for themes whose artwork reaches the Chat sidebar and transcript unpaneled.
+  let washesTextOverArtwork: Bool
+  /// The exact text/background pair the embedded terminal's contrast filter judges against.
+  let terminalForeground: ThemeColor
+  let terminalBackground: ThemeColor
   let nodeOpacity: Double
   let surfaceMaterial: OttoSurfaceMaterial
   /// Fill for node shells that sit directly over the canvas backdrop. Matte and
@@ -101,6 +118,13 @@ struct OttoPalette: Equatable {
     amber = Color(theme.amber)
     red = Color(theme.red)
     cyan = Color(theme.cyan)
+    onAccentGradient = Color(theme.onAccentGradient)
+    chromeBand = Color(theme.ink).opacity(theme.chromeBandOpacity)
+    chromeForeground = Color(theme.chromeForeground)
+    artworkWash = Color(theme.ink).opacity(theme.artworkWashOpacity)
+    washesTextOverArtwork = theme.drawsTextOverArtwork
+    terminalForeground = theme.paper
+    terminalBackground = theme.ink
     nodeOpacity = theme.nodeOpacity
     surfaceMaterial = theme.resolvedSurfaceMaterial
     switch surfaceMaterial {
@@ -226,7 +250,62 @@ private struct OttoGlassCard: ViewModifier {
   }
 }
 
+/// Sizes its content to the content's own ideal width, capped at the space on offer, so a
+/// backing drawn behind it hugs the text instead of spanning the column.
+struct OttoHuggingWidth: Layout {
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard let subview = subviews.first else { return .zero }
+    let ideal = subview.sizeThatFits(.unspecified).width
+    let width = proposal.width.map { min($0, ideal) } ?? ideal
+    return subview.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
+  }
+
+  func placeSubviews(
+    in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+  ) {
+    subviews.first?.place(
+      at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
+  }
+}
+
+/// A wash plate behind secondary text that would otherwise sit straight on theme artwork.
+/// Off artwork it draws nothing and leaves the layout untouched.
+private struct OttoArtworkBacking: ViewModifier {
+  @Environment(\.ottoPalette) private var palette
+  let cornerRadius: CGFloat
+  let horizontalPadding: CGFloat
+  let verticalPadding: CGFloat
+
+  func body(content: Content) -> some View {
+    if palette.overArtwork && palette.washesTextOverArtwork {
+      OttoHuggingWidth {
+        content
+          .padding(.horizontal, horizontalPadding)
+          .padding(.vertical, verticalPadding)
+          .background(
+            palette.artworkWash,
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+          // Pull the plate's padding back out so text stays on the column's alignment line.
+          .padding(.horizontal, -horizontalPadding)
+          .padding(.vertical, -verticalPadding)
+      }
+    } else {
+      content
+    }
+  }
+}
+
 extension View {
+  /// Back secondary transcript text with the theme's artwork wash when it sits on artwork.
+  func ottoArtworkBacking(
+    cornerRadius: CGFloat = 7, horizontalPadding: CGFloat = 6, verticalPadding: CGFloat = 2
+  ) -> some View {
+    modifier(
+      OttoArtworkBacking(
+        cornerRadius: cornerRadius, horizontalPadding: horizontalPadding,
+        verticalPadding: verticalPadding))
+  }
+
   func ottoGlass(cornerRadius: CGFloat = 14, tint: Double? = nil) -> some View {
     modifier(OttoGlassCard(cornerRadius: cornerRadius, tint: tint))
   }

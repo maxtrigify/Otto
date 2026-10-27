@@ -2,8 +2,10 @@ import Combine
 import Foundation
 import OttoModels
 
-/// The app-wide list of profiles and which one is open. It never moves or deletes a profile's
-/// files: removing a profile only forgets it.
+/// The app-wide list of profiles and which one is open. It never moves or deletes the user's own
+/// files. `remove` only forgets a profile; `delete` can also move Otto's own data for it (its
+/// `.otto` folder and its sessions database) to the Trash. `relocate` re-points a profile at a
+/// different folder without moving anything.
 @MainActor
 public final class OttoProfileRegistry: ObservableObject {
   private struct State: Codable {
@@ -13,8 +15,9 @@ public final class OttoProfileRegistry: ObservableObject {
   }
 
   public enum RegistryError: Error, LocalizedError, Equatable {
-    case invalidName, duplicateName, unknownProfile, lastProfile
+    case invalidName, duplicateName, unknownProfile, lastProfile, activeProfile, openedAtLaunch
     case folderExists(String)
+    case notAFolder(String)
     case unavailable(String)
     public var errorDescription: String? {
       switch self {
@@ -22,6 +25,10 @@ public final class OttoProfileRegistry: ObservableObject {
       case .duplicateName: "A profile with that name already exists."
       case .unknownProfile: "That profile no longer exists."
       case .lastProfile: "Otto needs at least one profile."
+      case .activeProfile: "Switch to another space first."
+      case .openedAtLaunch:
+        "Otto opened this space when it started and still uses it for app-wide settings. Quit and reopen Otto (it opens in your current space), then try again."
+      case .notAFolder(let path): "\(path) is not a folder."
       case .folderExists(let path): "A different folder already uses \(path)."
       case .unavailable(let reason): "Profiles could not be saved: \(reason)"
       }
@@ -131,7 +138,7 @@ public final class OttoProfileRegistry: ObservableObject {
     }
     var candidate = profile
     candidate.name = try validName(profile.name, excluding: profile.id)
-    // A profile's folder and origin are fixed once created.
+    // The folder changes only through `relocate`; the origin is fixed once created.
     candidate.workspacePath = state.profiles[index].workspacePath
     candidate.isOriginal = state.profiles[index].isOriginal
     var next = state
@@ -156,6 +163,90 @@ public final class OttoProfileRegistry: ObservableObject {
     next.profiles.removeAll { $0.id == id }
     if next.activeProfileID == id { next.activeProfileID = next.profiles.first?.id }
     try persist(next)
+  }
+
+  public func rename(_ id: UUID, to name: String) throws {
+    guard let index = state.profiles.firstIndex(where: { $0.id == id }) else {
+      throw RegistryError.unknownProfile
+    }
+    var next = state
+    next.profiles[index].name = try validName(name, excluding: id)
+    try persist(next)
+  }
+
+  /// Points a profile at a different folder. Nothing is moved or copied: Otto looks for the
+  /// profile's bots, chats and memory in the new folder's `.otto` folder (created if missing).
+  /// The open profile must be switched away from first, because its running space is bound to
+  /// the old folder.
+  @discardableResult
+  public func relocate(_ id: UUID, to folder: URL) throws -> OttoProfile {
+    guard let index = state.profiles.firstIndex(where: { $0.id == id }) else {
+      throw RegistryError.unknownProfile
+    }
+    guard id != state.activeProfileID else { throw RegistryError.activeProfile }
+    let directory = folder.standardizedFileURL
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+      isDirectory.boolValue
+    else { throw RegistryError.notAFolder(directory.path) }
+    if let owner = profile(workspacePath: directory.path) {
+      if owner.id == id { return owner }
+      throw RegistryError.folderExists(directory.path)
+    }
+    try fileManager.createDirectory(
+      at: directory.appending(path: ".otto", directoryHint: .isDirectory),
+      withIntermediateDirectories: true)
+    var next = state
+    next.profiles[index].workspacePath = directory.path
+    try persist(next)
+    return next.profiles[index]
+  }
+
+  /// What `delete` did with Otto's data for the profile.
+  public struct DeletionReport: Equatable, Sendable {
+    /// Otto-owned paths moved to the Trash (or discarded by the injected discarder).
+    public var discarded: [String] = []
+    /// Otto-owned paths that could not be discarded; the profile is still forgotten.
+    public var failed: [String] = []
+  }
+
+  /// Otto's own data for a profile: the `.otto` folder inside its folder and its sessions
+  /// database folder. Never the user's files. The original profile shares the app-wide
+  /// database, "About me" and folder with pre-profile Otto, so nothing of it is listed.
+  public func ottoDataLocations(for profile: OttoProfile) -> [URL] {
+    guard !profile.isOriginal else { return [] }
+    let workspace = URL(fileURLWithPath: profile.workspacePath, isDirectory: true)
+      .standardizedFileURL
+    let database = URL(fileURLWithPath: locations(for: profile).databasePath)
+      .deletingLastPathComponent()
+    return [workspace.appending(path: ".otto", directoryHint: .isDirectory), database]
+  }
+
+  /// Forgets a profile and, when asked, moves Otto's own data for it to the Trash. The user's
+  /// files in its folder are never touched. Refuses the last profile and the open one.
+  @discardableResult
+  public func delete(
+    _ id: UUID, removingOttoData: Bool, discard: ((URL) throws -> Void)? = nil
+  ) throws -> DeletionReport {
+    guard let target = profile(id: id) else { throw RegistryError.unknownProfile }
+    guard state.profiles.count > 1 else { throw RegistryError.lastProfile }
+    guard id != state.activeProfileID else { throw RegistryError.activeProfile }
+    let dataLocations = removingOttoData ? ottoDataLocations(for: target) : []
+    var next = state
+    next.profiles.removeAll { $0.id == id }
+    try persist(next)
+    var report = DeletionReport()
+    let discarder =
+      discard ?? { [fileManager] url in try fileManager.trashItem(at: url, resultingItemURL: nil) }
+    for url in dataLocations where fileManager.fileExists(atPath: url.path) {
+      do {
+        try discarder(url)
+        report.discarded.append(url.path)
+      } catch {
+        report.failed.append(url.path)
+      }
+    }
+    return report
   }
 
   private func validName(_ name: String, excluding id: UUID?) throws -> String {

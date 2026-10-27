@@ -320,6 +320,121 @@ struct AgentPermissionTests {
     }
   }
 
+  @Test("Provider stream records while an approval is parked keep the card on screen")
+  func claudeStreamKeepsParkedApproval() async throws {
+    let supervisor = AgentSupervisor()
+    // Claude Code keeps printing stream-json while it waits on the permission prompt tool: the
+    // rest of the assistant message's content blocks and system records, each reporting WORKING.
+    let id = try await spawnOneShotEmitting(
+      [
+        #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/notes.md"}}]}}"#,
+        #"{"type":"system","subtype":"status","session_id":"claude-session"}"#,
+      ],
+      parser: .claude(ClaudeOutputParser()),
+      supervisor: supervisor
+    )
+    let decision = Task {
+      try await supervisor.requestPermission(
+        agentID: id, toolName: "Bash", detail: "swift build", isProviderPermission: true)
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.sendInput(agentID: id, text: "emit")
+    try await waitFor(supervisor: supervisor) {
+      (try? await supervisor.snapshot(agentID: id))?.providerSessionID == "claude-session"
+    }
+
+    let parked = try await supervisor.snapshot(agentID: id)
+    #expect(parked.transcript.contains { $0.kind == .toolCall && $0.text == "/tmp/notes.md" })
+    #expect(parked.state == .waitingPermission)
+    #expect(parked.attentionReason == "Bash: swift build")
+    #expect(await supervisor.hasPendingPermission(agentID: id))
+
+    try await supervisor.resolvePermission(agentID: id, approved: true)
+    #expect(try await decision.value)
+    let resumed = try await supervisor.snapshot(agentID: id)
+    #expect(resumed.state == .working)
+    #expect(resumed.attentionReason == nil)
+    try await supervisor.stop(agentID: id)
+  }
+
+  @Test("An idle record from the provider cannot hide a parked approval")
+  func codexIdleKeepsParkedApproval() async throws {
+    let supervisor = AgentSupervisor()
+    let id = try await spawnOneShotEmitting(
+      [#"{"type":"thread.started","thread_id":"codex-thread"}"#],
+      parser: .codex(CodexOutputParser()),
+      supervisor: supervisor
+    )
+    let decision = Task {
+      try await supervisor.requestPermission(agentID: id, toolName: "browser.account")
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.sendInput(agentID: id, text: "emit")
+    try await waitFor(supervisor: supervisor) {
+      (try? await supervisor.snapshot(agentID: id))?.providerSessionID == "codex-thread"
+    }
+
+    let parked = try await supervisor.snapshot(agentID: id)
+    #expect(parked.state == .waitingPermission)
+    #expect(parked.attentionReason == "Wants to use browser.account")
+    // An idle run accepts a new prompt; a parked one must not, or the request is orphaned.
+    await #expect(throws: RuntimeError.self) {
+      try await supervisor.sendPrompt(agentID: id, prompt: "next")
+    }
+
+    try await supervisor.resolvePermission(agentID: id, approved: false)
+    #expect(try await decision.value == false)
+    try await supervisor.stop(agentID: id)
+  }
+
+  @Test("Provider stream records while a question is parked keep its choices on screen")
+  func claudeStreamKeepsParkedQuestion() async throws {
+    let supervisor = AgentSupervisor()
+    let id = try await spawnOneShotEmitting(
+      [#"{"type":"system","subtype":"status","session_id":"claude-question"}"#],
+      parser: .claude(ClaudeOutputParser()),
+      supervisor: supervisor
+    )
+    let answer = Task {
+      try await supervisor.requestChoice(
+        agentID: id, question: "Which branch?", choices: ["main", "release"])
+    }
+    try await waitForPermissionState(.waitingUser, id: id, supervisor: supervisor)
+    try await supervisor.sendInput(agentID: id, text: "emit")
+    try await waitFor(supervisor: supervisor) {
+      (try? await supervisor.snapshot(agentID: id))?.providerSessionID == "claude-question"
+    }
+
+    let parked = try await supervisor.snapshot(agentID: id)
+    #expect(parked.state == .waitingUser)
+    #expect(parked.attentionToken == "agent-choice")
+    #expect(parked.pendingChoice?.choices == ["main", "release"])
+
+    try await supervisor.resolveChoice(agentID: id, answer: "release")
+    #expect(try await answer.value == "release")
+    #expect(try await supervisor.snapshot(agentID: id).state == .working)
+    try await supervisor.stop(agentID: id)
+  }
+
+  /// A one-shot run that prints the given stream records once the test writes a line, so the
+  /// records land strictly after a request has been parked.
+  private func spawnOneShotEmitting(
+    _ records: [String], parser: ProviderParser, supervisor: AgentSupervisor
+  ) async throws -> UUID {
+    let quoted = records.map { "'\($0)'" }.joined(separator: " ")
+    return try await supervisor.spawn(
+      provider: .claudeCode,
+      specification: ProcessLaunchSpec(
+        executable: "/bin/sh",
+        arguments: ["-c", "read line; printf '%s\\n' \(quoted); sleep 20"],
+        workingDirectory: FileManager.default.currentDirectoryPath
+      ),
+      parser: parser,
+      initialState: .working,
+      executionMode: .oneShotProvider
+    )
+  }
+
   private func spawnLongRunningOneShot(supervisor: AgentSupervisor) async throws -> UUID {
     try await supervisor.spawn(
       provider: .claudeCode,

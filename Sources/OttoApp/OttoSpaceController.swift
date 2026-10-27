@@ -16,7 +16,28 @@ private struct SwitchSpaceKey: EnvironmentKey {
     throw OttoProfileRegistry.RegistryError.unavailable("Space switching is not ready.")
   }
 }
+/// Delete and re-point actions for spaces. They go through the controller so a space that is
+/// open in the background is closed before its data or folder changes.
+struct OttoSpaceManagement {
+  var delete: @MainActor (OttoProfile, Bool) async throws -> OttoProfileRegistry.DeletionReport
+  var relocate: @MainActor (OttoProfile, URL) async throws -> OttoProfile
+
+  static let unavailable = OttoSpaceManagement(
+    delete: { _, _ in
+      throw OttoProfileRegistry.RegistryError.unavailable("Space management is not ready.")
+    },
+    relocate: { _, _ in
+      throw OttoProfileRegistry.RegistryError.unavailable("Space management is not ready.")
+    })
+}
+private struct SpaceManagementKey: EnvironmentKey {
+  static let defaultValue = OttoSpaceManagement.unavailable
+}
 extension EnvironmentValues {
+  var ottoSpaceManagement: OttoSpaceManagement {
+    get { self[SpaceManagementKey.self] }
+    set { self[SpaceManagementKey.self] = newValue }
+  }
   var ottoSpaceVisible: Bool {
     get { self[SpaceVisibleKey.self] }
     set { self[SpaceVisibleKey.self] = newValue }
@@ -146,6 +167,47 @@ final class OttoSpaceController: ObservableObject {
     presentActive(previous: previous)
   }
 
+  /// Deletes a space other than the visible one. Its background runtime, if any, is shut down
+  /// first so nothing keeps writing to data that is about to move to the Trash.
+  func delete(_ profile: OttoProfile, removingOttoData: Bool) async throws
+    -> OttoProfileRegistry.DeletionReport
+  {
+    guard let registry, let target = registry.profile(id: profile.id) else {
+      throw OttoProfileRegistry.RegistryError.unknownProfile
+    }
+    guard registry.profiles.count > 1 else { throw OttoProfileRegistry.RegistryError.lastProfile }
+    try await closeRuntime(for: target)
+    let report = try registry.delete(target.id, removingOttoData: removingOttoData)
+    recentProfileIDs.removeAll { $0 == target.id }
+    return report
+  }
+
+  /// Re-points a space other than the visible one at another folder. Nothing is moved.
+  func relocate(_ profile: OttoProfile, to folder: URL) async throws -> OttoProfile {
+    guard let registry, let target = registry.profile(id: profile.id) else {
+      throw OttoProfileRegistry.RegistryError.unknownProfile
+    }
+    try await closeRuntime(for: target)
+    return try registry.relocate(target.id, to: folder)
+  }
+
+  private func closeRuntime(for profile: OttoProfile) async throws {
+    guard !isSwitching else {
+      throw OttoProfileRegistry.RegistryError.unavailable(
+        "Another space is opening. Try again in a moment.")
+    }
+    let key = URL(fileURLWithPath: profile.workspacePath).standardizedFileURL.path
+    guard key != active.id else { throw OttoProfileRegistry.RegistryError.activeProfile }
+    guard let index = opened.firstIndex(where: { $0.id == key }) else { return }
+    // The launch space's services also back Settings and app commands; it cannot be closed.
+    guard index != 0 else { throw OttoProfileRegistry.RegistryError.openedAtLaunch }
+    let runtime = opened[index]
+    await runtime.services.flushPersistence()
+    await runtime.services.shutdown()
+    await runtime.voice.setSpaceActive(false)
+    opened.remove(at: index)
+  }
+
   private func makeRuntime(profile: OttoProfile, registry: OttoProfileRegistry) async throws
     -> OttoSpaceRuntime
   {
@@ -190,6 +252,9 @@ final class OttoSpaceController: ObservableObject {
       ProviderModelCatalogStore.shared.configure(
         accounts: target.services.providerAccounts, projects: target.services.conversationProjects)
       OttoBuddyController.shared.start(services: target.services, store: target.store)
+      #if DEBUG
+        OttoDevProbe.shared.attach(services: target.services)
+      #endif
       await target.voice.setSpaceActive(true)
     }
   }
@@ -244,6 +309,13 @@ struct SpaceWorkspaceStack: View {
           .accessibilityHidden(runtime.id != spaces.active.id)
           .environment(\.ottoSpaceVisible, runtime.id == spaces.active.id)
           .environment(\.ottoSwitchSpace, { profile in try await spaces.switchTo(profile) })
+          .environment(
+            \.ottoSpaceManagement,
+            OttoSpaceManagement(
+              delete: { profile, removingData in
+                try await spaces.delete(profile, removingOttoData: removingData)
+              },
+              relocate: { profile, folder in try await spaces.relocate(profile, to: folder) }))
       }
     }
     .overlay {

@@ -57,6 +57,132 @@ struct OttoProfileTests {
     #expect(throws: OttoProfileRegistry.RegistryError.self) { try restored.remove(original.id) }
   }
 
+  @Test("Deleting a space refuses the last and open one and never touches the user's files")
+  func deleteSpace() throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let support = root.appending(path: "support")
+    let registry = OttoProfileRegistry(
+      applicationSupport: support, originalWorkspacePath: root.appending(path: "Work").path)
+    let work = try #require(registry.active)
+    #expect(throws: OttoProfileRegistry.RegistryError.lastProfile) {
+      try registry.delete(work.id, removingOttoData: true)
+    }
+    let personal = try registry.create(
+      name: "Personal", symbol: "heart", folder: root.appending(path: "Personal"))
+    #expect(throws: OttoProfileRegistry.RegistryError.activeProfile) {
+      try registry.delete(work.id, removingOttoData: false)
+    }
+    #expect(throws: OttoProfileRegistry.RegistryError.unknownProfile) {
+      try registry.delete(UUID(), removingOttoData: false)
+    }
+
+    // The user's own file, plus Otto's data: .otto state and the space's sessions database.
+    let userFile = URL(fileURLWithPath: personal.workspacePath).appending(path: "notes.txt")
+    try Data("mine".utf8).write(to: userFile)
+    let botFile = URL(fileURLWithPath: personal.workspacePath).appending(
+      path: ".otto/agent-profiles.json")
+    try Data("[]".utf8).write(to: botFile)
+    let database = URL(fileURLWithPath: registry.locations(for: personal).databasePath)
+    try FileManager.default.createDirectory(
+      at: database.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("db".utf8).write(to: database)
+    #expect(registry.ottoDataLocations(for: work).isEmpty)
+
+    try registry.setActive(personal.id)
+    #expect(throws: OttoProfileRegistry.RegistryError.activeProfile) {
+      try registry.delete(personal.id, removingOttoData: true)
+    }
+    try registry.setActive(work.id)
+    var discarded: [String] = []
+    let report = try registry.delete(personal.id, removingOttoData: true) { url in
+      discarded.append(url.path)
+      try FileManager.default.removeItem(at: url)
+    }
+    #expect(registry.profiles.map(\.id) == [work.id])
+    #expect(report.failed.isEmpty)
+    #expect(Set(report.discarded) == Set(discarded))
+    #expect(discarded.count == 2)
+    #expect(!FileManager.default.fileExists(atPath: botFile.path))
+    #expect(!FileManager.default.fileExists(atPath: database.path))
+    #expect(FileManager.default.fileExists(atPath: userFile.path))
+    #expect(
+      OttoProfileRegistry(applicationSupport: support, originalWorkspacePath: "/elsewhere")
+        .profiles.map(\.id) == [work.id])
+
+    // Remove-from-list-only keeps Otto's data too, and the original space keeps its shared data.
+    let side = try registry.create(
+      name: "Side", symbol: "leaf", folder: root.appending(path: "Side"))
+    let kept = try registry.delete(side.id, removingOttoData: false) { _ in
+      Issue.record("Nothing should be discarded")
+    }
+    #expect(kept.discarded.isEmpty)
+    #expect(FileManager.default.fileExists(atPath: side.workspacePath + "/.otto"))
+    let again = try registry.create(
+      name: "Again", symbol: "leaf", folder: root.appending(path: "Again"))
+    try registry.setActive(again.id)
+    let original = try registry.delete(work.id, removingOttoData: true) { _ in
+      Issue.record("The original space's data is shared and must stay")
+    }
+    #expect(original.discarded.isEmpty)
+    #expect(registry.profiles.map(\.id) == [again.id])
+  }
+
+  @Test("Renaming and re-pointing a space keeps its data where it is")
+  func renameAndRelocate() throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let support = root.appending(path: "support")
+    let registry = OttoProfileRegistry(
+      applicationSupport: support, originalWorkspacePath: root.appending(path: "Work").path)
+    let work = try #require(registry.active)
+    try FileManager.default.createDirectory(
+      atPath: work.workspacePath, withIntermediateDirectories: true)
+    let personal = try registry.create(
+      name: "Personal", symbol: "heart", folder: root.appending(path: "Personal"))
+
+    try registry.rename(personal.id, to: "  Home life ")
+    #expect(registry.profile(id: personal.id)?.name == "Home life")
+    #expect(throws: OttoProfileRegistry.RegistryError.duplicateName) {
+      try registry.rename(personal.id, to: "work")
+    }
+    #expect(throws: OttoProfileRegistry.RegistryError.invalidName) {
+      try registry.rename(personal.id, to: "   ")
+    }
+
+    let oldFile = URL(fileURLWithPath: personal.workspacePath).appending(path: "plan.md")
+    try Data("plan".utf8).write(to: oldFile)
+    let databaseBefore = registry.locations(for: personal).databasePath
+    let moved = root.appending(path: "Moved Personal")
+    #expect(throws: OttoProfileRegistry.RegistryError.notAFolder(moved.standardizedFileURL.path)) {
+      try registry.relocate(personal.id, to: moved)
+    }
+    try FileManager.default.createDirectory(at: moved, withIntermediateDirectories: true)
+    #expect(throws: OttoProfileRegistry.RegistryError.activeProfile) {
+      try registry.relocate(work.id, to: moved)
+    }
+    #expect(throws: OttoProfileRegistry.RegistryError.folderExists(work.workspacePath)) {
+      try registry.relocate(personal.id, to: URL(fileURLWithPath: work.workspacePath))
+    }
+    let relocated = try registry.relocate(personal.id, to: moved)
+    #expect(relocated.workspacePath == moved.standardizedFileURL.path)
+    #expect(relocated.name == "Home life")
+    #expect(FileManager.default.fileExists(atPath: moved.path + "/.otto"))
+    // Nothing was moved: the old folder and its files are exactly where they were.
+    #expect(FileManager.default.fileExists(atPath: oldFile.path))
+    #expect(!FileManager.default.fileExists(atPath: moved.path + "/plan.md"))
+    #expect(registry.locations(for: relocated).databasePath == databaseBefore)
+    #expect(registry.locations(for: relocated).personalMemoryPath.hasPrefix(moved.path))
+
+    // Saving settings afterwards keeps the new folder.
+    var edited = relocated
+    edited.workspacePath = "/ignored"
+    try registry.update(edited)
+    let restored = OttoProfileRegistry(applicationSupport: support, originalWorkspacePath: "/x")
+    #expect(restored.profile(id: personal.id)?.workspacePath == moved.standardizedFileURL.path)
+    #expect(restored.profile(id: personal.id)?.name == "Home life")
+  }
+
   @Test(
     "Agents are told their profile, and cross-profile search stays off until the user allows it")
   func crossProfileAccess() async throws {

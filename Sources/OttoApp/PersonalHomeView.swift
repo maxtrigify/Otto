@@ -236,7 +236,8 @@ struct PersonalHomeView: View {
     }
     .buttonStyle(.plain)
     .frame(height: 34)
-    .background(Color.black.opacity(0.28))
+    // Theme-derived band and glyphs, shared with Chat's header (see OttoPalette.chromeBand).
+    .background(palette.chromeBand)
   }
 
   private func hero(_ today: DailyBrief, now: Date) -> some View {

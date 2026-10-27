@@ -257,6 +257,58 @@ struct AgentSupervisorTests {
     try await supervisor.stop(agentID: id)
   }
 
+  @Test("Prose on an interactive screen that mentions approval does not raise a phantom card")
+  func interactiveProseIsNotAPermissionPrompt() async throws {
+    let supervisor = AgentSupervisor()
+    // The squashed screen line a resumed Claude TUI painted for an agent's own reply, which
+    // quoted an approval card. Before the fix this became WAITING_PERMISSION with no request
+    // behind it, and Approve only typed Enter into the agent's input box.
+    let id = try await supervisor.spawn(
+      provider: .claudeCode,
+      specification: ProcessLaunchSpec(
+        executable: "/bin/sh",
+        arguments: [
+          "-c",
+          #"printf 'OttoDevshowing"Permissionrequired·Bash:echohi>a.txt"withApproveandDeny\nready\n'; sleep 5"#,
+        ],
+        workingDirectory: FileManager.default.currentDirectoryPath
+      ),
+      parser: .claude(ClaudeOutputParser()),
+      initialState: .idle,
+      executionMode: .interactiveProvider
+    )
+    try await waitForOutput("ready", id: id, supervisor: supervisor)
+    let snapshot = try await supervisor.snapshot(agentID: id)
+    #expect(snapshot.state != .waitingPermission)
+    #expect(snapshot.attentionReason == nil)
+    try await supervisor.stop(agentID: id)
+  }
+
+  @Test("Approve or Deny on a card with nothing behind it clears the card")
+  func dismissUnbackedAttention() async throws {
+    let supervisor = AgentSupervisor()
+    // A structured run still reads a stray non-JSON line as a guessed wait, with no request parked.
+    let id = try await supervisor.spawn(
+      provider: .claudeCode,
+      specification: ProcessLaunchSpec(
+        executable: "/bin/sh",
+        arguments: ["-c", "printf 'Permission required: approve this?\n'; sleep 5"],
+        workingDirectory: FileManager.default.currentDirectoryPath
+      ),
+      parser: .claude(ClaudeOutputParser()),
+      initialState: .working
+    )
+    try await waitForState(.waitingPermission, id: id, supervisor: supervisor)
+    #expect(await !supervisor.hasPendingPermission(agentID: id))
+    #expect(try await supervisor.dismissUnbackedAttention(agentID: id))
+    let snapshot = try await supervisor.snapshot(agentID: id)
+    #expect(snapshot.state == .idle)
+    #expect(snapshot.attentionReason == nil)
+    // Nothing left to clear: a second call is a no-op.
+    #expect(try await !supervisor.dismissUnbackedAttention(agentID: id))
+    try await supervisor.stop(agentID: id)
+  }
+
   @Test("A failed prompt write does not strand the agent in working state")
   func failedPromptWritePreservesCompletedState() async throws {
     let supervisor = AgentSupervisor()

@@ -69,4 +69,38 @@ struct AgentPermissionModeTests {
       store.activeCanvas.nodes.first(where: { $0.id == nodeID })?
         .agentDefinition?.permissionMode == AgentPermissionMode.workspaceWrite.rawValue)
   }
+
+  @Test("Approving an interactive run resolves a parked request instead of typing Return")
+  func interactiveRunResolvesParkedRequest() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: "otto-permissions-\(UUID())")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let canvas = OttoCanvas(name: "Permissions")
+    let store = CanvasStore(
+      snapshot: WorkspaceSnapshot(canvases: [canvas], activeCanvasID: canvas.id))
+    let services = ApplicationServices(store: store, workspacePath: root.path)
+    let nodeID = UUID()
+    _ = try await services.supervisor.spawn(
+      provider: .claudeCode,
+      specification: ProcessLaunchSpec(
+        executable: "/bin/sh", arguments: ["-c", "sleep 20"], workingDirectory: root.path),
+      id: nodeID, parser: .claude(ClaudeOutputParser()), initialState: .working,
+      executionMode: .interactiveProvider)
+    // An Otto tool confirmation from a TUI run parks on the supervisor like a one-shot approval.
+    let approval = Task {
+      try await services.supervisor.requestPermission(agentID: nodeID, toolName: "browser.account")
+    }
+    let deadline = ContinuousClock.now + .seconds(5)
+    while await !services.supervisor.hasPendingPermission(agentID: nodeID),
+      ContinuousClock.now < deadline
+    {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(await services.supervisor.hasPendingPermission(agentID: nodeID))
+    await services.resolveAgentPermission(agentID: nodeID, approved: true)
+    #expect(try await approval.value)
+    #expect(services.errorMessage == nil)
+    #expect(await !services.supervisor.hasPendingPermission(agentID: nodeID))
+    try await services.supervisor.stop(agentID: nodeID)
+  }
 }

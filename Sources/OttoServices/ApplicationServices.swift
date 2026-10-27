@@ -3089,11 +3089,28 @@ public final class ApplicationServices: ObservableObject {
     try await supervisor.resize(agentID: terminalID, columns: columns, rows: rows)
   }
 
-  /// Answers a one-shot provider's blocked tool-permission request. The supervisor resumes the
-  /// otto-mcp bridge call that carried it, which returns the allow/deny JSON to the provider.
+  /// Answers an agent's blocked permission request. A request parked on the supervisor (every
+  /// one-shot provider approval, and Otto tool confirmations from any run) resumes the otto-mcp
+  /// bridge call that carried it. Only an interactive TUI prompt with nothing parked is answered
+  /// with the provider's own confirm (Return) or cancel (Esc) keystroke.
   public func resolveAgentPermission(agentID: UUID, approved: Bool) async {
     do {
-      try await supervisor.resolvePermission(agentID: agentID, approved: approved)
+      if await !supervisor.hasPendingPermission(agentID: agentID),
+        let snapshot = try? await supervisor.snapshot(agentID: agentID),
+        snapshot.executionMode == .interactiveProvider
+      {
+        if await supervisor.hasInteractivePrompt(agentID: agentID) {
+          try await supervisor.sendBytes(
+            agentID: agentID, data: approved ? Data("\r".utf8) : Data([0x1B]))
+        } else {
+          // Nothing on screen to confirm: a keystroke would land in the agent's input box.
+          try await supervisor.dismissUnbackedAttention(agentID: agentID)
+        }
+      } else if try await supervisor.dismissUnbackedAttention(agentID: agentID) {
+        // A card left by a guess, with no request parked behind it.
+      } else {
+        try await supervisor.resolvePermission(agentID: agentID, approved: approved)
+      }
       acknowledgeAttention(nodeID: agentID)
     } catch {
       errorMessage = error.localizedDescription

@@ -33,12 +33,22 @@ struct EmulatedTerminalView: NSViewRepresentable {
     view.optionAsMetaKey = true
     view.allowMouseReporting = true
     view.changeScrollback(10_000)
+    // Pin the palette the contrast filter judges against: the classic 16 colours plus the
+    // standard xterm cube, instead of a cube re-derived from (and flipped by) the theme.
+    view.getTerminal().ansi256PaletteStrategy = .xterm
+    view.installColors(
+      OttoTerminalColors.ansi16.map {
+        SwiftTerm.Color(
+          red: UInt16($0.red * 65535), green: UInt16($0.green * 65535),
+          blue: UInt16($0.blue * 65535))
+      })
     view.setAccessibilityLabel("Interactive terminal. Click to type or paste.")
     let scale = OttoFontScale(rawValue: fontScaleRaw) ?? .standard
     context.coordinator.applyAppearance(
       fontSize: 11 * scale.multiplier,
       foreground: NSColor(palette.paper),
       background: NSColor(palette.ink),
+      contrast: (palette.terminalForeground, palette.terminalBackground),
       to: view
     )
     return view
@@ -50,6 +60,7 @@ struct EmulatedTerminalView: NSViewRepresentable {
       fontSize: 11 * scale.multiplier,
       foreground: NSColor(palette.paper),
       background: NSColor(palette.ink),
+      contrast: (palette.terminalForeground, palette.terminalBackground),
       to: view
     )
     context.coordinator.send = acceptsInput ? send : { _ in }
@@ -87,6 +98,9 @@ struct EmulatedTerminalView: NSViewRepresentable {
     private var renderedFontSize: CGFloat?
     private var renderedForeground: NSColor?
     private var renderedBackground: NSColor?
+    /// Rewrites explicit text colours so output written for some other terminal background
+    /// (white text from a dark-tuned TUI on a light theme, say) stays readable here.
+    private var contrastFilter = TerminalContrastFilter(theme: OttoThemeCatalog.fieldNotes)
 
     init(
       replayExistingOutput: Bool,
@@ -103,8 +117,18 @@ struct EmulatedTerminalView: NSViewRepresentable {
       fontSize: CGFloat,
       foreground: NSColor,
       background: NSColor,
+      contrast: (foreground: ThemeColor, background: ThemeColor),
       to view: TerminalView
     ) {
+      if contrast.foreground != contrastFilter.foreground
+        || contrast.background != contrastFilter.background
+      {
+        let hadOutput = renderedSessionKey != nil
+        contrastFilter.setColors(foreground: contrast.foreground, background: contrast.background)
+        // Replayable transcripts re-render through the new theme's contrast; live sessions
+        // can't be replayed, so they pick the new colours up from their next output.
+        if hadOutput, replayExistingOutput { renderedSessionKey = nil }
+      }
       let changed =
         renderedFontSize != fontSize
         || renderedForeground?.isEqual(foreground) != true
@@ -140,8 +164,9 @@ struct EmulatedTerminalView: NSViewRepresentable {
       )
       if update.resetsTerminal {
         view.feed(text: "\u{001B}c")
+        contrastFilter.reset()
       }
-      let bytes = Array(update.bytes)
+      let bytes = contrastFilter.process(update.bytes)
       if !bytes.isEmpty { view.feed(byteArray: bytes[...]) }
       renderedSessionKey = sessionKey
       renderedEndOffset = update.renderedEndOffset

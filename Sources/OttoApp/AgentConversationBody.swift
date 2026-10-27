@@ -1212,6 +1212,9 @@ struct AgentConversationBody: View {
             .font(.ottoMono(max(6.5, 8 * scale), weight: .medium))
             .foregroundStyle(palette.muted)
         }
+        // Over theme artwork the notice has no panel under it; the wash plate carries it.
+        .ottoArtworkBacking(
+          cornerRadius: 6 * scale, horizontalPadding: 6 * scale, verticalPadding: 3 * scale)
         .padding(.vertical, 2 * scale)
         .accessibilityLabel("Agent activity: \(entry.text)")
       }
@@ -1352,6 +1355,7 @@ struct AgentConversationBody: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(.leading, 2 * scale)
+    .ottoArtworkBacking(cornerRadius: 7 * scale, horizontalPadding: 6 * scale)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
@@ -1402,6 +1406,8 @@ struct AgentConversationBody: View {
         .transition(.ottoUnfold(reduceMotion: reduceMotion))
       }
     }
+    // One plate for the header and its steps, so the block reads as a unit over artwork.
+    .ottoArtworkBacking(cornerRadius: 9 * scale, horizontalPadding: 4 * scale)
     .frame(maxWidth: min(760, 700 * scale), alignment: .leading)
     .accessibilityElement(children: .contain)
   }
@@ -1443,6 +1449,7 @@ struct AgentConversationBody: View {
       Spacer(minLength: 0)
     }
     .padding(.horizontal, 2 * scale)
+    .ottoArtworkBacking(cornerRadius: 7 * scale, horizontalPadding: 6 * scale)
     .accessibilityLabel("Step: \(name), \(entry.text)")
   }
 
@@ -1557,6 +1564,7 @@ struct AgentConversationBody: View {
           .transition(.opacity)
       }
     }
+    .ottoArtworkBacking(cornerRadius: 9 * scale, horizontalPadding: 4 * scale)
     .frame(maxWidth: min(760, 700 * scale), alignment: .leading)
     .onAppear { workingStart = workingStart ?? .now }
     .onDisappear { workingStart = nil }
@@ -1882,24 +1890,16 @@ struct AgentConversationBody: View {
 
   private var isOneShotRun: Bool { snapshot?.executionMode == .oneShotProvider }
 
-  /// One-shot runs park their permission request on the supervisor and expect a structured
-  /// allow/deny answer. Interactive TUIs confirm with Return and cancel with Esc; the buttons
-  /// forward exactly those keystrokes so the chat surface can answer prompts the terminal is
-  /// painting.
+  /// The services layer decides how to answer: a request parked on the supervisor (one-shot
+  /// provider approvals, and Otto tool confirmations from interactive runs too) gets a structured
+  /// allow/deny; a prompt only the interactive TUI is painting gets Return or Esc. Sending a
+  /// keystroke for a parked request would leave the agent blocked with no card left to answer.
   private func approvePermission() {
-    if isOneShotRun {
-      resolvePermission(true)
-    } else {
-      sendBytes(Data("\r".utf8))
-    }
+    resolvePermission(true)
   }
 
   private func denyPermission() {
-    if isOneShotRun {
-      resolvePermission(false)
-    } else {
-      sendBytes(Data([0x1B]))
-    }
+    resolvePermission(false)
   }
 
   /// Files this agent has created or edited, gathered from the tool calls the parsers already

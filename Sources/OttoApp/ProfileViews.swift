@@ -13,8 +13,10 @@ struct ProfileSwitcherMenu: View {
 
   @State private var sheet: ProfileSheet?
   @Environment(\.ottoSwitchSpace) private var switchSpace
+  @Environment(\.ottoSpaceManagement) private var management
   @State private var error: String?
   @State private var switching = false
+  @State private var deleting: OttoProfile?
 
   enum ProfileSheet: Identifiable {
     case create
@@ -45,6 +47,22 @@ struct ProfileSwitcherMenu: View {
       Divider()
       if let current {
         Button("Space settings…") { sheet = .settings(current.id) }
+      }
+      Menu("Manage spaces") {
+        ForEach(registry.profiles) { profile in
+          Menu {
+            Button("Rename and settings…") { sheet = .settings(profile.id) }
+            Button("Change folder…") { chooseFolder(for: profile) }
+              .disabled(profile.id == current?.id)
+            Button("Delete space…", role: .destructive) { deleting = profile }
+              .disabled(profile.id == current?.id || registry.profiles.count < 2)
+            if profile.id == current?.id {
+              Text("Switch to another space to move or delete this one.")
+            }
+          } label: {
+            Label(profile.name, systemImage: profile.symbol)
+          }
+        }
       }
       Button("New space…") { sheet = .create }
     } label: {
@@ -77,9 +95,20 @@ struct ProfileSwitcherMenu: View {
           }
         }
       }
-      // Sheets inherit the header's white-on-photo text; give them the system label colour
+      // Sheets inherit the header band's foreground; give them the system label colour
       // back, which follows the sheet's own light or dark appearance.
       .foregroundStyle(Color(nsColor: .labelColor))
+      .environment(\.ottoSpaceManagement, management)
+    }
+    .spaceDeleteConfirmation(profile: $deleting, registry: registry) { profile, removingData in
+      Task { @MainActor in
+        do {
+          let report = try await management.delete(profile, removingData)
+          if !report.failed.isEmpty {
+            error = SpaceDeleteConfirmation.failureMessage(report)
+          }
+        } catch { self.error = error.localizedDescription }
+      }
     }
     .alert(
       "Space error",
@@ -88,6 +117,15 @@ struct ProfileSwitcherMenu: View {
       Button("OK", role: .cancel) { error = nil }
     } message: {
       Text(error ?? "")
+    }
+  }
+
+  private func chooseFolder(for profile: OttoProfile) {
+    guard let folder = SpaceFolderPicker.choose(for: profile) else { return }
+    Task { @MainActor in
+      do { _ = try await management.relocate(profile, folder) } catch {
+        self.error = error.localizedDescription
+      }
     }
   }
 
@@ -227,16 +265,19 @@ struct NewProfileSheet: View {
   }
 }
 
-/// Rename, icon and cross-profile access. Removing a profile only forgets it; its folder stays.
+/// Rename, icon, folder and cross-profile access, plus Delete. Deleting never touches the user's
+/// own files in the space's folder.
 struct ProfileSettingsSheet: View {
   @ObservedObject var services: ApplicationServices
   @ObservedObject var registry: OttoProfileRegistry
   let profileID: UUID
   let onFinish: () -> Void
 
+  @Environment(\.ottoSpaceManagement) private var management
   @State private var draft: OttoProfile?
   @State private var error: String?
-  @State private var confirmingRemove = false
+  @State private var deleting: OttoProfile?
+  @State private var relocating = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -260,14 +301,27 @@ struct ProfileSettingsSheet: View {
           } header: {
             Text("Cross-space access")
           }
-          Section("Folder") {
+          Section {
             Text(binding.wrappedValue.workspacePath)
               .font(.caption).textSelection(.enabled).foregroundStyle(.secondary)
-            Button("Show in Finder") {
-              NSWorkspace.shared.activateFileViewerSelecting([
-                URL(fileURLWithPath: binding.wrappedValue.workspacePath)
-              ])
+            HStack {
+              Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([
+                  URL(fileURLWithPath: binding.wrappedValue.workspacePath)
+                ])
+              }
+              Button("Change folder…", action: changeFolder)
+                .disabled(isCurrent || relocating)
             }
+            Text(
+              isCurrent
+                ? "Switch to another space to point this one at a different folder."
+                : "Points this space at another folder. Nothing is moved: Otto uses the bots, chats and memory in that folder’s .otto folder, or starts them fresh."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          } header: {
+            Text("Folder")
           }
         }
         .formStyle(.grouped)
@@ -277,8 +331,12 @@ struct ProfileSettingsSheet: View {
         Text(error).font(.callout).foregroundStyle(.orange)
       }
       HStack {
-        if registry.profiles.count > 1, profileID != services.currentProfile?.id {
-          Button("Remove from Otto…", role: .destructive) { confirmingRemove = true }
+        if registry.profiles.count > 1 {
+          Button("Delete space…", role: .destructive) { deleting = draft }
+            .disabled(isCurrent)
+            .help(
+              isCurrent
+                ? "Switch to another space to delete this one." : "Delete this space")
         }
         Spacer()
         Button("Cancel", role: .cancel, action: onFinish).keyboardShortcut(.cancelAction)
@@ -288,17 +346,33 @@ struct ProfileSettingsSheet: View {
     .padding(22)
     .frame(width: 480)
     .onAppear { draft = registry.profile(id: profileID) }
-    .confirmationDialog(
-      "Remove \(draft?.name ?? "this space") from Otto?", isPresented: $confirmingRemove
-    ) {
-      Button("Remove", role: .destructive) {
+    .spaceDeleteConfirmation(profile: $deleting, registry: registry) { profile, removingData in
+      Task { @MainActor in
         do {
-          try registry.remove(profileID)
-          onFinish()
+          let report = try await management.delete(profile, removingData)
+          if report.failed.isEmpty {
+            onFinish()
+          } else {
+            error = SpaceDeleteConfirmation.failureMessage(report)
+          }
         } catch { self.error = error.localizedDescription }
       }
-    } message: {
-      Text("Its folder, bots, chats and memory stay on disk; Otto just stops listing it.")
+    }
+  }
+
+  private var isCurrent: Bool { profileID == services.currentProfile?.id }
+
+  private func changeFolder() {
+    guard let profile = registry.profile(id: profileID),
+      let folder = SpaceFolderPicker.choose(for: profile)
+    else { return }
+    relocating = true
+    Task { @MainActor in
+      defer { relocating = false }
+      do {
+        let moved = try await management.relocate(profile, folder)
+        draft?.workspacePath = moved.workspacePath
+      } catch { self.error = error.localizedDescription }
     }
   }
 
@@ -311,8 +385,74 @@ struct ProfileSettingsSheet: View {
   }
 }
 
+/// Picks the folder a space should point at. Returns nil when cancelled.
+enum SpaceFolderPicker {
+  @MainActor
+  static func choose(for profile: OttoProfile) -> URL? {
+    let panel = NSOpenPanel()
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = true
+    panel.allowsMultipleSelection = false
+    panel.directoryURL = URL(fileURLWithPath: profile.workspacePath).deletingLastPathComponent()
+    panel.prompt = "Use Folder"
+    panel.message =
+      "Choose the folder for \(profile.name). Nothing is moved or copied; Otto uses the bots, chats and memory in that folder’s .otto folder."
+    return panel.runModal() == .OK ? panel.url : nil
+  }
+}
+
+/// The one confirmation every Delete path uses, so the wording about files is always the same.
+struct SpaceDeleteConfirmation: ViewModifier {
+  @Binding var profile: OttoProfile?
+  let registry: OttoProfileRegistry
+  let confirm: (OttoProfile, Bool) -> Void
+
+  func body(content: Content) -> some View {
+    content.confirmationDialog(
+      "Delete \(profile?.name ?? "this space")?",
+      isPresented: Binding(get: { profile != nil }, set: { if !$0 { profile = nil } }),
+      presenting: profile
+    ) { profile in
+      if registry.ottoDataLocations(for: profile).isEmpty {
+        Button("Delete space", role: .destructive) { confirm(profile, false) }
+      } else {
+        Button("Delete space and its Otto data", role: .destructive) { confirm(profile, true) }
+        Button("Remove from list only") { confirm(profile, false) }
+      }
+      Button("Cancel", role: .cancel) {}
+    } message: { profile in
+      Text(Self.message(for: profile, registry: registry))
+    }
+  }
+
+  static func message(for profile: OttoProfile, registry: OttoProfileRegistry) -> String {
+    let folder = profile.workspacePath
+    if registry.ottoDataLocations(for: profile).isEmpty {
+      return
+        "Otto stops listing \(profile.name) and stops anything running in it. This was your first space: its sessions and About me are shared with Otto’s app-wide data, so they stay on disk. Your files in \(folder) are not touched."
+    }
+    return
+      "Otto stops listing \(profile.name) and stops anything running in it. “Delete space and its Otto data” also moves Otto’s own data for it to the Trash: its chats and sessions, bots, memory and routines (the .otto folder in \(folder) and its Otto database). Your own files in \(folder) are never deleted."
+  }
+
+  static func failureMessage(_ report: OttoProfileRegistry.DeletionReport) -> String {
+    "The space was deleted, but Otto couldn’t move this data to the Trash: \(report.failed.joined(separator: ", ")). You can remove it yourself in Finder."
+  }
+}
+
+extension View {
+  func spaceDeleteConfirmation(
+    profile: Binding<OttoProfile?>, registry: OttoProfileRegistry,
+    confirm: @escaping (OttoProfile, Bool) -> Void
+  ) -> some View {
+    modifier(SpaceDeleteConfirmation(profile: profile, registry: registry, confirm: confirm))
+  }
+}
+
 /// The same right-hand header controls on every screen: profile, background, activity.
 struct OttoHeaderControls: View {
+  @Environment(\.ottoPalette) private var palette
   @ObservedObject var services: ApplicationServices
   @ObservedObject var store: CanvasStore
   var needsAttention = false
@@ -355,7 +495,7 @@ struct OttoHeaderControls: View {
         Image(systemName: "tray")
           .overlay(alignment: .topTrailing) {
             if needsAttention {
-              Circle().fill(Color(red: 0.77, green: 0.85, blue: 0.70))
+              Circle().fill(palette.signal)
                 .frame(width: 5, height: 5).offset(x: 2, y: -2)
             }
           }
@@ -364,6 +504,7 @@ struct OttoHeaderControls: View {
       .accessibilityLabel("Open activity")
       .help("Activity")
     }
-    .foregroundStyle(.white.opacity(0.85))
+    // These controls always sit on a `chromeBand`, so they take its theme-matched foreground.
+    .foregroundStyle(palette.chromeForeground)
   }
 }

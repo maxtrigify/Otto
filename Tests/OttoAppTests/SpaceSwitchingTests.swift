@@ -97,6 +97,54 @@ struct SpaceSwitchingTests {
     for runtime in controller.opened { await runtime.services.shutdown() }
   }
 
+  @Test("Deleting or re-pointing a space closes its background runtime and spares the open one")
+  func deleteAndRelocateThroughController() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: "otto-space-delete-\(UUID())")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let registry = OttoProfileRegistry(
+      applicationSupport: root, originalWorkspacePath: root.appending(path: "A").path)
+    let a = try #require(registry.active)
+    let b = try registry.create(name: "B", symbol: "heart", folder: root.appending(path: "B"))
+    let c = try registry.create(name: "C", symbol: "leaf", folder: root.appending(path: "C"))
+    let store = CanvasStore()
+    let tools = ToolRegistry()
+    let services = ApplicationServices(
+      store: store, registry: tools, workspacePath: a.workspacePath, profiles: registry)
+    let runtime = OttoSpaceRuntime(
+      store: store, services: services,
+      voice: VoiceController(
+        registry: tools, store: store, services: services, workspacePath: a.workspacePath))
+    let controller = OttoSpaceController(
+      initial: runtime, registry: registry, presentationEnabled: false)
+    controller.startActive()
+    await runtime.ready()
+
+    await #expect(throws: OttoProfileRegistry.RegistryError.activeProfile) {
+      _ = try await controller.delete(a, removingOttoData: true)
+    }
+    try await controller.switchTo(b)
+    try await controller.switchTo(c)
+    #expect(controller.opened.count == 3)
+    // The launch space backs Settings and app commands, so it waits for a relaunch.
+    await #expect(throws: OttoProfileRegistry.RegistryError.openedAtLaunch) {
+      _ = try await controller.delete(a, removingOttoData: false)
+    }
+    let moved = root.appending(path: "B moved")
+    try FileManager.default.createDirectory(at: moved, withIntermediateDirectories: true)
+    let relocated = try await controller.relocate(b, to: moved)
+    #expect(relocated.workspacePath == moved.standardizedFileURL.path)
+    #expect(controller.opened.count == 2)
+    #expect(!controller.opened.contains { $0.id == b.workspacePath })
+
+    let report = try await controller.delete(relocated, removingOttoData: false)
+    #expect(report.discarded.isEmpty)
+    #expect(registry.profiles.map(\.id) == [a.id, c.id])
+    #expect(controller.switcherProfiles.map(\.id) == [c.id, a.id])
+    #expect(FileManager.default.fileExists(atPath: moved.path))
+    for runtime in controller.opened { await runtime.services.shutdown() }
+  }
+
   @Test("An invalid destination leaves the current runtime and active preference alone")
   func invalidDestination() async throws {
     let root = FileManager.default.temporaryDirectory.appending(

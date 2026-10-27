@@ -368,7 +368,7 @@ struct FirstRunWelcomeView: View {
       HStack(alignment: .top, spacing: 16) {
         Text(String(starterName.prefix(1)).uppercased())
           .font(.ottoDisplay(22).weight(.bold))
-          .foregroundStyle(.white)
+          .foregroundStyle(palette.onAccentGradient)
           .frame(width: 56, height: 56)
           .background(
             LinearGradient(

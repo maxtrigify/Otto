@@ -1041,6 +1041,31 @@ public actor AgentSupervisor {
     !(pendingPermissions[agentID] ?? []).isEmpty
   }
 
+  /// Whether an interactive run is showing a provider prompt that a keystroke answers.
+  public func hasInteractivePrompt(agentID: UUID) -> Bool {
+    agents[agentID]?.activeInteractivePrompt != nil
+  }
+
+  /// Clears a waiting card that no request stands behind — nothing parked, no question, no
+  /// on-screen provider prompt — so Approve or Deny always leaves the run usable instead of
+  /// silently doing nothing. Returns whether there was such a card to clear.
+  @discardableResult
+  public func dismissUnbackedAttention(agentID: UUID) throws -> Bool {
+    guard var agent = agents[agentID] else { throw RuntimeError.agentNotFound(agentID) }
+    guard [.waitingPermission, .waitingUser].contains(agent.snapshot.state),
+      (pendingPermissions[agentID] ?? []).isEmpty,
+      (pendingChoices[agentID] ?? []).isEmpty,
+      agent.activeInteractivePrompt == nil
+    else { return false }
+    agent.snapshot.attentionReason = nil
+    agent.snapshot.attentionToken = nil
+    agent.snapshot.pendingChoice = nil
+    transition(&agent, to: .idle, confidence: 0.8)
+    agents[agentID] = agent
+    refreshDelegatingParent(agentID)
+    return true
+  }
+
   public func pendingPermission(agentID: UUID) -> AgentPendingPermission? {
     guard let agent = agents[agentID], let pending = pendingPermissions[agentID]?.first else {
       return nil
@@ -1260,8 +1285,22 @@ public actor AgentSupervisor {
     }
   }
 
+  private static func isTextGuessedWait(_ event: ParsedAgentEvent) -> Bool {
+    switch event {
+    case .permissionRequested, .waitingForUser: true
+    case .state(let state, _): state == .waitingPermission || state == .waitingUser
+    default: false
+    }
+  }
+
   private func consumeProvider(line: String, agent: inout ManagedAgent) {
+    // A native TUI's screen is prose, not protocol: a line that merely mentions "permission" and
+    // "approve" (the agent quoting a prompt, say) is not a prompt. Interactive runs take their
+    // blocking prompts only from InteractivePromptDetector, which keys on the menu's own
+    // Enter/Esc footer, so the parser's text guesses must not raise a card nothing stands behind.
+    let screenDriven = agent.snapshot.executionMode == .interactiveProvider
     for event in agent.parser.ingest(line: line) {
+      if screenDriven, Self.isTextGuessedWait(event) { continue }
       switch event {
       case .sessionStarted(let sessionID):
         agent.snapshot.providerSessionID = sessionID
@@ -1616,11 +1655,28 @@ public actor AgentSupervisor {
     agent.snapshot.transcript = Array(agent.snapshot.transcript.suffix(200))
   }
 
+  /// The request a run is parked on inside the supervisor: the oldest tool-permission request,
+  /// otherwise the oldest tool-served question. Both hold a continuation, so the provider stays
+  /// blocked until the user answers here; the conversation must keep showing the card for them.
+  private func parkedAttention(agentID: UUID) -> (
+    state: AgentLifecycleState, reason: String, token: String?, choice: AgentChoicePrompt?
+  )? {
+    if let permission = pendingPermissions[agentID]?.first {
+      return (.waitingPermission, permission.reason, nil, nil)
+    }
+    if let choice = pendingChoices[agentID]?.first, choice.continuation != nil {
+      return (.waitingUser, choice.prompt.question, "agent-choice", choice.prompt)
+    }
+    return nil
+  }
+
   private func transition(
     _ agent: inout ManagedAgent,
-    to state: AgentLifecycleState,
-    confidence: Double
+    to requestedState: AgentLifecycleState,
+    confidence requestedConfidence: Double
   ) {
+    var state = requestedState
+    var confidence = requestedConfidence
     if state != .waitingPermission, state != .waitingUser {
       agent.snapshot.attentionReason = nil
       agent.snapshot.attentionToken = nil
@@ -1635,6 +1691,22 @@ public actor AgentSupervisor {
           pendingChoices[id] = remaining.isEmpty ? nil : remaining
         }
       }
+    }
+    // A run parked on an approval or question cannot be working or idle: the provider is blocked
+    // inside the tool call until the user answers. Its stream still prints records meanwhile
+    // (further content blocks of the same assistant message, system records, results of tools
+    // that were already running), and each one reports WORKING. Letting that through hid the
+    // card a moment after it appeared while the request stayed parked, stranding the agent.
+    if state == .working || state == .idle,
+      let parked = parkedAttention(agentID: agent.snapshot.id)
+    {
+      agent.snapshot.attentionReason = parked.reason
+      agent.snapshot.attentionToken = parked.token
+      if let choice = parked.choice { agent.snapshot.pendingChoice = choice }
+      // Already showing it: a provider heartbeat is not a lifecycle change worth publishing.
+      if agent.snapshot.state == parked.state { return }
+      state = parked.state
+      confidence = 1
     }
     agent.snapshot.state = state
     agent.snapshot.confidence = confidence

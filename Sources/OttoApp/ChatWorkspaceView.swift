@@ -366,7 +366,9 @@ struct ChatWorkspaceView: View {
         if showingSidebar {
           sidebar
             .frame(width: 248)
-            // Over a clear photo the rail is a solid panel so its list stays readable.
+            // Over theme artwork the rail takes the header band's ink wash, sized so names,
+            // previews, group headers and the footer keep their contrast over any pixel.
+            .background(palette.washesTextOverArtwork ? palette.artworkWash : Color.clear)
             .transition(.move(edge: .leading).combined(with: .opacity))
         }
         // Flush shell: the rail and the conversation share one surface, split by a hairline,
@@ -1906,18 +1908,21 @@ struct ChatWorkspaceView: View {
             if showingWorkPanel { showingAgentDetails = false }
           }
         }
-        Divider().frame(height: 14).overlay(Color.white.opacity(0.2)).padding(.horizontal, 4)
+        Divider().frame(height: 14).overlay(palette.chromeForeground.opacity(0.2))
+          .padding(.horizontal, 4)
       }
       OttoHeaderControls(
         services: services, store: store, needsAttention: !services.botActivity.needsUser.isEmpty,
         openActivity: { destination = .activity })
     }
-    .foregroundStyle(.white.opacity(0.9))
+    .foregroundStyle(palette.chromeForeground)
     .padding(.leading, Chrome.leading)
     .padding(.trailing, 18)
     .frame(height: Chrome.bandHeight)
     // The same banner as Home on every theme, so the header never changes between screens.
-    .background(Color.black.opacity(0.28))
+    // Its tint and text both come from the theme: a fixed black wash with white glyphs was
+    // ~2:1 on every light theme and over bright artwork.
+    .background(palette.chromeBand)
   }
 
   /// The agent whose work controls belong in the band. Team rooms and the
@@ -1938,7 +1943,7 @@ struct ChatWorkspaceView: View {
         .font(.system(size: 12, weight: .semibold))
         .frame(width: Chrome.control, height: Chrome.control)
         .background(
-          isOn ? Color.white.opacity(0.18) : Color.white.opacity(0.06),
+          isOn ? palette.chromeForeground.opacity(0.18) : palette.chromeForeground.opacity(0.06),
           in: RoundedRectangle(cornerRadius: 7)
         )
         .animation(motion.tint, value: isOn)
@@ -4338,8 +4343,10 @@ private struct PluginBrandTile: View {
   var size: CGFloat = 32
 
   var body: some View {
-    let onDark = Color.isDarkHex(plugin.colorHex)
-    let ink: Color = onDark ? .white : palette.ink
+    // The tile has no fill of its own, so a lettermark sits on the page surface. Choosing
+    // white or `ink` from the *brand* colour drew white letters on light pages, and on light
+    // themes `ink` is itself near-white. The theme's text colour always reads.
+    let ink = palette.paper
     let artwork = PluginLogoArtwork.artwork(for: plugin)
     ZStack {
       tileForeground(ink: ink, artwork: artwork)
@@ -4716,7 +4723,9 @@ struct HireBotSheet: View {
         } label: {
           Text(saving ? (isEditing ? "Saving…" : "Hiring…") : hireActionTitle)
             .font(.ottoDisplay(12.5).weight(.semibold))
-            .foregroundStyle(.white)
+            // Text matched to the fill: white on a light theme's signal was fine, but white
+            // on a dark theme's pale signal (Field Notes lime) was unreadable.
+            .foregroundStyle(canHire && !saving ? palette.onSignal : palette.paper)
             .padding(.horizontal, 16)
             .frame(height: 32)
             .background(
