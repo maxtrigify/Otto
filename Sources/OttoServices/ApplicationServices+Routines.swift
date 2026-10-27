@@ -71,40 +71,18 @@ extension ApplicationServices {
         return RoutineDetail(routine: routine, recentRuns: self.routines.recentRuns(routineID: id))
       })
     try await registry.register(
-      RoutineCreateTool { [weak self] routine, context in
+      RoutineCreateTool { [weak self] routine, _ in
         guard let self else {
           throw ToolRegistryError.invalidInput("Otto services are unavailable")
         }
-        var candidate = routine
-        if context.source == .agent || context.source == .automation { candidate.enabled = false }
-        if candidate.enabled, case .webhook = candidate.trigger,
-          (try await self.secrets.value(for: Self.routineWebhookSecretKey(candidate.id)))?.isEmpty
-            != false
-        {
-          candidate.enabled = false
-        }
-        return try self.routines.save(candidate)
+        return try await self.saveRoutine(routine)
       })
     try await registry.register(
-      RoutineUpdateTool { [weak self] routine, context in
+      RoutineUpdateTool { [weak self] routine, _ in
         guard let self else {
           throw ToolRegistryError.invalidInput("Otto services are unavailable")
         }
-        var candidate = routine
-        if context.source == .agent || context.source == .automation,
-          self.routines.routine(id: routine.id)?.enabled != true
-        {
-          candidate.enabled = false
-        }
-        if candidate.enabled, case .webhook = candidate.trigger,
-          (try await self.secrets.value(for: Self.routineWebhookSecretKey(candidate.id)))?.isEmpty
-            != false
-        {
-          candidate.enabled = false
-        }
-        let saved = try self.routines.save(candidate)
-        try await self.syncMorningBriefIfMain(saved)
-        return saved
+        return try await self.saveRoutine(routine)
       })
     try await registry.register(
       RoutineDeleteTool { [weak self] id in

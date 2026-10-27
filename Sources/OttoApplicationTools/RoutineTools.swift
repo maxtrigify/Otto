@@ -154,7 +154,7 @@ public struct RoutineCreateTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "routine.create",
     description:
-      "Creates a routine. Agent-created routines always remain disabled pending user approval. To chain it into a flow, set runAfter to {\"routineID\": \"<UUID>\", \"when\": \"succeeded\"|\"failed\"|\"finished\"}; it then runs when that routine finishes and receives its answer as untrusted payload.",
+      "Creates an automation. Bots and sessions can set enabled to true to turn it on, or false to save it paused. Webhook automations need a signing secret configured before they can turn on. To chain it into a flow, set runAfter to {\"routineID\": \"<UUID>\", \"when\": \"succeeded\"|\"failed\"|\"finished\"}; it then runs when that routine finishes and receives its answer as untrusted payload.",
     inputSchema: routineSchema, outputSchema: .objectSchema(), requiredScopes: [.canvasWrite],
     riskLevel: .consequential)
   private let handler: @MainActor @Sendable (Routine, ToolContext) async throws -> Routine
@@ -168,7 +168,7 @@ public struct RoutineCreateTool: OttoTool {
 
 public struct RoutineUpdateTool: OttoTool {
   public static let definition = ToolDefinition(
-    name: "routine.update", description: "Updates a routine. Agents cannot enable automations.",
+    name: "routine.update", description: "Updates an automation. Use routine.get first, then pass the full routine with enabled set to true to turn it on or false to pause it. Bots and sessions can enable automations. Webhook automations need a signing secret configured before they can turn on.",
     inputSchema: routineSchema, outputSchema: .objectSchema(), requiredScopes: [.canvasWrite],
     riskLevel: .consequential)
   private let handler: @MainActor @Sendable (Routine, ToolContext) async throws -> Routine

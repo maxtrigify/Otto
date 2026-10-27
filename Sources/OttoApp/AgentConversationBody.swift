@@ -1212,9 +1212,6 @@ struct AgentConversationBody: View {
             .font(.ottoMono(max(6.5, 8 * scale), weight: .medium))
             .foregroundStyle(palette.muted)
         }
-        // Over theme artwork the notice has no panel under it; the wash plate carries it.
-        .ottoArtworkBacking(
-          cornerRadius: 6 * scale, horizontalPadding: 6 * scale, verticalPadding: 3 * scale)
         .padding(.vertical, 2 * scale)
         .accessibilityLabel("Agent activity: \(entry.text)")
       }
@@ -1355,7 +1352,6 @@ struct AgentConversationBody: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(.leading, 2 * scale)
-    .ottoArtworkBacking(cornerRadius: 7 * scale, horizontalPadding: 6 * scale)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 
@@ -1406,8 +1402,6 @@ struct AgentConversationBody: View {
         .transition(.ottoUnfold(reduceMotion: reduceMotion))
       }
     }
-    // One plate for the header and its steps, so the block reads as a unit over artwork.
-    .ottoArtworkBacking(cornerRadius: 9 * scale, horizontalPadding: 4 * scale)
     .frame(maxWidth: min(760, 700 * scale), alignment: .leading)
     .accessibilityElement(children: .contain)
   }
@@ -1449,7 +1443,6 @@ struct AgentConversationBody: View {
       Spacer(minLength: 0)
     }
     .padding(.horizontal, 2 * scale)
-    .ottoArtworkBacking(cornerRadius: 7 * scale, horizontalPadding: 6 * scale)
     .accessibilityLabel("Step: \(name), \(entry.text)")
   }
 
@@ -1564,7 +1557,6 @@ struct AgentConversationBody: View {
           .transition(.opacity)
       }
     }
-    .ottoArtworkBacking(cornerRadius: 9 * scale, horizontalPadding: 4 * scale)
     .frame(maxWidth: min(760, 700 * scale), alignment: .leading)
     .onAppear { workingStart = workingStart ?? .now }
     .onDisappear { workingStart = nil }

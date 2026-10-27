@@ -366,9 +366,7 @@ struct ChatWorkspaceView: View {
         if showingSidebar {
           sidebar
             .frame(width: 248)
-            // Over theme artwork the rail takes the header band's ink wash, sized so names,
-            // previews, group headers and the footer keep their contrast over any pixel.
-            .background(palette.washesTextOverArtwork ? palette.artworkWash : Color.clear)
+            // Over a clear photo the rail is a solid panel so its list stays readable.
             .transition(.move(edge: .leading).combined(with: .opacity))
         }
         // Flush shell: the rail and the conversation share one surface, split by a hairline,

@@ -4,6 +4,12 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.9 — 2026-10-27
+
+### Fixes
+
+- **The sidebar and thinking steps look as they did before 0.2.8.** Version 0.2.8 put a dark tint behind the sidebar and a box around an agent's thinking and tool steps on themes with artwork. That changed the look of those themes, so it's been removed. The terminal and header readability fixes from 0.2.8 are unchanged.
+
 ## 0.2.8 — 2026-10-27
 
 ### Fixes

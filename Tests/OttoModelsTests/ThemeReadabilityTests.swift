@@ -49,59 +49,6 @@ struct ThemeReadabilityTests {
     }
   }
 
-  @Test("Text on the artwork wash holds its floors over any backdrop pixel")
-  func artworkWash() {
-    let artworkThemes = OttoThemeCatalog.all.filter(\.drawsTextOverArtwork)
-    // Every illustrated theme, light and dark, plus the matte ones; never plain or glass.
-    #expect(artworkThemes.map(\.id).contains("highfell"))
-    #expect(artworkThemes.map(\.id).contains("velvet"))
-    #expect(!artworkThemes.map(\.id).contains("graphite"))
-    #expect(!artworkThemes.map(\.id).contains("glasswing"))
-    // The ramp must include both extremes, the worst case the header-band test uses.
-    #expect(OttoThemeDefinition.artworkBackdropRamp.contains(.black))
-    #expect(OttoThemeDefinition.artworkBackdropRamp.contains(.white))
-    for theme in artworkThemes {
-      for pixel in OttoThemeDefinition.artworkBackdropRamp {
-        let wash = theme.artworkWash(over: pixel)
-        let body = theme.paper.contrastRatio(with: wash)
-        let resting = theme.paper
-          .blended(over: wash, opacity: OttoThemeDefinition.restingTextOpacity)
-          .contrastRatio(with: wash)
-        let secondary = theme.muted.contrastRatio(with: wash)
-        #expect(body >= OttoTextContrast.body, "\(theme.id): paper over \(pixel) is \(body)")
-        #expect(
-          resting >= OttoTextContrast.body,
-          "\(theme.id): resting paper over \(pixel) is \(resting)")
-        #expect(
-          secondary >= OttoTextContrast.secondary,
-          "\(theme.id): muted over \(pixel) is \(secondary)")
-        // Status glyphs and the info icon (signal, cyan, amber) are non-text graphics: 3:1.
-        for (name, accent) in [("signal", theme.signal), ("cyan", theme.cyan), ("amber", theme.amber)] {
-          let ratio = accent.contrastRatio(with: wash)
-          #expect(
-            ratio >= OttoTextContrast.secondary,
-            "\(theme.id): \(name) over \(pixel) is \(ratio)")
-        }
-      }
-      // At least as dense as the header band it matches, and still a tint, not a slab. Light
-      // themes need the most (0.80-0.82): mid-grey text and amber glyphs over a black pixel.
-      #expect(theme.artworkWashOpacity >= theme.chromeBandOpacity, "\(theme.id)")
-      #expect(theme.artworkWashOpacity <= 0.85, "\(theme.id): \(theme.artworkWashOpacity)")
-    }
-  }
-
-  @Test("Muted text straight on artwork fails without the wash (regression guard)")
-  func mutedOnBareArtworkFailed() {
-    // What the sidebar previews and transcript notices shipped with: no backing at all. A
-    // black/white-only check passes light themes' mid-grey muted text; the mid-tone pixels
-    // on the ramp are where it actually vanished (Highfell's sunlit grass and cloud edges).
-    for theme in OttoThemeCatalog.all.filter(\.drawsTextOverArtwork) {
-      let worst = OttoThemeDefinition.artworkBackdropRamp
-        .map { theme.muted.contrastRatio(with: $0) }.min() ?? 0
-      #expect(worst < OttoTextContrast.secondary, "\(theme.id): \(worst)")
-    }
-  }
-
   @Test("The old fixed header wash fails light themes (regression guard)")
   func oldHeaderWashFailed() {
     // White glyphs over a 28% black wash: what both header bands shipped in 0.2.7.
