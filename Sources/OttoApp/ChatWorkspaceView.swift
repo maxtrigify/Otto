@@ -145,6 +145,8 @@ struct ChatWorkspaceView: View {
   @State private var showingTeam = false
   @State private var showingSessionCreator = false
   @State private var hoveredSessionID: UUID?
+  @State private var renamingSessionID: UUID?
+  @State private var sessionNameDraft = ""
   @State private var panelRoutineID: UUID?
   @State private var teamDraft = ""
   @State private var teamMentions: [TeamMention] = []
@@ -398,6 +400,21 @@ struct ChatWorkspaceView: View {
       }
     }
     .overlay(alignment: .topLeading) { sessionCreatorLayer }
+    .alert(
+      "Rename session",
+      isPresented: Binding(
+        get: { renamingSessionID != nil },
+        set: { if !$0 { renamingSessionID = nil } }
+      )
+    ) {
+      TextField("Business or project name", text: $sessionNameDraft)
+        .accessibilityIdentifier("session-rename-name")
+      Button("Cancel", role: .cancel) { renamingSessionID = nil }
+      Button("Rename") { saveSessionName() }
+        .disabled(sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    } message: {
+      Text("Name this conversation without changing the bot or its history.")
+    }
     .onAppear {
       if sessionCanvasID == nil { sessionCanvasID = store.activeCanvas.id }
       repairSelection()
@@ -2757,6 +2774,19 @@ struct ChatWorkspaceView: View {
 
       if hovered {
         Button {
+          beginSessionRename(node)
+        } label: {
+          Image(systemName: "pencil")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(palette.muted)
+            .frame(width: 18, height: 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Rename session")
+        .accessibilityLabel("Rename session \(node.displayName)")
+
+        Button {
           closeSession(node)
         } label: {
           Image(systemName: "xmark")
@@ -2781,6 +2811,32 @@ struct ChatWorkspaceView: View {
         hoveredSessionID = nil
       }
     }
+    .contextMenu {
+      Button("Rename session…", systemImage: "pencil") { beginSessionRename(node) }
+      Divider()
+      Button("Close session", systemImage: "xmark", role: .destructive) {
+        closeSession(node)
+      }
+    }
+  }
+
+  private func beginSessionRename(_ node: OttoNode) {
+    guard sessionAgents.contains(where: { $0.id == node.id }) else { return }
+    sessionNameDraft = node.displayName
+    renamingSessionID = node.id
+  }
+
+  private func saveSessionName() {
+    defer { renamingSessionID = nil }
+    guard let nodeID = renamingSessionID else { return }
+    let name = sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty,
+      sessionAgents.contains(where: { $0.id == nodeID }),
+      let canvasID = store.snapshot.canvases.first(where: { canvas in
+        canvas.nodes.contains(where: { $0.id == nodeID })
+      })?.id
+    else { return }
+    store.dispatch(.renameNode(id: nodeID, name: name), targetCanvasID: canvasID)
   }
 
   /// What a session is *about*, for the rail's second line. The brief — the first thing
