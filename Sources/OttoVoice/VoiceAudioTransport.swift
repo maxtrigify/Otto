@@ -87,6 +87,7 @@ public enum VoiceAudioError: Error, LocalizedError, Sendable {
   case conversionFailed
   case invalidProviderAudio
   case audioEngineStartFailed(String)
+  case audioOutputUnavailable
 
   public var errorDescription: String? {
     switch self {
@@ -100,6 +101,8 @@ public enum VoiceAudioError: Error, LocalizedError, Sendable {
       "The voice provider returned an invalid audio buffer."
     case .audioEngineStartFailed(let message):
       "Otto could not start audio playback: \(message)"
+    case .audioOutputUnavailable:
+      "No audio output device is available. Connect speakers or headphones to use voice."
     }
   }
 }
@@ -138,7 +141,13 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
   /// it races an engine stop or graph reconfiguration. All graph/player mutations live here.
   private let audioQueue = DispatchQueue(label: "io.openotto.voice.audio-graph")
   private let lock = NSLock()
-  private let providerFormat: AVAudioFormat
+  /// Provider audio arrives as interleaved 16-bit PCM and is converted to this standard float
+  /// format before scheduling, so the engine graph only ever sees a format every mixer accepts.
+  private let playbackFormat: AVAudioFormat
+  /// Set once the player is attached and connected. Touching the output device is deferred to
+  /// the first audio operation so constructing the transport (which happens during app launch)
+  /// cannot fail on Macs without a usable output device.
+  private var playbackGraphReady = false
   private var inputHandler: (@Sendable (Data) -> Void)?
   private var speechActivityHandler: (@Sendable () -> Void)?
   private var inputMetricsHandler: (@Sendable (VoiceAudioInputMetrics) -> Void)?
@@ -166,14 +175,11 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 
   public init(authorizer: any MicrophoneAuthorizing = SystemMicrophoneAuthorizer()) {
     self.authorizer = authorizer
-    providerFormat = AVAudioFormat(
-      commonFormat: .pcmFormatInt16,
-      sampleRate: Self.providerSampleRate,
-      channels: 1,
-      interleaved: true
+    playbackFormat = AVAudioFormat(
+      standardFormatWithSampleRate: Self.providerSampleRate,
+      channels: 1
     )!
-    engine.attach(player)
-    engine.connect(player, to: engine.mainMixerNode, format: providerFormat)
+    // Deliberately no graph work here: see `preparePlaybackGraph`.
   }
 
   /// Replaces the audio engine wholesale. Toggling voice processing off and on again across
@@ -183,8 +189,46 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
   private func rebuildEngine() {
     engine = AVAudioEngine()
     player = AVAudioPlayerNode()
-    engine.attach(player)
-    engine.connect(player, to: engine.mainMixerNode, format: providerFormat)
+    playbackGraphReady = false
+  }
+
+  /// Attaches the player to the mixer on first use. Must run on `audioQueue`.
+  ///
+  /// `AVAudioEngine.mainMixerNode` implicitly wires the mixer to the output device, and
+  /// AVFoundation raises an Objective-C exception rather than returning an error when that
+  /// device is missing or reports an unusable format (0 Hz / 0 channels). Before this check
+  /// Otto did that work inside `init`, which runs at launch, so an affected Mac could never
+  /// open the app. Now the failure is reported as a voice error and everything else keeps
+  /// working.
+  private func preparePlaybackGraph() throws {
+    guard !playbackGraphReady else { return }
+    let hardwareFormat: AVAudioFormat
+    do {
+      hardwareFormat = try ObjectiveCExceptions.catching {
+        engine.outputNode.outputFormat(forBus: 0)
+      }
+    } catch {
+      throw VoiceAudioError.audioEngineStartFailed(error.localizedDescription)
+    }
+    guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0 else {
+      throw VoiceAudioError.audioOutputUnavailable
+    }
+    do {
+      try ObjectiveCExceptions.catching {
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+      }
+    } catch {
+      if player.engine != nil { engine.detach(player) }
+      throw VoiceAudioError.audioEngineStartFailed(error.localizedDescription)
+    }
+    playbackGraphReady = true
+  }
+
+  /// Stops the player when it is part of a graph. Must run on `audioQueue`.
+  private func stopPlayerIfAttached() {
+    guard playbackGraphReady, player.engine != nil else { return }
+    try? ObjectiveCExceptions.catching { player.stop() }
   }
 
   public func setSpeechActivityHandler(_ handler: (@Sendable () -> Void)?) async {
@@ -219,6 +263,38 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 
     do {
       try await performAudioOperation { [self] in
+        try self.preparePlaybackGraph()
+        try self.installInputGraph()
+      }
+    } catch {
+      await performAudioOperation {
+        if let sink = self.lock.withLock({ () -> AVAudioSinkNode? in
+          defer { self.sinkNode = nil }
+          return self.sinkNode
+        }) {
+          try? ObjectiveCExceptions.catching {
+            self.engine.disconnectNodeInput(sink)
+            self.engine.detach(sink)
+          }
+        }
+      }
+      lock.withLock {
+        tapInstalled = false
+        inputHandler = nil
+        voiceProcessingActive = false
+      }
+      throw error
+    }
+  }
+
+  /// Wires the microphone into the engine and starts it. Must run on `audioQueue`.
+  ///
+  /// Every AVFoundation call here can raise an Objective-C exception for an unusable input
+  /// device or format, so the whole block runs under the exception guard and reports a voice
+  /// error instead of terminating the app.
+  private func installInputGraph() throws {
+    do {
+      try ObjectiveCExceptions.catching {
         let input = self.engine.inputNode
         var voiceProcessingActive = false
         // Voice processing supplies acoustic echo cancellation so Otto does not transcribe its own
@@ -279,22 +355,12 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
         // Never hold `lock` here: Core Audio can synchronously invoke the sink while starting.
         try self.engine.start()
       }
-    } catch {
-      await performAudioOperation {
-        if let sink = self.lock.withLock({ () -> AVAudioSinkNode? in
-          defer { self.sinkNode = nil }
-          return self.sinkNode
-        }) {
-          self.engine.disconnectNodeInput(sink)
-          self.engine.detach(sink)
-        }
-      }
-      lock.withLock {
-        tapInstalled = false
-        inputHandler = nil
-        voiceProcessingActive = false
-      }
+    } catch let error as VoiceAudioError {
       throw error
+    } catch let error as ObjectiveCExceptions.Raised {
+      throw VoiceAudioError.audioEngineStartFailed(error.reason)
+    } catch {
+      throw VoiceAudioError.audioEngineStartFailed(error.localizedDescription)
     }
   }
 
@@ -302,21 +368,19 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
     guard !data.isEmpty, data.count.isMultiple(of: MemoryLayout<Int16>.size) else {
       throw VoiceAudioError.invalidProviderAudio
     }
-    let frameCount = AVAudioFrameCount(data.count / MemoryLayout<Int16>.size)
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: providerFormat, frameCapacity: frameCount)
+    guard let buffer = VoicePCMConverter.playbackBuffer(from: data, format: playbackFormat)
     else {
       throw VoiceAudioError.invalidProviderAudio
     }
-    buffer.frameLength = frameCount
-    let audioBuffer = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)[0]
-    guard let destination = audioBuffer.mData else { throw VoiceAudioError.invalidProviderAudio }
-    data.copyBytes(to: destination.assumingMemoryBound(to: UInt8.self), count: data.count)
 
     try await performAudioOperation { [self] in
+      try self.preparePlaybackGraph()
       if !self.engine.isRunning {
-        self.engine.prepare()
         do {
-          try self.engine.start()
+          try ObjectiveCExceptions.catching {
+            self.engine.prepare()
+            try self.engine.start()
+          }
         } catch {
           throw VoiceAudioError.audioEngineStartFailed(error.localizedDescription)
         }
@@ -333,19 +397,29 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
         self.interruptionReported = false
         return self.playbackEpoch
       }
-      self.player.scheduleBuffer(buffer) { [weak self] in
-        self?.markPlaybackBufferComplete(epoch: epoch)
-      }
-      if !self.player.isPlaying {
-        // Safe because engine start, scheduling, play, stop, and graph changes are serialized.
-        self.player.play()
+      do {
+        try ObjectiveCExceptions.catching {
+          self.player.scheduleBuffer(buffer) { [weak self] in
+            self?.markPlaybackBufferComplete(epoch: epoch)
+          }
+          if !self.player.isPlaying {
+            // Safe because engine start, scheduling, play, stop, and graph changes are serialized.
+            self.player.play()
+          }
+        }
+      } catch {
+        self.lock.withLock {
+          self.pendingPlaybackBuffers = max(0, self.pendingPlaybackBuffers - 1)
+          if self.pendingPlaybackBuffers == 0 { self.playbackActive = false }
+        }
+        throw VoiceAudioError.audioEngineStartFailed(error.localizedDescription)
       }
     }
   }
 
   public func stopPlayback() async {
     await performAudioOperation {
-      self.player.stop()
+      self.stopPlayerIfAttached()
       self.resetPlaybackState()
     }
   }
@@ -360,22 +434,28 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 
   public func stop() async {
     await performAudioOperation {
-      self.player.stop()
-      self.engine.stop()
+      self.stopPlayerIfAttached()
+      try? ObjectiveCExceptions.catching { self.engine.stop() }
       if let sink = self.lock.withLock({ () -> AVAudioSinkNode? in
         defer { self.sinkNode = nil }
         return self.sinkNode
       }) {
-        self.engine.disconnectNodeInput(sink)
-        self.engine.detach(sink)
-      }
-      // Tear the voice-processing IO unit down completely: leaving it enabled keeps macOS in
-      // call mode after voice sleeps — other apps' audio stays ducked and the system treats the
-      // microphone chain as active even though Otto is no longer listening. The engine is then
-      // replaced outright so the next session starts from a pristine graph instead of re-toggling
-      // voice processing on a used engine, which is a known silent-microphone failure mode.
-      if self.engine.inputNode.isVoiceProcessingEnabled {
-        try? self.engine.inputNode.setVoiceProcessingEnabled(false)
+        try? ObjectiveCExceptions.catching {
+          self.engine.disconnectNodeInput(sink)
+          self.engine.detach(sink)
+        }
+        // Tear the voice-processing IO unit down completely: leaving it enabled keeps macOS in
+        // call mode after voice sleeps — other apps' audio stays ducked and the system treats
+        // the microphone chain as active even though Otto is no longer listening. The engine is
+        // then replaced outright so the next session starts from a pristine graph instead of
+        // re-toggling voice processing on a used engine, which is a known silent-microphone
+        // failure mode. Only an engine that captured input ever touched the input node, so
+        // this stays off the microphone hardware otherwise.
+        try? ObjectiveCExceptions.catching {
+          if self.engine.inputNode.isVoiceProcessingEnabled {
+            try self.engine.inputNode.setVoiceProcessingEnabled(false)
+          }
+        }
       }
       self.rebuildEngine()
       self.lock.withLock {
@@ -423,7 +503,7 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
           detectedSpeech = speechActivityHandler
           // The real-time audio callback never mutates the player directly. Queueing the stop keeps
           // it ordered with any engine start, playback scheduling, or shutdown already in flight.
-          audioQueue.async { [weak self] in self?.player.stop() }
+          audioQueue.async { [weak self] in self?.stopPlayerIfAttached() }
         }
       }
       // Do not stream Otto's own speaker output back to the provider. Voice processing removes
@@ -569,6 +649,29 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 }
 
 enum VoicePCMConverter {
+  /// Expands provider PCM16 (interleaved, mono, 24 kHz) into a standard float buffer in
+  /// `format`. The engine graph is built entirely on the standard float format, which every
+  /// AVAudioEngine mixer and output accepts, instead of asking the mixer to accept raw 16-bit
+  /// input directly.
+  static func playbackBuffer(from data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+    guard !data.isEmpty, data.count.isMultiple(of: MemoryLayout<Int16>.size) else { return nil }
+    let frameCount = AVAudioFrameCount(data.count / MemoryLayout<Int16>.size)
+    guard
+      format.commonFormat == .pcmFormatFloat32, format.channelCount == 1,
+      let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount),
+      let destination = buffer.floatChannelData?[0]
+    else { return nil }
+    buffer.frameLength = frameCount
+    let scale = 1 / Float(Int16.max)
+    data.withUnsafeBytes { raw in
+      for frame in 0..<Int(frameCount) {
+        let sample = raw.loadUnaligned(fromByteOffset: frame * 2, as: Int16.self)
+        destination[frame] = max(-1, Float(Int16(littleEndian: sample)) * scale)
+      }
+    }
+    return buffer
+  }
+
   static func providerPCM16(from input: AVAudioPCMBuffer) -> Data? {
     let inputFrames = Int(input.frameLength)
     let sampleRate = input.format.sampleRate

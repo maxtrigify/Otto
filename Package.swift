@@ -62,6 +62,7 @@ let package = Package(
   ],
   targets: [
     .target(name: "OttoModels"),
+    .target(name: "OttoObjCSupport"),
     .target(
       name: "OttoMemory",
       linkerSettings: [.linkedLibrary("sqlite3")]
@@ -174,7 +175,7 @@ let package = Package(
     .target(
       name: "OttoVoice",
       dependencies: [
-        "OttoModels", "OttoSecurity", "OttoTools",
+        "OttoModels", "OttoObjCSupport", "OttoSecurity", "OttoTools",
         .product(name: "LiveKitWakeWord", package: "livekit-wakeword"),
       ],
       linkerSettings: [.linkedFramework("AVFoundation")]

@@ -4,6 +4,12 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.10 — 2026-10-28
+
+### Fixes
+
+- **Otto opens on Macs with no working audio output.** Otto set up its voice playback audio while launching, and on a Mac whose speakers or output device were missing or reported an unusable format the app closed before its first window appeared. Voice audio is now set up only when you first use voice, and any audio problem shows as a voice error instead of stopping Otto from opening.
+
 ## 0.2.9 — 2026-10-27
 
 ### Fixes
