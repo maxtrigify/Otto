@@ -17,6 +17,7 @@ struct OttoApp: App {
   private var uiState: WorkspaceUIState { spaces.active.uiState }
   @StateObject private var updates = AppUpdateController()
   @AppStorage(OttoBuddyPreferences.enabledKey) private var buddyEnabled = false
+  @State private var selectedSettingsPage: OttoSettingsPage = .voice
 
   init() {
     // The Muse → Otto rename moves app folders and imports preferences. It must finish before
@@ -200,37 +201,56 @@ struct OttoApp: App {
     }
 
     Settings {
-      TabView {
-        VoiceSettingsView(voice: voice)
-          .tabItem { Label("Voice", systemImage: "waveform") }
-        ShortcutsSettingsView(voice: voice)
-          .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-        AppearanceSettingsView()
-          .tabItem { Label("Appearance", systemImage: "textformat.size") }
-        CompletionNotificationSettingsView()
-          .tabItem { Label("Notifications", systemImage: "bell") }
-        OttoBuddySettingsView()
-          .tabItem { Label("Otto on Screen", systemImage: "eyes") }
-        AgentDefaultsSettingsView()
-          .tabItem { Label("Agents", systemImage: "sparkles") }
-        ModelProviderSettingsView()
-          .tabItem { Label("Models", systemImage: "cpu") }
-        ProviderAccountsSettingsView(services: services)
-          .tabItem { Label("Accounts", systemImage: "person.2.crop.square.stack") }
-        SummarizerSettingsView()
-          .tabItem { Label("Summarizer", systemImage: "text.badge.star") }
-        WebsiteAccountsView(
-          accounts: services.websiteAccounts, profiles: services.agentProfiles.activeProfiles
-        )
-        .tabItem { Label("Websites", systemImage: "lock.shield") }
-        MessagingSettingsView(messaging: services.messaging)
-          .tabItem { Label("Messaging", systemImage: "message") }
-        BoatCloudView(cloud: services.boatCloud)
-          .tabItem { Label("Cloud", systemImage: "cloud") }
-        MobileSettingsView(services: services)
-          .tabItem { Label("Mobile", systemImage: "iphone.and.arrow.forward") }
+      // The macOS Settings TabView overflow menu disables tabs beyond the visible
+      // toolbar width. Keep every destination selectable, including Cloud and
+      // Mobile, by using a compact sidebar instead of 13 toolbar tabs.
+      HStack(spacing: 0) {
+        List(OttoSettingsPage.allCases, selection: $selectedSettingsPage) { page in
+          Label(page.title, systemImage: page.systemImage)
+            .tag(page)
+        }
+        .listStyle(.sidebar)
+        .frame(width: 205)
+
+        Divider()
+
+        settingsDetail
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-      .frame(minWidth: 820)
+      .frame(minWidth: 880, minHeight: 600)
+    }
+  }
+
+  @ViewBuilder
+  private var settingsDetail: some View {
+    switch selectedSettingsPage {
+    case .voice:
+      VoiceSettingsView(voice: voice)
+    case .shortcuts:
+      ShortcutsSettingsView(voice: voice)
+    case .appearance:
+      AppearanceSettingsView()
+    case .notifications:
+      CompletionNotificationSettingsView()
+    case .ottoOnScreen:
+      OttoBuddySettingsView()
+    case .agents:
+      AgentDefaultsSettingsView()
+    case .models:
+      ModelProviderSettingsView()
+    case .accounts:
+      ProviderAccountsSettingsView(services: services)
+    case .summarizer:
+      SummarizerSettingsView()
+    case .websites:
+      WebsiteAccountsView(
+        accounts: services.websiteAccounts, profiles: services.agentProfiles.activeProfiles)
+    case .messaging:
+      MessagingSettingsView(messaging: services.messaging)
+    case .cloud:
+      BoatCloudView(cloud: services.boatCloud)
+    case .mobile:
+      MobileSettingsView(services: services)
     }
   }
 
@@ -259,6 +279,49 @@ struct OttoApp: App {
     }
   }
 
+}
+
+private enum OttoSettingsPage: String, CaseIterable, Identifiable {
+  case voice, shortcuts, appearance, notifications, ottoOnScreen, agents, models, accounts,
+    summarizer, websites, messaging, cloud, mobile
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .voice: "Voice"
+    case .shortcuts: "Shortcuts"
+    case .appearance: "Appearance"
+    case .notifications: "Notifications"
+    case .ottoOnScreen: "Otto on Screen"
+    case .agents: "Agents"
+    case .models: "Models"
+    case .accounts: "Accounts"
+    case .summarizer: "Summarizer"
+    case .websites: "Websites"
+    case .messaging: "Messaging"
+    case .cloud: "Cloud"
+    case .mobile: "Mobile"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .voice: "waveform"
+    case .shortcuts: "keyboard"
+    case .appearance: "textformat.size"
+    case .notifications: "bell"
+    case .ottoOnScreen: "eyes"
+    case .agents: "sparkles"
+    case .models: "cpu"
+    case .accounts: "person.2.crop.square.stack"
+    case .summarizer: "text.badge.star"
+    case .websites: "lock.shield"
+    case .messaging: "message"
+    case .cloud: "cloud"
+    case .mobile: "iphone.and.arrow.forward"
+    }
+  }
 }
 
 private func observabilityDirectory() -> URL {
