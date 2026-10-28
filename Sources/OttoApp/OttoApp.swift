@@ -201,23 +201,24 @@ struct OttoApp: App {
     }
 
     Settings {
-      // The macOS Settings TabView overflow menu disables tabs beyond the visible
-      // toolbar width. Keep every destination selectable, including Cloud and
-      // Mobile, by using a compact sidebar instead of 13 toolbar tabs.
+      // Keep a stable, sufficiently wide Settings window across every page.
+      // Accounts requests a 760pt content width; a smaller container causes
+      // macOS to expand/shift the window left when that page is selected.
+      // The persistent sidebar also avoids the toolbar's clipped overflow tabs.
       HStack(spacing: 0) {
         List(OttoSettingsPage.allCases, selection: $selectedSettingsPage) { page in
           Label(page.title, systemImage: page.systemImage)
             .tag(page)
         }
         .listStyle(.sidebar)
-        .frame(width: 205)
+        .frame(width: 220)
 
         Divider()
 
         settingsDetail
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .frame(width: 895, height: 790, alignment: .top)
       }
-      .frame(minWidth: 880, minHeight: 600)
+      .frame(width: 1116, height: 790)
     }
   }
 
@@ -245,14 +246,10 @@ struct OttoApp: App {
     case .websites:
       WebsiteAccountsView(
         accounts: services.websiteAccounts, profiles: services.agentProfiles.activeProfiles)
-    case .messaging:
-      MessagingSettingsView(messaging: services.messaging)
     case .connectors:
-      ConnectorsSettingsView(telegram: services.telegram)
+      ConnectorsSettingsView(services: services)
     case .cloud:
       BoatCloudView(cloud: services.boatCloud)
-    case .mobile:
-      MobileSettingsView(services: services)
     }
   }
 
@@ -285,7 +282,7 @@ struct OttoApp: App {
 
 private enum OttoSettingsPage: String, CaseIterable, Identifiable {
   case voice, shortcuts, appearance, notifications, ottoOnScreen, agents, models, accounts,
-    summarizer, websites, messaging, connectors, cloud, mobile
+    summarizer, websites, connectors, cloud
 
   var id: Self { self }
 
@@ -301,10 +298,8 @@ private enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .accounts: "Accounts"
     case .summarizer: "Summarizer"
     case .websites: "Websites"
-    case .messaging: "Messaging"
     case .connectors: "Connectors"
     case .cloud: "Cloud"
-    case .mobile: "Mobile"
     }
   }
 
@@ -320,10 +315,8 @@ private enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .accounts: "person.2.crop.square.stack"
     case .summarizer: "text.badge.star"
     case .websites: "lock.shield"
-    case .messaging: "message"
     case .connectors: "point.3.connected.trianglepath.dotted"
     case .cloud: "cloud"
-    case .mobile: "iphone.and.arrow.forward"
     }
   }
 }

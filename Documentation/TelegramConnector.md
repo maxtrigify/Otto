@@ -6,7 +6,9 @@ It is independent of the existing Photon/iMessage connector.
 ## Setup
 
 1. Run the local Otto build on your Mac and click **Connectors** beside
-   Home/Chat, or open **Settings → Connectors**.
+   Home/Chat, or open **Settings → Connectors**. Use the Telegram tab; the
+   iMessage (Photon) and Mobile pairing screens are next to it, in the same
+   connector hub.
 2. In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`,
    and create a bot. Telegram supplies the bot's **bot token**.
 3. Paste that token in Otto's secure field and click **Connect Telegram**.

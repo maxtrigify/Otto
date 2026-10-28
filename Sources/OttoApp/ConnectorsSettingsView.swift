@@ -1,9 +1,62 @@
 import OttoServices
 import SwiftUI
 
-/// Each connector is explicit. Telegram credentials never leave the secure
-/// secret store; only a pairing code is rendered in the Settings UI.
+/// Keep every phone and messaging integration under a single Settings page.
+/// Reuse the existing Mobile and Photon views so their saved state and
+/// permission flows remain unchanged.
 struct ConnectorsSettingsView: View {
+  let services: ApplicationServices
+  @State private var selected: ConnectorDestination = .telegram
+
+  private enum ConnectorDestination: String, CaseIterable, Identifiable {
+    case telegram, messaging, mobile
+    var id: Self { self }
+    var label: String {
+      switch self {
+      case .telegram: "Telegram"
+      case .messaging: "iMessage"
+      case .mobile: "Mobile"
+      }
+    }
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 14) {
+        Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted")
+          .font(.headline)
+        Spacer()
+        Picker("Connector", selection: $selected) {
+          ForEach(ConnectorDestination.allCases) { destination in
+            Text(destination.label).tag(destination)
+          }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 390)
+        .accessibilityIdentifier("connector-destinations")
+      }
+      .padding(.horizontal, 28)
+      .padding(.vertical, 14)
+      Divider()
+      Group {
+        switch selected {
+        case .telegram:
+          TelegramConnectionSettings(telegram: services.telegram)
+        case .messaging:
+          MessagingSettingsView(messaging: services.messaging)
+        case .mobile:
+          MobileSettingsView(services: services)
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+    .frame(minWidth: 780, minHeight: 710)
+  }
+}
+
+/// Telegram credentials never leave the secure secret store; only the
+/// one-time pairing code is rendered in the Settings UI.
+private struct TelegramConnectionSettings: View {
   @ObservedObject var telegram: TelegramConnector
   @State private var botToken = ""
   @State private var busy = false
@@ -106,10 +159,6 @@ struct ConnectorsSettingsView: View {
         }
       }
 
-      Section("Other connectors") {
-        Text("iMessage via Photon remains under Settings → Messaging.")
-          .foregroundStyle(.secondary)
-      }
     }
     .formStyle(.grouped)
     .frame(minWidth: 610, minHeight: 560)

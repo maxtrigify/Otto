@@ -181,7 +181,7 @@ struct WorkspaceView: View {
       }
     }
     .sheet(isPresented: $showingConnectors) {
-      ConnectorsSettingsView(telegram: services.telegram)
+      ConnectorsSettingsView(services: services)
     }
     .sheet(isPresented: $uiState.showsRoutineManager) {
       RoutineManagerView(store: store, services: services)
