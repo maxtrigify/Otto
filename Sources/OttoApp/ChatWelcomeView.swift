@@ -147,10 +147,12 @@ struct WelcomeChipFlow: Layout {
       lines.reduce(CGFloat(0)) { total, line in
         total + (line.map(\.1.height).max() ?? 0)
       } + spacing * CGFloat(max(0, lines.count - 1))
-    let widest =
-      lines.map { line in
-        line.reduce(CGFloat(0)) { $0 + $1.1.width } + spacing * CGFloat(max(0, line.count - 1))
-      }.max() ?? 0
+    let lineWidths: [CGFloat] = lines.map { line in
+      let content: CGFloat = line.reduce(CGFloat(0)) { $0 + $1.1.width }
+      let gaps: CGFloat = spacing * CGFloat(max(0, line.count - 1))
+      return content + gaps
+    }
+    let widest: CGFloat = lineWidths.max() ?? 0
     return CGSize(width: min(widest, width), height: height)
   }
 
