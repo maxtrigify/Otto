@@ -226,6 +226,7 @@ public final class ApplicationServices: ObservableObject {
   private let providerSessionHome: URL
   public var defaultWorkspacePath: String { workspacePath }
   public lazy var messaging = MessagingService(services: self)
+  public lazy var telegram = TelegramConnector(services: self)
   lazy var privatePhone = PrivatePhoneConnection()
   public lazy var websiteAccounts = WebsiteAccountService(
     workspacePath: workspacePath,
@@ -606,6 +607,7 @@ public final class ApplicationServices: ObservableObject {
       await installMemoryBootstrapProvider()
       await installAccountProvider()
       isOnline = true
+      telegram.start()
       #if os(macOS)
         resourcePressureMonitor.start()
       #endif
@@ -946,6 +948,7 @@ public final class ApplicationServices: ObservableObject {
 
   private func stopControlPlane() {
     messaging.stop()
+    telegram.stop()
     routineEngine.stop()
     routineObservation?.cancel()
     routineObservation = nil

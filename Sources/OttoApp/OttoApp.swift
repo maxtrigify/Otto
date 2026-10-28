@@ -247,6 +247,8 @@ struct OttoApp: App {
         accounts: services.websiteAccounts, profiles: services.agentProfiles.activeProfiles)
     case .messaging:
       MessagingSettingsView(messaging: services.messaging)
+    case .connectors:
+      ConnectorsSettingsView(telegram: services.telegram)
     case .cloud:
       BoatCloudView(cloud: services.boatCloud)
     case .mobile:
@@ -283,7 +285,7 @@ struct OttoApp: App {
 
 private enum OttoSettingsPage: String, CaseIterable, Identifiable {
   case voice, shortcuts, appearance, notifications, ottoOnScreen, agents, models, accounts,
-    summarizer, websites, messaging, cloud, mobile
+    summarizer, websites, messaging, connectors, cloud, mobile
 
   var id: Self { self }
 
@@ -300,6 +302,7 @@ private enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .summarizer: "Summarizer"
     case .websites: "Websites"
     case .messaging: "Messaging"
+    case .connectors: "Connectors"
     case .cloud: "Cloud"
     case .mobile: "Mobile"
     }
@@ -318,6 +321,7 @@ private enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .summarizer: "text.badge.star"
     case .websites: "lock.shield"
     case .messaging: "message"
+    case .connectors: "point.3.connected.trianglepath.dotted"
     case .cloud: "cloud"
     case .mobile: "iphone.and.arrow.forward"
     }

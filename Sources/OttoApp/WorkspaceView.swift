@@ -22,6 +22,7 @@ struct WorkspaceView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.ottoMotion) private var motion
   @State private var showingBoatCloud = false
+  @State private var showingConnectors = false
   @Namespace private var surfacePickerSelection
   @ObservedObject var store: CanvasStore
   @ObservedObject var services: ApplicationServices
@@ -106,6 +107,17 @@ struct WorkspaceView: View {
           workspaceSurfacePicker
             .homeTourTarget(.surfaceSwitcher)
             .padding(.leading, 112)
+          Button {
+            showingConnectors = true
+          } label: {
+            Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted")
+              .font(.system(size: 11, weight: .medium))
+              .foregroundStyle(surfacePickerPalette.paper)
+              .padding(.horizontal, 8)
+              .frame(height: 26)
+          }
+          .buttonStyle(.plain)
+          .accessibilityIdentifier("open-connectors")
           Spacer()
         }
         .padding(.top, 2.5)
@@ -167,6 +179,9 @@ struct WorkspaceView: View {
         }.padding()
         BoatCloudView(cloud: services.boatCloud)
       }
+    }
+    .sheet(isPresented: $showingConnectors) {
+      ConnectorsSettingsView(telegram: services.telegram)
     }
     .sheet(isPresented: $uiState.showsRoutineManager) {
       RoutineManagerView(store: store, services: services)
