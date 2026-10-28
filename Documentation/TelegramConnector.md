@@ -1,7 +1,10 @@
-# Telegram connector — local Mac test
+# Telegram connector and Connectors hub
 
-This feature is intentionally local to the Mac branch until it has been tested.
-It is independent of the existing Photon/iMessage connector.
+**Connectors** is Otto's central place for current and future connections.
+It currently brings Telegram, existing Photon/iMessage messaging, and Mobile
+phone pairing together. Other integrations (for example WhatsApp) can be added
+to this same hub in the future; **WhatsApp is not implemented in this change**.
+The Telegram integration is independent of the existing Photon/iMessage connector.
 
 ## Setup
 
@@ -53,5 +56,5 @@ It is independent of the existing Photon/iMessage connector.
 - One Telegram bot token, one private chat and one approved group can be configured per Otto
   workspace. Disconnect clears Keychain credentials and local authorization;
   rotate the token in BotFather if it may have been disclosed.
-- No actual Telegram account/token is bundled or committed. Final live
-  send/receive validation needs a user-owned BotFather token and chat.
+- No actual Telegram account/token is bundled or committed. Testing
+  real send/receive behavior requires a user-owned BotFather token and chat.

@@ -37,6 +37,14 @@ struct ConnectorsSettingsView: View {
       }
       .padding(.horizontal, 28)
       .padding(.vertical, 14)
+      Text(
+        "One place for Otto's messaging and mobile connections. Other integrations, such as WhatsApp, can be added here in the future."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 28)
+      .padding(.bottom, 10)
       Divider()
       Group {
         switch selected {
