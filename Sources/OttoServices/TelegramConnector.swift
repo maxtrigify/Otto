@@ -23,14 +23,32 @@ public struct TelegramIncomingMessage: Codable, Sendable {
   public let messageID: Int64
   public let chat: Peer
   public let from: Sender?
+  public let senderChat: Peer?
   public let text: String?
   enum CodingKeys: String, CodingKey {
     case messageID = "message_id"
     case chat, from, text
+    case senderChat = "sender_chat"
   }
 
   public var isPrivateHuman: Bool {
-    chat.type == "private" && from?.id == chat.id && from?.isBot != true
+    chat.type == "private" && from?.id == chat.id && from?.isBot == false
+  }
+
+  public var isGroupHuman: Bool {
+    (chat.type == "group" || chat.type == "supergroup") && chat.id < 0
+      && from?.isBot == false && senderChat == nil && from?.id != nil
+  }
+
+  public func isAuthorized(
+    privateChatID: Int64?, groupChatID: Int64?, groupSenderID: Int64?
+  ) -> Bool {
+    if isPrivateHuman { return privateChatID != nil && privateChatID == chat.id }
+    if isGroupHuman {
+      return groupChatID != nil && groupChatID == chat.id
+        && groupSenderID != nil && groupSenderID == from?.id
+    }
+    return false
   }
 }
 
@@ -50,11 +68,18 @@ public enum TelegramCommand: Equatable, Sendable {
   case message(String)
   case pair(String)
 
-  public static func parse(_ raw: String) -> TelegramCommand? {
+  public static func parse(_ raw: String, addressedTo botUsername: String? = nil)
+    -> TelegramCommand?
+  {
     let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty, text.count <= 4_000 else { return nil }
     let split = text.split(maxSplits: 1, whereSeparator: \.isWhitespace)
-    let first = String(split[0]).lowercased().split(separator: "@").first.map(String.init) ?? ""
+    let address = String(split[0]).split(separator: "@", maxSplits: 1)
+    if address.count == 2 {
+      guard let botUsername, address[1].caseInsensitiveCompare(botUsername) == .orderedSame
+      else { return nil }
+    }
+    let first = String(address[0]).lowercased()
     let argument =
       split.count > 1 ? String(split[1]).trimmingCharacters(in: .whitespacesAndNewlines) : ""
     switch first {
@@ -178,6 +203,11 @@ public final class TelegramConnector: ObservableObject {
   @Published public private(set) var pairingCode: String?
   @Published public private(set) var pendingChatID: Int64?
   @Published public private(set) var approvedChatID: Int64?
+  @Published public private(set) var approvedGroupID: Int64?
+  @Published public private(set) var approvedGroupSenderID: Int64?
+  @Published public private(set) var pendingGroupID: Int64?
+  @Published public private(set) var pendingGroupSenderID: Int64?
+  @Published public private(set) var groupPairingCode: String?
   @Published public private(set) var selectedBotID: UUID?
 
   private weak var services: ApplicationServices?
@@ -189,6 +219,7 @@ public final class TelegramConnector: ObservableObject {
   private var offset: Int64
   private var pendingSenderID: Int64?
   private var pairingExpiry: Date?
+  private var groupPairingExpiry: Date?
   private let credentialKey: String
 
   public init(
@@ -206,12 +237,27 @@ public final class TelegramConnector: ObservableObject {
     self.offset = max(0, Int64(defaults.integer(forKey: "\(prefix).offset")))
     let savedChat = defaults.object(forKey: "\(prefix).chat") as? NSNumber
     self.approvedChatID = savedChat?.int64Value
+    self.approvedGroupID = (defaults.object(forKey: "\(prefix).group") as? NSNumber)?.int64Value
+    self.approvedGroupSenderID =
+      (defaults.object(forKey: "\(prefix).group.sender") as? NSNumber)?.int64Value
     self.selectedBotID = defaults.string(forKey: "\(prefix).bot").flatMap(UUID.init(uuidString:))
   }
 
   public var bots: [AgentProfile] {
     (services?.agentProfiles.activeProfiles ?? []).sorted {
       $0.name.localizedStandardCompare($1.name) == .orderedAscending
+    }
+  }
+
+  /// The Mac owner selects the sole bot exposed to Telegram. Chat commands
+  /// cannot change this binding or access another Otto bot.
+  public func selectBot(_ id: UUID?) {
+    guard id == nil || bots.contains(where: { $0.id == id }) else { return }
+    selectedBotID = id
+    if let id {
+      defaults.set(id.uuidString, forKey: "\(prefix).bot")
+    } else {
+      defaults.removeObject(forKey: "\(prefix).bot")
     }
   }
 
@@ -266,9 +312,16 @@ public final class TelegramConnector: ObservableObject {
     do {
       try await secrets.delete(credentialKey)
       defaults.removeObject(forKey: "\(prefix).chat")
+      defaults.removeObject(forKey: "\(prefix).group")
+      defaults.removeObject(forKey: "\(prefix).group.sender")
       defaults.removeObject(forKey: "\(prefix).bot")
       defaults.removeObject(forKey: "\(prefix).offset")
       approvedChatID = nil
+      approvedGroupID = nil
+      approvedGroupSenderID = nil
+      pendingGroupID = nil
+      pendingGroupSenderID = nil
+      groupPairingCode = nil
       selectedBotID = nil
       pendingChatID = nil
       pendingSenderID = nil
@@ -285,6 +338,44 @@ public final class TelegramConnector: ObservableObject {
     pairingExpiry = Date().addingTimeInterval(600)
     pendingChatID = nil
     pendingSenderID = nil
+  }
+
+  public func issueGroupPairingCode() {
+    groupPairingCode = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+    groupPairingExpiry = Date().addingTimeInterval(600)
+    pendingGroupID = nil
+    pendingGroupSenderID = nil
+  }
+
+  public func approvePendingGroup() {
+    guard let group = pendingGroupID, group < 0, let sender = pendingGroupSenderID,
+      sender > 0
+    else { return }
+    defaults.set(NSNumber(value: group), forKey: "\(prefix).group")
+    defaults.set(NSNumber(value: sender), forKey: "\(prefix).group.sender")
+    approvedGroupID = group
+    approvedGroupSenderID = sender
+    pendingGroupID = nil
+    pendingGroupSenderID = nil
+    groupPairingCode = nil
+    groupPairingExpiry = nil
+    status = "Telegram group approved. Only the pairing member can command Otto."
+    Task {
+      try? await transport?.send(
+        "Group approved. Messages from the pairing member can reach the Otto bot selected on your Mac. Use /bots to check the selection.",
+        to: group)
+    }
+  }
+
+  public func revokeGroup() {
+    defaults.removeObject(forKey: "\(prefix).group")
+    defaults.removeObject(forKey: "\(prefix).group.sender")
+    approvedGroupID = nil
+    approvedGroupSenderID = nil
+    pendingGroupID = nil
+    pendingGroupSenderID = nil
+    groupPairingCode = nil
+    groupPairingExpiry = nil
   }
 
   public func approvePendingChat() {
@@ -325,15 +416,34 @@ public final class TelegramConnector: ObservableObject {
   }
 
   private func handle(_ message: TelegramIncomingMessage, client: TelegramBotTransport) async {
-    guard message.isPrivateHuman, let text = message.text,
-      let command = TelegramCommand.parse(text)
+    guard let text = message.text,
+      let command = TelegramCommand.parse(text, addressedTo: username),
+      message.isPrivateHuman || message.isGroupHuman
     else { return }
     let chat = message.chat.id
-    if let approvedChatID {
-      guard approvedChatID == chat else { return }
-    } else {
+    if message.isGroupHuman {
+      if message.isAuthorized(
+        privateChatID: approvedChatID, groupChatID: approvedGroupID,
+        groupSenderID: approvedGroupSenderID)
+      {
+        // Explicitly approved group and one named Telegram user only.
+      } else if approvedGroupID == nil, case .pair(let code) = command,
+        let groupPairingCode, code == groupPairingCode,
+        (groupPairingExpiry ?? .distantPast) > .now
+      {
+        pendingGroupID = chat
+        pendingGroupSenderID = message.from?.id
+        status = "Telegram group requests approval in Otto Connectors."
+        try? await client.send(
+          "Group pairing requested. Approve the group and sender in Otto on your Mac.", to: chat)
+        return
+      } else {
+        return
+      }
+    } else if approvedChatID != chat {
       guard case .pair(let code) = command,
-        let pairingCode, code == pairingCode, (pairingExpiry ?? .distantPast) > .now
+        approvedChatID == nil, let pairingCode, code == pairingCode,
+        (pairingExpiry ?? .distantPast) > .now
       else { return }
       pendingChatID = chat
       pendingSenderID = message.from?.id
@@ -345,42 +455,25 @@ public final class TelegramConnector: ObservableObject {
     switch command {
     case .help:
       try? await client.send(
-        "Otto commands:\n/bots — list saved Otto bots\n/use @handle — select your bot\n/bot @handle message — send to a different bot\nOr send normal text to the selected bot. Approvals must be completed in Otto on your Mac.",
+        "Otto commands:\n/bots — show the Otto bot selected on the Mac\nSend normal text to that bot. Only the Mac owner can change the bot. Tool approvals remain in Otto on the Mac.",
         to: chat)
     case .bots:
-      let list = bots.prefix(40).map { "• @\($0.handle) — \($0.name)" }.joined(separator: "\n")
-      try? await client.send(list.isEmpty ? "No saved Otto bots yet." : list, to: chat)
-    case .use(let handle):
-      guard let bot = resolveBot(handle) else {
-        try? await client.send("Bot not found. Use /bots to see available bots.", to: chat)
-        return
-      }
-      selectedBotID = bot.id
-      defaults.set(bot.id.uuidString, forKey: "\(prefix).bot")
-      try? await client.send("Selected @\(bot.handle). Send a message to start.", to: chat)
-    case .send(let handle, let prompt):
-      guard let bot = resolveBot(handle) else {
-        try? await client.send("Bot not found. Use /bots.", to: chat)
-        return
-      }
-      await sendPrompt(prompt, to: bot, client: client, chat: chat)
+      let selected = selectedBotID.flatMap { id in bots.first(where: { $0.id == id }) }
+      try? await client.send(
+        selected.map { "Connected Otto bot: @\($0.handle) — \($0.name)" }
+          ?? "No Otto bot selected. Select one on the Mac in Connectors → Telegram.", to: chat)
+    case .use, .send:
+      try? await client.send(
+        "Bot selection is locked on the Mac. Open Otto → Connectors → Telegram to choose the bot.",
+        to: chat)
     case .message(let prompt):
       guard let id = selectedBotID, let bot = bots.first(where: { $0.id == id }) else {
-        try? await client.send("Select a bot using /bots and /use @handle.", to: chat)
+        try? await client.send("Select an Otto bot in Mac → Connectors → Telegram.", to: chat)
         return
       }
       await sendPrompt(prompt, to: bot, client: client, chat: chat)
     case .pair:
       try? await client.send("Already paired. Use /bots to choose a bot.", to: chat)
-    }
-  }
-
-  private func resolveBot(_ input: String) -> AgentProfile? {
-    let term = input.trimmingCharacters(in: CharacterSet(charactersIn: " @"))
-    return bots.first {
-      $0.id.uuidString.caseInsensitiveCompare(term) == .orderedSame
-        || $0.handle.caseInsensitiveCompare(term) == .orderedSame
-        || $0.name.caseInsensitiveCompare(term) == .orderedSame
     }
   }
 

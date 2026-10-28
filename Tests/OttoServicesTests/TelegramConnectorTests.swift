@@ -14,14 +14,16 @@ struct TelegramConnectorTests {
       TelegramCommand.parse("/bot @Engineer please review") == .send("@Engineer", "please review"))
     #expect(TelegramCommand.parse("Hi there") == .message("Hi there"))
     #expect(TelegramCommand.parse("/pair code123") == .pair("code123"))
+    #expect(TelegramCommand.parse("/bots@NoraTelegram", addressedTo: "noratelegram") == .bots)
+    #expect(TelegramCommand.parse("/bots@OtherTelegram", addressedTo: "noratelegram") == nil)
     #expect(TelegramCommand.parse("/approve") == nil)
     #expect(TelegramCommand.parse("/bot") == nil)
     #expect(TelegramCommand.parse("") == nil)
     #expect(TelegramCommand.parse(String(repeating: "X", count: 4_001)) == nil)
   }
 
-  @Test("Only direct, human, self-addressed Telegram messages may be processed")
-  func privateHumanOnly() throws {
+  @Test("Only real human senders in private chats or groups may be considered for pairing")
+  func privateAndGroupHumans() throws {
     let privateMessage = """
       {"message_id":1,"chat":{"id":123,"type":"private"},
        "from":{"id":123,"is_bot":false},"text":"/bots"}
@@ -29,11 +31,22 @@ struct TelegramConnectorTests {
     let decoder = JSONDecoder()
     let valid = try decoder.decode(TelegramIncomingMessage.self, from: Data(privateMessage.utf8))
     #expect(valid.isPrivateHuman)
-    let groupMessage = privateMessage.replacingOccurrences(of: "private", with: "group")
+    #expect(!valid.isGroupHuman)
+    let groupMessage =
+      privateMessage
+      .replacingOccurrences(of: "private", with: "supergroup")
+      .replacingOccurrences(of: #""id":123,"type""#, with: #""id":-100123,"type""#)
+    let groupValid = try decoder.decode(
+      TelegramIncomingMessage.self, from: Data(groupMessage.utf8))
+    #expect(groupValid.isGroupHuman)
+    #expect(groupValid.isAuthorized(privateChatID: nil, groupChatID: -100123, groupSenderID: 123))
+    #expect(!groupValid.isAuthorized(privateChatID: 123, groupChatID: -100123, groupSenderID: 999))
+    #expect(!groupValid.isAuthorized(privateChatID: 123, groupChatID: -200, groupSenderID: 123))
+    #expect(!groupValid.isAuthorized(privateChatID: 123, groupChatID: nil, groupSenderID: nil))
+    #expect(valid.isAuthorized(privateChatID: 123, groupChatID: nil, groupSenderID: nil))
+    #expect(!valid.isAuthorized(privateChatID: 999, groupChatID: -100123, groupSenderID: 123))
     #expect(
-      try !decoder.decode(
-        TelegramIncomingMessage.self, from: Data(groupMessage.utf8)
-      ).isPrivateHuman)
+      !groupValid.isPrivateHuman)
     let spoofed = privateMessage.replacingOccurrences(
       of: #""id":123,"is_bot":false"#,
       with: #""id":999,"is_bot":false"#)
@@ -46,6 +59,24 @@ struct TelegramConnectorTests {
       try !decoder.decode(
         TelegramIncomingMessage.self, from: Data(automated.utf8)
       ).isPrivateHuman)
+    let botGroup = groupMessage.replacingOccurrences(of: "false", with: "true")
+    #expect(
+      try !decoder.decode(
+        TelegramIncomingMessage.self, from: Data(botGroup.utf8)
+      ).isGroupHuman)
+    let anonymousAdmin = groupMessage.replacingOccurrences(
+      of: #""from":{"id":123,"is_bot":false}"#,
+      with: #""from":{"id":123,"is_bot":false},"sender_chat":{"id":-100123,"type":"supergroup"}"#)
+    #expect(
+      try !decoder.decode(
+        TelegramIncomingMessage.self, from: Data(anonymousAdmin.utf8)
+      ).isGroupHuman)
+    let spoofedGroup = groupMessage.replacingOccurrences(
+      of: #""type":"supergroup""#, with: #""type":"private""#)
+    #expect(
+      try !decoder.decode(
+        TelegramIncomingMessage.self, from: Data(spoofedGroup.utf8)
+      ).isGroupHuman)
   }
 
   @Test("Reject malformed BotFather tokens before any network request")

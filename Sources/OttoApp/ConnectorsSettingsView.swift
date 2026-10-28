@@ -67,7 +67,7 @@ private struct TelegramConnectionSettings: View {
         Label(telegram.status, systemImage: "paperplane.circle")
           .accessibilityIdentifier("telegram-connector-status")
         Text(
-          "Telegram replies work in the approved private chat only. Group messages, including ordinary 'Test' messages, are ignored until group access is explicitly supported and authorized."
+          "Telegram can message one Otto bot you choose below. Private chats and approved groups are supported. Group access is limited to the Telegram member who pairs it."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -94,11 +94,11 @@ private struct TelegramConnectionSettings: View {
       }
 
       if telegram.username != nil {
-        Section("Private pairing") {
+        Section("Private chat pairing") {
           if let approved = telegram.approvedChatID {
             Label("Paired chat ID: \(approved)", systemImage: "checkmark.shield.fill")
               .foregroundStyle(.green)
-            Text("Only this one-to-one Telegram chat can dispatch bot messages.")
+            Text("Only this paired one-to-one chat can dispatch private messages.")
               .font(.caption).foregroundStyle(.secondary)
           } else {
             Text(
@@ -120,22 +120,63 @@ private struct TelegramConnectionSettings: View {
             }
           }
         }
-        Section("Otto bots") {
+        Section("Approved Telegram group") {
+          if let group = telegram.approvedGroupID,
+            let sender = telegram.approvedGroupSenderID
+          {
+            Label("Approved group: \(group)", systemImage: "person.3.fill")
+              .foregroundStyle(.green)
+            LabeledContent("Allowed Telegram sender", value: String(sender))
+            Text("Only this group member may send instructions to Otto; other members are ignored.")
+              .font(.caption).foregroundStyle(.secondary)
+            Button("Revoke group access", role: .destructive) { telegram.revokeGroup() }
+          } else {
+            Text(
+              "To connect your Nora group, generate a group code, add your Telegram bot to the group, then send /pair CODE in that group. Approve the group and sender here on your Mac."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            if let code = telegram.groupPairingCode {
+              Text("/pair \(code)")
+                .textSelection(.enabled)
+                .font(.system(.callout, design: .monospaced))
+            }
+            Button("Generate group pairing code") { telegram.issueGroupPairingCode() }
+              .accessibilityIdentifier("telegram-group-pair")
+            if let group = telegram.pendingGroupID,
+              let sender = telegram.pendingGroupSenderID
+            {
+              LabeledContent("Group ID requesting access", value: String(group))
+              LabeledContent("Telegram sender requesting access", value: String(sender))
+              Button("Approve this group and sender") { telegram.approvePendingGroup() }
+                .accessibilityIdentifier("telegram-approve-group")
+            }
+            Text(
+              "For ordinary messages like 'Test', disable group privacy in BotFather (/setprivacy → Disable), then remove and re-add the Telegram bot to the group. With privacy enabled, group commands like /bots@YourBot usually work, but ordinary text may not reach it."
+            )
+            .font(.caption).foregroundStyle(.secondary)
+          }
+        }
+        Section("Connected Otto bot") {
           if telegram.bots.isEmpty {
             Text("Create a saved bot in Otto → Chat → Bots first.")
               .foregroundStyle(.secondary)
           } else {
-            Text(
-              "3. Send /bots in Telegram, then /use @handle to select an Otto bot. You can also send /bot @handle your message."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-            ForEach(telegram.bots) { bot in
-              HStack {
-                Text(bot.name)
-                Spacer()
-                Text("@\(bot.handle)").font(.caption).foregroundStyle(.secondary)
+            Picker(
+              "Allow Telegram to talk to",
+              selection: Binding<UUID?>(
+                get: { telegram.selectedBotID },
+                set: { telegram.selectBot($0) })
+            ) {
+              Text("No bot selected (messages disabled)").tag(UUID?.none)
+              ForEach(telegram.bots) { bot in
+                Text("\(bot.name) (@\(bot.handle))").tag(Optional(bot.id))
               }
             }
+            .accessibilityIdentifier("telegram-otto-bot-picker")
+            Text(
+              "Only the chosen bot is accessible from Telegram. Telegram /use and /bot commands cannot switch bots. Send /bots to check the selected bot, then send a message."
+            )
+            .font(.caption).foregroundStyle(.secondary)
           }
           Text(
             "Telegram is not an approval channel. Permission prompts and sensitive actions must be reviewed in Otto on the Mac."
