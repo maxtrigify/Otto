@@ -12,13 +12,17 @@ public struct LocalModelConfiguration: Sendable, Equatable {
 
   public init(baseURL input: String, modelID: String) throws {
     let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let components = URLComponents(string: raw),
+    // People commonly paste a local server's IP:port without the scheme.
+    // Default to HTTP only for an address that subsequently passes our
+    // private-network allowlist. Never infer HTTP for public servers.
+    let address = raw.contains("://") ? raw : "http://\(raw)"
+    guard let components = URLComponents(string: address),
       let scheme = components.scheme?.lowercased(),
       let host = components.host?.lowercased(),
       !host.isEmpty,
       components.user == nil, components.password == nil,
       components.query == nil, components.fragment == nil,
-      !raw.contains("\n"), !raw.contains("\r"),
+      !raw.contains("\n"), !raw.contains("\r"), !raw.contains("\\"),
       scheme == "https" || (scheme == "http" && Self.isPrivateHost(host))
     else { throw LocalModelConfigurationError.invalidURL }
 
@@ -69,7 +73,11 @@ public struct LocalModelConfiguration: Sendable, Equatable {
     }
     let pieces = host.split(separator: ".").compactMap { UInt8($0) }
     guard pieces.count == 4, host.split(separator: ".").count == 4 else { return false }
-    return pieces[0] == 127 || pieces[0] == 10 || (pieces[0] == 192 && pieces[1] == 168)
+    // Tailscale devices use 100.64.0.0/10. The range is non-public and
+    // shared with CGNAT, so it must still be a trusted/private connection.
+    return pieces[0] == 127 || pieces[0] == 10
+      || (pieces[0] == 100 && (64...127).contains(Int(pieces[1])))
+      || (pieces[0] == 192 && pieces[1] == 168)
       || (pieces[0] == 172 && (16...31).contains(Int(pieces[1])))
       || (pieces[0] == 169 && pieces[1] == 254)
   }
@@ -82,7 +90,7 @@ public enum LocalModelConfigurationError: Error, LocalizedError {
   public var errorDescription: String? {
     switch self {
     case .invalidURL:
-      "Enter an HTTPS server URL or an HTTP loopback/private-LAN URL, with no credentials or query string."
+      "Enter an HTTPS URL or local/LAN/Tailnet HTTP address without credentials or a query string. macOS may require HTTPS for remote HTTP hosts."
     case .invalidModel:
       "Enter the exact model ID served by your OpenAI-compatible API."
     }

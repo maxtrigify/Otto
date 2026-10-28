@@ -26,6 +26,29 @@ struct ProviderModelCatalogTests {
     }
     #expect(!ProviderModelCatalogStore.isDiscovered(.hermes))
   }
+
+  @Test("Saved OpenAI-compatible local models appear immediately in the bot picker")
+  @MainActor
+  func localModelIsVisibleWithoutDiscovery() throws {
+    let config = try LocalModelConfiguration(
+      baseURL: "http://127.0.0.1:11434/v1", modelID: "qwen3:8b")
+    let direct = ProviderModelCatalogStore.withConfiguredLocalModel(
+      nil, provider: .openAI, configuration: config)
+    #expect(direct?.first?.id == "local/qwen3:8b")
+    #expect(direct?.first?.displayName == "Local · qwen3:8b")
+
+    let existing = [AgentModel(id: "openai/gpt-5.6", displayName: "GPT")]
+    let combined = ProviderModelCatalogStore.withConfiguredLocalModel(
+      existing, provider: .openAI, configuration: config)
+    #expect(combined?.count == 2)
+    #expect(combined?.first?.id == "local/qwen3:8b")
+    let deduped = ProviderModelCatalogStore.withConfiguredLocalModel(
+      combined, provider: .openAI, configuration: config)
+    #expect(deduped?.count == 2)
+    #expect(
+      ProviderModelCatalogStore.withConfiguredLocalModel(
+        nil, provider: .codex, configuration: config) == nil)
+  }
 }
 
 @Suite("Account catalog isolation")

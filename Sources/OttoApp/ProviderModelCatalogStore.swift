@@ -81,7 +81,29 @@ final class ProviderModelCatalogStore: ObservableObject {
   }
 
   func catalog(for provider: AgentProvider, accountID: UUID? = nil) -> [AgentModel]? {
-    catalogs[Key(provider: provider, accountID: accountID)]
+    let discovered = catalogs[Key(provider: provider, accountID: accountID)]
+    return Self.withConfiguredLocalModel(
+      discovered, provider: provider, configuration: LocalModelConfiguration.load())
+  }
+
+  static func withConfiguredLocalModel(
+    _ discovered: [AgentModel]?, provider: AgentProvider,
+    configuration: LocalModelConfiguration?
+  ) -> [AgentModel]? {
+    guard provider == .openAI, let local = configuration else {
+      return discovered
+    }
+    // Configuration is stored independently of network discovery, which can
+    // be slow, stale, or unavailable when the local server is offline. Always
+    // expose the explicitly saved model in every bot picker immediately.
+    let model = AgentModel(
+      id: OttoHarnessModelSelection.persistedID(provider: .local, modelID: local.modelID),
+      displayName: "Local · \(local.modelID)")
+    var models = discovered ?? []
+    if !models.contains(where: { $0.id == model.id }) {
+      models.insert(model, at: 0)
+    }
+    return models
   }
 
   /// Starts discovery unless a recent result exists or discovery is already running.

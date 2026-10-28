@@ -4435,6 +4435,7 @@ struct HireBotSheet: View {
   @State private var saving = false
   @State private var errorMessage: String?
   @State private var showingAdvanced = false
+  @State private var showingLocalModelSettings = false
 
   private let colors = ["#397b69", "#ad6a66", "#526b8e", "#a46e21", "#087f83"]
 
@@ -4503,6 +4504,30 @@ struct HireBotSheet: View {
       }
       alignSelections(for: provider)
       catalogStore.load(provider, accountID: modelAccountID)
+    }
+    .sheet(isPresented: $showingLocalModelSettings) {
+      VStack(spacing: 0) {
+        HStack {
+          Text("Add an OpenAI-compatible model")
+            .font(.headline)
+          Spacer()
+          Button("Done") { showingLocalModelSettings = false }
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(16)
+        Divider()
+        ModelProviderSettingsView(initialProvider: .local) {
+          guard let saved = LocalModelConfiguration.load() else { return }
+          // Keep the bot draft intact: this chooses only its model and does
+          // not save or overwrite the bot until Save changes is pressed.
+          model = OttoHarnessModelSelection.persistedID(
+            provider: .local, modelID: saved.modelID)
+          effort = ""
+          catalogStore.load(.openAI, accountID: modelAccountID)
+        }
+      }
+      .frame(width: 625, height: 660)
+      .onExitCommand { showingLocalModelSettings = false }
     }
   }
 
@@ -4811,6 +4836,27 @@ struct HireBotSheet: View {
 
   @ViewBuilder
   private var advancedModel: some View {
+    if provider == .openAI {
+      VStack(alignment: .leading, spacing: 6) {
+        Button {
+          showingLocalModelSettings = true
+        } label: {
+          Label(
+            LocalModelConfiguration.load() == nil
+              ? "Add OpenAI-compatible local model…"
+              : "Edit OpenAI-compatible local model…",
+            systemImage: "plus.circle")
+        }
+        .accessibilityIdentifier("bot-local-model-setup")
+        if LocalModelConfiguration.load() == nil {
+          Text(
+            "No local model is configured yet. Add the server URL and model ID here, then select it below."
+          )
+          .font(.ottoMono(8))
+          .foregroundStyle(palette.muted)
+        }
+      }
+    }
     if !modelOptions.isEmpty {
       VStack(alignment: .leading, spacing: 7) {
         advancedLabel("MODEL")

@@ -6,6 +6,57 @@ import Testing
 
 @Suite("Otto-owned agent harness")
 struct HarnessTests {
+  @Test("Missing legacy session resumes with a new ID and preserves existing sessions")
+  func missingResumeDoesNotDeleteHistory() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let store = HarnessSessionStore(rootURL: fixture.url)
+    var retained = HarnessSession(providerID: "local", modelID: "earlier")
+    retained.messages.append(HarnessMessage(role: .user, content: "Keep this history"))
+    try await store.save(retained)
+
+    let staleID = HarnessSession.makeID()
+    let backend = ScriptedBackend(
+      providerID: "local",
+      responses: [HarnessBackendResponse(text: "New session is working")])
+    let runner = HarnessRunner(sessionStore: store)
+    let result = try await runner.run(
+      HarnessTurnRequest(
+        sessionID: staleID, providerID: "local", modelID: "proxy-alias",
+        systemInstructions: "Preserve the bot instructions", prompt: "Hello"),
+      backend: backend)
+
+    #expect(result.sessionID != staleID)
+    #expect(HarnessSession.isOttoID(result.sessionID))
+    #expect(result.text == "New session is working")
+    #expect(
+      !FileManager.default.fileExists(
+        atPath: fixture.url.appending(path: "\(staleID).json").path))
+    let original = try await store.load(sessionID: retained.id)
+    #expect(original.messages.map(\.content) == ["Keep this history"])
+    let resumed = try await store.load(sessionID: result.sessionID)
+    #expect(resumed.messages.map(\.content) == ["Hello", "New session is working"])
+  }
+
+  @Test("Corrupted session files remain visible as errors and are never overwritten")
+  func corruptResumeFailsWithoutDataLoss() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let store = HarnessSessionStore(rootURL: fixture.url)
+    let sessionID = HarnessSession.makeID()
+    let file = fixture.url.appending(path: "\(sessionID).json")
+    let original = Data(#"{"corrupt":true}"#.utf8)
+    try original.write(to: file)
+
+    do {
+      _ = try await store.loadOrCreate(
+        sessionID: sessionID, providerID: "local", modelID: "proxy-alias")
+      Issue.record("Corrupt sessions must not be reset silently")
+    } catch {
+      #expect(try Data(contentsOf: file) == original)
+    }
+  }
+
   @Test("Otto owns resumable history while system instructions refresh every turn")
   func resumeUsesCanonicalHistoryAndFreshSystem() async throws {
     let fixture = try Fixture()
