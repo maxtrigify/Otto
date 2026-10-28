@@ -4,6 +4,13 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## Unreleased
+
+### New
+
+- **Run Otto Harness bots on a local model.** In Settings → Models choose "Local (OpenAI compatible)" and point Otto at Ollama, LM Studio, llama.cpp, vLLM or any server that speaks the OpenAI Chat Completions API. The API key is optional and stays in Otto's secure credential store; plain HTTP is accepted only for this Mac and private-network addresses. Contributed by onlinegill.
+- **Android companion app, as source.** `Apps/OttoAndroidApp` is a native Android app that pairs with your Mac over a private HTTPS address and shows your sessions and bots. It is built from source or from the "Android companion APK" GitHub workflow; it is not part of the Mac download. Contributed by onlinegill.
+
 ## 0.2.10 — 2026-10-28
 
 ### Fixes

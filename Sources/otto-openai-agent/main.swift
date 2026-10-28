@@ -106,10 +106,13 @@ private enum OttoOpenAIAgent {
   private static func run(_ options: Options) async throws {
     let providerName = providerDisplayName(options.backend)
     let apiKey =
-      (OttoEnvironment.value("MODEL_API_KEY")
-      ?? OttoEnvironment.value("OPENAI_API_KEY"))?.trimmingCharacters(
-        in: .whitespacesAndNewlines)
-    guard let apiKey, !apiKey.isEmpty else { throw DirectRuntimeError.missingAPIKey(providerName) }
+      (options.backend == "local"
+      ? OttoEnvironment.value("MODEL_API_KEY")
+      : (OttoEnvironment.value("MODEL_API_KEY") ?? OttoEnvironment.value("OPENAI_API_KEY")))?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard options.backend == "local" || !apiKey.isEmpty else {
+      throw DirectRuntimeError.missingAPIKey(providerName)
+    }
 
     let client = controlClient()
     let definitions = (try? await client?.listToolsAsync()) ?? []
@@ -169,21 +172,30 @@ private enum OttoOpenAIAgent {
   private static func modelBackend(id: String, apiKey: String) throws -> any HarnessModelBackend {
     switch id {
     case "openai":
-      OpenAIResponsesBackend(apiKey: apiKey)
+      return OpenAIResponsesBackend(apiKey: apiKey)
     case "anthropic":
-      AnthropicMessagesBackend(apiKey: apiKey)
+      return AnthropicMessagesBackend(apiKey: apiKey)
     case "xai":
-      OpenAIResponsesBackend(
+      return OpenAIResponsesBackend(
         apiKey: apiKey,
         providerID: "xai",
         providerDisplayName: "xAI",
         endpoint: URL(string: "https://api.x.ai/v1/responses")!)
     case "moonshot":
-      OpenAIChatCompletionsBackend(
+      return OpenAIChatCompletionsBackend(
         apiKey: apiKey,
         providerID: "moonshot",
         providerDisplayName: "Moonshot",
         endpoint: URL(string: "https://api.moonshot.ai/v1/chat/completions")!)
+    case "local":
+      guard let rawURL = OttoEnvironment.value("MODEL_BASE_URL") else {
+        throw DirectRuntimeError.invalidArguments(
+          "Configure the local server URL in Otto Settings → Models.")
+      }
+      let config = try LocalModelConfiguration(baseURL: rawURL, modelID: "local-model")
+      return OpenAIChatCompletionsBackend(
+        apiKey: apiKey, providerID: "local", providerDisplayName: "Local model",
+        endpoint: config.completionsURL)
     default:
       throw DirectRuntimeError.invalidArguments("Unknown model backend: \(id)")
     }
@@ -194,6 +206,7 @@ private enum OttoOpenAIAgent {
     case "anthropic": "Anthropic"
     case "xai": "xAI"
     case "moonshot": "Moonshot"
+    case "local": "Local model"
     default: "OpenAI"
     }
   }
