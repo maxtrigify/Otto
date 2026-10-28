@@ -623,6 +623,19 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     return await withTaskGroup(of: [AgentModel].self) { group in
       for modelProvider in OttoHarnessProvider.allCases {
         group.addTask {
+          if modelProvider == .local {
+            guard let configuration = LocalModelConfiguration.load() else { return [] }
+            let storedKey = try? await credentialProvider(.local)
+            let configured = AgentModel(
+              id: OttoHarnessModelSelection.persistedID(
+                provider: .local, modelID: configuration.modelID),
+              displayName: "Local · \(configuration.modelID)")
+            let discovered =
+              await Self.discoverDirectModels(
+                provider: .local, apiKey: storedKey ?? "") ?? []
+            return discovered.contains(where: { $0.id == configured.id })
+              ? discovered : [configured] + discovered
+          }
           guard
             let key = try? await credentialProvider(modelProvider),
             !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -663,12 +676,15 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .anthropic: endpoint = URL(string: "https://api.anthropic.com/v1/models?limit=100")!
     case .xAI: endpoint = URL(string: "https://api.x.ai/v1/models")!
     case .moonshot: endpoint = URL(string: "https://api.moonshot.ai/v1/models")!
+    case .local:
+      guard let configuration = LocalModelConfiguration.load() else { return nil }
+      endpoint = configuration.modelsURL
     }
     var request = URLRequest(url: endpoint, timeoutInterval: 12)
     if provider == .anthropic {
       request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
       request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-    } else {
+    } else if !apiKey.isEmpty {
       request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     }
     guard let (data, response) = try? await session.data(for: request),
@@ -703,6 +719,7 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .anthropic: id.hasPrefix("claude-")
     case .xAI: id.hasPrefix("grok-4")
     case .moonshot: id.hasPrefix("kimi-")
+    case .local: !id.isEmpty && id.count <= 200 && !id.contains("\n")
     }
   }
 
@@ -718,10 +735,20 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     var apiKey = request.account?.harnessCredentials[selection.provider.credentialKey]
     if apiKey == nil { apiKey = try await credentialProvider(selection.provider) }
     apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let apiKey, !apiKey.isEmpty else {
+    guard selection.provider == .local || (apiKey?.isEmpty == false) else {
       throw RuntimeError.launchFailed(
         "\(selection.provider.displayName) API key is missing. Add it in Otto Settings → Models, then retry."
       )
+    }
+    let localConfiguration: LocalModelConfiguration?
+    if selection.provider == .local {
+      guard let configured = LocalModelConfiguration.load() else {
+        throw RuntimeError.launchFailed(
+          "Local server URL and model are missing. Configure them in Otto Settings → Models.")
+      }
+      localConfiguration = configured
+    } else {
+      localConfiguration = nil
     }
     var arguments: [String] = []
     if let prompt = request.prompt {
@@ -742,7 +769,10 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     return ProcessLaunchSpec(
       executable: path,
       arguments: arguments,
-      environment: ["OTTO_MODEL_API_KEY": apiKey],
+      environment: [
+        "OTTO_MODEL_API_KEY": apiKey ?? "",
+        "OTTO_MODEL_BASE_URL": localConfiguration?.baseURL.absoluteString ?? "",
+      ],
       workingDirectory: request.workspacePath
     )
   }

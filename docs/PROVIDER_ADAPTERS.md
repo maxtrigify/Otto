@@ -213,6 +213,33 @@ Grok Build TUI (`grok`), the xAI coding agent.
 - MCP: no launch flag. Servers come from `~/.grok/config.toml` or the workspace's `.grok/config.toml`. Otto writes only the project-level file and only its `otto` entry (Muse-written `[mcp_servers.muse]` tables are removed; a user-authored `muse` server is kept). Env values are `${VAR}` references expanded by Grok at load time from the process environment, so the file stays identical for every node and two Grok nodes cannot overwrite each other's scoped token. `tool_timeout_sec` is one hour because `agent.ask_user` and permission approvals block on a human answer.
 - Otto orchestration v1 still admits only Claude Code and Codex.
 
+## Local OpenAI-compatible model endpoint (Otto Harness)
+
+In **Otto → Settings → Models**, choose **Local (OpenAI compatible)**. Enter the
+API base URL and the exact model ID (e.g. Ollama
+`http://127.0.0.1:11434/v1` with model `qwen3:8b`; LM Studio
+`http://127.0.0.1:1234/v1`; vLLM
+`http://192.168.1.20:8000/v1`). Click **Save local endpoint and model**.
+If your server requires authentication, enter its key in the **Optional local
+server API key** field and click **Save securely**. No key is required for
+servers that accept unauthenticated requests. Choose the discovered or saved
+`Local · <model>` choice in an Otto Harness bot's model picker.
+
+The runtime sends OpenAI-compatible `POST /v1/chat/completions` requests with
+the model's ordinary `messages` and `tools` fields; model discovery reads
+`GET /v1/models`. Servers must support the Chat Completions response shape;
+tool-enabled Otto sessions also need function/tool calling support. The model
+ID and URL are stored in macOS application preferences, while any API key
+remains in Otto's secure credential store and is never written to a config file
+or command-line argument. Each agent process receives only its configured
+endpoint and its own credential.
+
+For HTTP, only localhost, loopback, private IPv4, and local network hosts are
+accepted. Use HTTPS for nonlocal endpoints and whenever sending a credential
+across an untrusted network. Never include a token in the URL; no key is sent
+when left blank. This provider is local/private-network **outbound** model
+access, not a public API endpoint exposed by Otto.
+
 ## Otto control context
 
 Scoped control values are injected only through the child environment: `OTTO_CONTROL_SOCKET`, `OTTO_CONTROL_TOKEN`, `OTTO_NODE_ID`, `OTTO_WORKSPACE_ID`, and `OTTO_MCP`. Tokens must never be included in provider arguments or diagnostic logs.

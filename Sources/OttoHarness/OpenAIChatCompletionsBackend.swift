@@ -32,7 +32,9 @@ public struct OpenAIChatCompletionsBackend: HarnessModelBackend {
     let messages = try requestMessages(for: request)
     var urlRequest = URLRequest(url: endpoint)
     urlRequest.httpMethod = "POST"
-    urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    if !apiKey.isEmpty {
+      urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    }
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
     urlRequest.httpBody = try requestBody(for: request, messages: messages)
     let (data, response) = try await session.data(for: urlRequest)

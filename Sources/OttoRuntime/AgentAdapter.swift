@@ -23,6 +23,7 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
   case anthropic = "anthropic"
   case xAI = "xai"
   case moonshot = "moonshot"
+  case local = "local"
 
   public var id: String { rawValue }
 
@@ -32,6 +33,7 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
     case .anthropic: "Anthropic"
     case .xAI: "xAI"
     case .moonshot: "Moonshot"
+    case .local: "Local (OpenAI compatible)"
     }
   }
 
@@ -41,6 +43,7 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
     case .anthropic: "anthropic.api-key"
     case .xAI: "xai.api-key"
     case .moonshot: "moonshot.api-key"
+    case .local: "local.openai.api-key"
     }
   }
 }
@@ -78,6 +81,7 @@ public struct OttoHarnessModelSelection: Equatable, Sendable {
     case .anthropic: "claude-sonnet-5"
     case .xAI: "grok-4.6"
     case .moonshot: "kimi-k2.5"
+    case .local: "local-model"
     }
   }
 }
@@ -171,6 +175,7 @@ public enum AgentModelCatalog {
       case .anthropic: ["low", "medium", "high", "max"]
       case .xAI: ["low", "medium", "high", "xhigh"]
       case .moonshot: []
+      case .local: []
       }
     default: []
     }
