@@ -23,7 +23,7 @@ struct ConnectorsSettingsView: View {
   var body: some View {
     VStack(spacing: 0) {
       HStack(spacing: 14) {
-        Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted")
+        Label(selected.label, systemImage: "point.3.connected.trianglepath.dotted")
           .font(.headline)
         Spacer()
         Picker("Connector", selection: $selected) {
@@ -63,16 +63,14 @@ private struct TelegramConnectionSettings: View {
 
   var body: some View {
     Form {
-      Section {
-        Label("Connectors", systemImage: "point.3.connected.trianglepath.dotted")
-          .font(.title3.weight(.semibold))
-        Text("Connect Otto to your messaging apps and route private requests to saved bots.")
-          .foregroundStyle(.secondary)
-      }
-
-      Section("Telegram") {
+      Section("Telegram bot") {
         Label(telegram.status, systemImage: "paperplane.circle")
           .accessibilityIdentifier("telegram-connector-status")
+        Text(
+          "Telegram replies work in the approved private chat only. Group messages, including ordinary 'Test' messages, are ignored until group access is explicitly supported and authorized."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
         if let username = telegram.username {
           LabeledContent("Telegram bot", value: "@\(username)")
         } else {

@@ -181,7 +181,25 @@ struct WorkspaceView: View {
       }
     }
     .sheet(isPresented: $showingConnectors) {
-      ConnectorsSettingsView(services: services)
+      VStack(spacing: 0) {
+        HStack {
+          Spacer()
+          Button("Done") {
+            showingConnectors = false
+          }
+          .keyboardShortcut(.cancelAction)
+          .accessibilityIdentifier("dismiss-connectors")
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 12)
+
+        Divider()
+
+        ConnectorsSettingsView(services: services)
+      }
+      .onExitCommand {
+        showingConnectors = false
+      }
     }
     .sheet(isPresented: $uiState.showsRoutineManager) {
       RoutineManagerView(store: store, services: services)
