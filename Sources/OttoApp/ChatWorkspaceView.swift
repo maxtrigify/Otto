@@ -3671,12 +3671,12 @@ struct ChatWorkspaceView: View {
         Task { await voice.toggleVoice() }
       } label: {
         HStack(spacing: 10) {
-          Image(systemName: voice.isMicrophoneActive ? "waveform" : "mic.slash.fill")
+          Image(systemName: voiceShowsListening ? "waveform" : "mic.slash.fill")
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(voice.isMicrophoneActive ? palette.ink : palette.muted)
+            .foregroundStyle(voiceShowsListening ? palette.ink : palette.muted)
             .frame(width: 24, height: 24)
             .background(
-              voice.isMicrophoneActive ? palette.signal : palette.raised,
+              voiceShowsListening ? palette.signal : palette.raised,
               in: Circle()
             )
           VStack(alignment: .leading, spacing: 1) {
@@ -3684,7 +3684,7 @@ struct ChatWorkspaceView: View {
               .font(.ottoDisplay(12.5).weight(.medium))
             Text(voiceStatusLabel)
               .font(.ottoDisplay(10.5))
-              .foregroundStyle(voice.isMicrophoneActive ? palette.signal : palette.muted)
+              .foregroundStyle(voiceShowsListening ? palette.signal : palette.muted)
           }
           Spacer(minLength: 0)
         }
@@ -3769,9 +3769,12 @@ struct ChatWorkspaceView: View {
     voice.operatingMode == .pushToTalk || voice.operatingMode == .outputOnly
   }
 
+  /// Lit from the moment a hold starts, so pressing the control gives instant feedback.
+  private var voiceShowsListening: Bool { voice.isMicrophoneActive || voice.isHoldingVoice }
+
   private var voiceStatusLabel: String {
     if voice.localTranscribing { return "Transcribing…" }
-    if voice.isMicrophoneActive {
+    if voiceShowsListening {
       return "Listening · \(voice.operatingMode.displayName)"
     }
     return voice.operatingMode.displayName

@@ -271,13 +271,14 @@ final class VoiceController: ObservableObject {
   private let whistleInstaller: WhistleInstaller
   private var dictation: DictationSession?
   private var dictationTask: Task<Void, Never>?
-  private var dictationListening = false
+  // Published so the voice control shows Listening while on-device capture runs.
+  @Published private var dictationListening = false
   private let dictationDraftStore = DictationDraftStore()
   private let captureLease = VoiceCaptureLease()
   private var captureOwner: String?
   private var command: LocalCommandSession?
   private var commandTask: Task<Void, Never>?
-  private var commandListening = false
+  @Published private var commandListening = false
   private let observability: ObservabilityStore?
   private let workspacePath: String
   /// Starts with the active workspace and fills in from a background scan, so launch never
