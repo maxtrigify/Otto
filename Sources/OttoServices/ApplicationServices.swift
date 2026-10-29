@@ -227,6 +227,7 @@ public final class ApplicationServices: ObservableObject {
   public var defaultWorkspacePath: String { workspacePath }
   public lazy var messaging = MessagingService(services: self)
   public lazy var telegram = TelegramConnector(services: self)
+  public lazy var smtp = SMTPConnector(workspacePath: defaultWorkspacePath)
   lazy var privatePhone = PrivatePhoneConnection()
   public lazy var websiteAccounts = WebsiteAccountService(
     workspacePath: workspacePath,
@@ -559,6 +560,8 @@ public final class ApplicationServices: ObservableObject {
       try await registerBotTools()
       try await registerWebsiteAccountTools()
       try await registerAppConnectionTools()
+      try await registerCalendarTools()
+      try await registerSMTPTools()
       await migrateLegacyBotNotesToBrain()
       try await registerRoutineTools()
       try await registerBriefTools()

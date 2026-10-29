@@ -112,6 +112,12 @@ public final class AppConnectionsStore: ObservableObject {
   public nonisolated static let readScope = "https://www.googleapis.com/auth/gmail.readonly"
   public nonisolated static let composeScope = "https://www.googleapis.com/auth/gmail.compose"
   public nonisolated static let sendScope = "https://www.googleapis.com/auth/gmail.send"
+  public nonisolated static let calendarReadScope =
+    "https://www.googleapis.com/auth/calendar.readonly"
+  public nonisolated static let calendarEventsScope =
+    "https://www.googleapis.com/auth/calendar.events"
+  public nonisolated static let gmailBaseURL = "https://gmail.googleapis.com/gmail/v1/users/me/"
+  public nonisolated static let calendarBaseURL = "https://www.googleapis.com/calendar/v3/"
   @Published public private(set) var accounts: [GmailConnection] = []
   @Published public private(set) var isConnecting = false
   @Published public private(set) var error: String?
@@ -172,7 +178,9 @@ public final class AppConnectionsStore: ObservableObject {
     googleClientID = id
   }
 
-  public func connect(allowSending: Bool = false, reconnecting accountID: UUID? = nil) async {
+  public func connect(
+    allowSending: Bool = false, allowCalendar: Bool = false, reconnecting accountID: UUID? = nil
+  ) async {
     guard !isConnecting else { return }
     guard disconnecting.isEmpty else {
       error = AppConnectionError.unavailable.localizedDescription
@@ -199,6 +207,7 @@ public final class AppConnectionsStore: ObservableObject {
       let clientID = googleClientID
       var scopes: Set<String> = [Self.readScope]
       if allowSending { scopes.formUnion([Self.composeScope, Self.sendScope]) }
+      if allowCalendar { scopes.formUnion([Self.calendarReadScope, Self.calendarEventsScope]) }
       let authorization = try await signIn.authorize(clientID: clientID, scopes: scopes)
       var fields = [
         "client_id": clientID, "grant_type": "authorization_code",
@@ -332,14 +341,15 @@ public final class AppConnectionsStore: ObservableObject {
 
   func request(
     account: GmailConnection, path: String, method: String = "GET",
-    query: [URLQueryItem] = [], body: JSONValue? = nil
+    query: [URLQueryItem] = [], body: JSONValue? = nil,
+    base: String = AppConnectionsStore.gmailBaseURL
   ) async throws -> JSONValue {
     let generation = generations[account.id, default: UUID()]
     generations[account.id] = generation
     do {
       let credential = try await freshCredential(account.id, generation: generation)
       try requireActive(account.id, generation: generation)
-      var url = URLComponents(string: "https://gmail.googleapis.com/gmail/v1/users/me/\(path)")!
+      var url = URLComponents(string: base + path)!
       url.queryItems = query.isEmpty ? nil : query
       var request = URLRequest(url: url.url!)
       request.httpMethod = method

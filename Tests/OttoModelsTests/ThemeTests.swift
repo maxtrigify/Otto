@@ -8,8 +8,8 @@ import Testing
 struct ThemeTests {
   @Test("Every installed theme satisfies text contrast invariants")
   func contrast() {
-    #expect(OttoThemeCatalog.all.count == 17)
-    #expect(Set(OttoThemeCatalog.all.map(\.id)).count == 17)
+    #expect(OttoThemeCatalog.all.count == 18)
+    #expect(Set(OttoThemeCatalog.all.map(\.id)).count == 18)
     for theme in OttoThemeCatalog.all {
       #expect(theme.paper.contrastRatio(with: theme.ink) >= 7)
       #expect(theme.muted.contrastRatio(with: theme.ink) >= 4.5)
@@ -258,17 +258,19 @@ struct ThemeTests {
     #expect(OttoMatteTransparency.resolve(preference: 2, themeDefault: 0.86) == 1.0)
   }
 
-  @Test("Catalog offers light-appearance landscape themes")
+  @Test("Catalog offers light-appearance themes, landscape and plain")
   func lightThemes() {
     let light = OttoThemeCatalog.all.filter(\.isLightAppearance)
     #expect(
       light.map(\.id).sorted()
-        == ["duneveil", "glasswing", "highfell", "mistfall", "silverbough"])
-    for theme in light {
+        == ["daylight", "duneveil", "glasswing", "highfell", "mistfall", "silverbough"])
+    for theme in light where theme.id != "daylight" {
       #expect(theme.backgroundAsset != nil)
       #expect(
         theme.resolvedSurfaceMaterial == .glassLight
           || theme.resolvedSurfaceMaterial == .windowGlass)
+    }
+    for theme in light {
       #expect(theme.ink.isLight)
       #expect(!theme.paper.isLight)
     }

@@ -136,7 +136,7 @@ extension ApplicationServices {
         return await self.appConnections.available(provider: provider, scope: O.scope)
       })
   }
-  private func sharedAppsProvider(_ context: ToolContext, writes: Bool = false) async
+  func sharedAppsProvider(_ context: ToolContext, writes: Bool = false) async
     -> AgentProvider?
   {
     // Identity is authenticated by the control grant; never route by a model-supplied provider.

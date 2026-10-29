@@ -9,12 +9,13 @@ struct ConnectorsSettingsView: View {
   @State private var selected: ConnectorDestination = .telegram
 
   private enum ConnectorDestination: String, CaseIterable, Identifiable {
-    case telegram, messaging, mobile
+    case telegram, messaging, email, mobile
     var id: Self { self }
     var label: String {
       switch self {
       case .telegram: "Telegram"
       case .messaging: "iMessage"
+      case .email: "Email"
       case .mobile: "Mobile"
       }
     }
@@ -52,6 +53,8 @@ struct ConnectorsSettingsView: View {
           TelegramConnectionSettings(telegram: services.telegram)
         case .messaging:
           MessagingSettingsView(messaging: services.messaging)
+        case .email:
+          SMTPConnectionSettings(smtp: services.smtp)
         case .mobile:
           MobileSettingsView(services: services)
         }
@@ -211,3 +214,96 @@ private struct TelegramConnectionSettings: View {
     .frame(minWidth: 610, minHeight: 560)
   }
 }
+
+/// SMTP sends mail on the user's behalf. The password is written to the Keychain and is
+/// never shown again once saved.
+private struct SMTPConnectionSettings: View {
+  let smtp: SMTPConnector
+  @State private var host = ""
+  @State private var port = "587"
+  @State private var username = ""
+  @State private var fromAddress = ""
+  @State private var useImplicitTLS = false
+  @State private var password = ""
+  @State private var status = ""
+  @State private var busy = false
+  @State private var isConfigured = false
+
+  var body: some View {
+    Form {
+      Section("Outgoing mail (SMTP)") {
+        Label(
+          isConfigured ? "Connected. Agents can send mail with smtp.send." : "Not connected",
+          systemImage: "envelope"
+        )
+        TextField("Server", text: $host)
+        TextField("Port", text: $port)
+        Toggle("Use implicit TLS (port 465)", isOn: $useImplicitTLS)
+        TextField("Username", text: $username)
+        TextField("From address", text: $fromAddress)
+        SecureField("Password or app password", text: $password)
+      }
+      Section {
+        HStack {
+          Button("Save") { Task { await save() } }
+            .disabled(busy || host.isEmpty || username.isEmpty || fromAddress.isEmpty || password.isEmpty)
+          if isConfigured {
+            Button("Disconnect", role: .destructive) { Task { await disconnect() } }
+              .disabled(busy)
+          }
+        }
+        if !status.isEmpty {
+          Text(status).font(.caption).foregroundStyle(.secondary)
+        }
+      }
+    }
+    .formStyle(.grouped)
+    .task { await load() }
+  }
+
+  private func load() async {
+    guard let config = await smtp.configuration else { return }
+    isConfigured = true
+    host = config.host
+    port = String(config.port)
+    username = config.username
+    fromAddress = config.fromAddress
+    useImplicitTLS = config.security == .tls
+  }
+
+  private func save() async {
+    busy = true
+    defer { busy = false }
+    guard let portNumber = Int(port) else {
+      status = "Port must be a number."
+      return
+    }
+    let config = SMTPConfiguration(
+      host: host.trimmingCharacters(in: .whitespaces),
+      port: portNumber,
+      username: username.trimmingCharacters(in: .whitespaces),
+      fromAddress: fromAddress.trimmingCharacters(in: .whitespaces),
+      security: useImplicitTLS ? .tls : .startTLS)
+    do {
+      try await smtp.save(config, password: password)
+      password = ""
+      isConfigured = true
+      status = "Saved. The password is stored in the Keychain."
+    } catch {
+      status = error.localizedDescription
+    }
+  }
+
+  private func disconnect() async {
+    busy = true
+    defer { busy = false }
+    do {
+      try await smtp.disconnect()
+      isConfigured = false
+      status = "Disconnected."
+    } catch {
+      status = error.localizedDescription
+    }
+  }
+}
+
