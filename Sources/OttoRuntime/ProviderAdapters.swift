@@ -522,6 +522,10 @@ public struct CodexAdapter: AgentAdapter {
     // agent.ask_user and permission approvals block on a human answer, so the otto server's
     // tool timeout must be hour-scale rather than Codex's default of about a minute.
     arguments += ["--config", "mcp_servers.otto.tool_timeout_sec=3600"]
+    // Otto confirms its own consequential tools (smtp.send, gmail.send, ...) through the in-chat
+    // permission card. Without this, non-interactive Codex runs refuse those calls outright
+    // ("requires approval, but approval policy is never") before Otto can ask.
+    arguments += ["--config", "mcp_servers.otto.default_tools_approval_mode=\"approve\""]
     // Codex spawns MCP servers with a whitelisted environment, so the parent process's OTTO_*
     // variables never reach the bridge unless they are configured explicitly per server.
     for key in request.controlEnvironment.keys.sorted() {

@@ -527,8 +527,11 @@ struct WorkspaceView: View {
     }
   }
 
-  /// The Home/Chat switch looks the same on every screen and theme.
-  private var surfacePickerPalette: OttoPalette { OttoPalette(theme: OttoThemeCatalog.aurora) }
+  /// The Home/Chat switch uses the active theme's own colours on light themes, and the dark
+  /// Aurora plate everywhere else, so it stays readable on both.
+  private var surfacePickerPalette: OttoPalette {
+    OttoPalette(theme: activeTheme.isLightAppearance ? activeTheme : OttoThemeCatalog.aurora)
+  }
 
   private var workspaceSurfacePicker: some View {
     // Segmented tabs after Fluid Functionalism: the selected plate slides on the moderate
@@ -566,7 +569,8 @@ struct WorkspaceView: View {
     .padding(2)
     .frame(height: 26)
     .background(
-      Color.black.opacity(0.55),
+      activeTheme.isLightAppearance
+        ? surfacePickerPalette.raised.opacity(0.9) : Color.black.opacity(0.55),
       in: RoundedRectangle(cornerRadius: 7, style: .continuous)
     )
     .accessibilityElement(children: .contain)

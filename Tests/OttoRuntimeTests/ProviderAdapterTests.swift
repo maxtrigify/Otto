@@ -1404,6 +1404,10 @@ struct ProviderAdapterTests {
     #expect(
       codexSpec.arguments.contains("mcp_servers.otto.env.OTTO_CONTROL_TOKEN=\"scoped-token\"")
     )
+    // Otto confirms its own tools, so Codex must not refuse them under approval policy "never".
+    #expect(
+      codexSpec.arguments.contains("mcp_servers.otto.default_tools_approval_mode=\"approve\"")
+    )
 
     let claudeStub = try stubProvider(named: "claude")
     defer { try? FileManager.default.removeItem(at: claudeStub.deletingLastPathComponent()) }

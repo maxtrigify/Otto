@@ -34,12 +34,16 @@ public enum SMTPError: Error, LocalizedError, Equatable {
   case notConfigured
   case invalidField(String)
   case sendFailed(String)
+  case checkFailed(String)
+  case saveFailed(String)
 
   public var errorDescription: String? {
     switch self {
     case .notConfigured: "SMTP is not set up. Add the server and password under Connectors."
     case .invalidField(let field): "\(field) is missing or contains line breaks."
     case .sendFailed(let detail): "SMTP send failed. \(detail)"
+    case .checkFailed(let detail): "Could not reach the mail server. \(detail)"
+    case .saveFailed(let detail): "Could not save SMTP settings. \(detail)"
     }
   }
 }
@@ -52,7 +56,9 @@ public actor SMTPConnector {
 
   public init(
     workspacePath: String,
-    secrets: any SecretStore = makeKeychainSecretStore(service: OttoSecretService.appConnections)
+    // Development builds use the same user-only secrets file as other dev connectors; release
+    // builds use the Keychain.
+    secrets: any SecretStore = makeDefaultSecretStore(service: OttoSecretService.appConnections)
   ) {
     fileURL = URL(fileURLWithPath: workspacePath).appending(path: ".otto/smtp.json")
     self.secrets = secrets
@@ -72,8 +78,17 @@ public actor SMTPConnector {
     guard !password.isEmpty, !password.contains(where: \.isNewline) else {
       throw SMTPError.invalidField("Password")
     }
-    try await secrets.set(password, for: passwordKey)
-    try WorkspaceJSONFile.save(configuration, to: fileURL, fileManager: .default)
+    do {
+      try await secrets.set(password, for: passwordKey)
+    } catch {
+      throw SMTPError.saveFailed("Password storage: \(error.localizedDescription)")
+    }
+    do {
+      try WorkspaceJSONFile.save(configuration, to: fileURL, fileManager: .default)
+    } catch {
+      throw SMTPError.saveFailed(
+        "Settings file \(fileURL.path): \(error.localizedDescription)")
+    }
     self.configuration = configuration
   }
 
@@ -81,6 +96,38 @@ public actor SMTPConnector {
     try await secrets.delete(passwordKey)
     try? FileManager.default.removeItem(at: fileURL)
     configuration = nil
+  }
+
+  /// Connects, authenticates and disconnects with the saved settings. No mail is sent.
+  public func testConnection() async throws {
+    guard let configuration else { throw SMTPError.notConfigured }
+    guard let password = try await secrets.value(for: passwordKey) else {
+      throw SMTPError.notConfigured
+    }
+    let directory = FileManager.default.temporaryDirectory.appending(
+      path: "otto-smtp-check-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(
+      at: directory, withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700])
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let configURL = directory.appending(path: "curl.conf")
+    let config = "user = \"\(configuration.username.escapedForCurlConfig):\(password.escapedForCurlConfig)\"\n"
+    try Data(config.utf8).write(to: configURL)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+
+    let scheme = configuration.security == .tls ? "smtps" : "smtp"
+    // NOOP makes curl log in and then ask the server to acknowledge, without sending mail.
+    var arguments = [
+      "--silent", "--show-error", "--max-time", "30",
+      "--config", configURL.path,
+      "--url", "\(scheme)://\(configuration.host):\(configuration.port)",
+      "--request", "NOOP",
+    ]
+    if configuration.security == .startTLS { arguments.append("--ssl-reqd") }
+    let result = try await Self.runCurl(arguments)
+    guard result.status == 0 else {
+      throw SMTPError.checkFailed(String(result.stderr.prefix(200)))
+    }
   }
 
   /// Sends one plain-text message. Callers must have obtained Otto's confirmation first.

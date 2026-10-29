@@ -31,7 +31,7 @@ struct ConnectorsSettingsView: View {
         Text("Connectors").font(.title2.weight(.semibold))
         Text("Connect the services Otto uses. Each one lists the Otto bots allowed to use it.")
           .font(.caption).foregroundStyle(.secondary)
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 14)], spacing: 14) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
           ForEach(ConnectorKind.allCases) { kind in
             Button {
               selected = kind
@@ -66,19 +66,22 @@ private struct ConnectorTile: View {
   let botCount: Int
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    HStack(spacing: 10) {
       Image(systemName: kind.symbol)
-        .font(.title2)
-        .frame(width: 44, height: 44)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-      Text(kind.title).font(.headline)
-      Text(botCount == 0 ? "No bots allowed" : "\(botCount) bot\(botCount == 1 ? "" : "s") allowed")
-        .font(.caption).foregroundStyle(.secondary)
+        .font(.system(size: 14))
+        .frame(width: 30, height: 30)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+      VStack(alignment: .leading, spacing: 1) {
+        Text(kind.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+        Text(botCount == 0 ? "No bots allowed" : "\(botCount) bot\(botCount == 1 ? "" : "s") allowed")
+          .font(.caption2).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 0)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(14)
-    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary))
+    .padding(.horizontal, 10)
+    .padding(.vertical, 8)
+    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 9))
+    .overlay(RoundedRectangle(cornerRadius: 9).stroke(.quaternary))
   }
 }
 
@@ -349,6 +352,7 @@ private struct SMTPConnectionSettings: View {
   @State private var password = ""
   @State private var status = ""
   @State private var busy = false
+  @State private var testing = false
   @State private var isConfigured = false
 
   var body: some View {
@@ -370,6 +374,9 @@ private struct SMTPConnectionSettings: View {
           Button("Save") { Task { await save() } }
             .disabled(busy || host.isEmpty || username.isEmpty || fromAddress.isEmpty || password.isEmpty)
           if isConfigured {
+            Button("Test connection") { Task { await test() } }
+              .disabled(testing || busy)
+              .accessibilityIdentifier("smtp-test-connection")
             Button("Disconnect", role: .destructive) { Task { await disconnect() } }
               .disabled(busy)
           }
@@ -411,6 +418,17 @@ private struct SMTPConnectionSettings: View {
       password = ""
       isConfigured = true
       status = "Saved. The password is stored in the Keychain."
+    } catch {
+      status = error.localizedDescription
+    }
+  }
+
+  private func test() async {
+    testing = true
+    defer { testing = false }
+    do {
+      try await smtp.testConnection()
+      status = "Connected. The server accepted the login. No mail was sent."
     } catch {
       status = error.localizedDescription
     }
