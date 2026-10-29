@@ -91,4 +91,43 @@ struct TelegramConnectorTests {
       _ = try TelegramBotTransport(token: "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567")
     }
   }
+
+  @Test("A voice note is read as a recording only when the message has no text")
+  func voiceNotes() throws {
+    let voice = """
+      {"message_id":7,"chat":{"id":123,"type":"private"},"from":{"id":123,"is_bot":false},
+       "voice":{"file_id":"AwACAgQ","file_unique_id":"x","duration":23,"mime_type":"audio/ogg",
+       "file_size":41000},"caption":"for the release"}
+      """
+    let message = try JSONDecoder().decode(TelegramIncomingMessage.self, from: Data(voice.utf8))
+    #expect(message.recording?.fileID == "AwACAgQ")
+    #expect(message.recording?.duration == 23)
+    #expect(message.caption == "for the release")
+    let texted = voice.replacingOccurrences(of: #""caption""#, with: #""text""#)
+    let withText = try JSONDecoder().decode(
+      TelegramIncomingMessage.self, from: Data(texted.utf8))
+    #expect(withText.recording == nil)
+  }
+
+  @Test("Approval taps carry a one-time token, never the request itself")
+  func approvalButtons() throws {
+    let token = TelegramApprovalAnswer.makeToken()
+    #expect(token.count == 16)
+    #expect(TelegramApprovalAnswer.parse("ok:\(token)") == .approve(token))
+    #expect(TelegramApprovalAnswer.parse("no:\(token)") == .deny(token))
+    #expect(TelegramApprovalAnswer.parse("ok:\(token.uppercased())") == nil)
+    #expect(TelegramApprovalAnswer.parse("ok:short") == nil)
+    #expect(TelegramApprovalAnswer.parse("yes:\(token)") == nil)
+    #expect(TelegramApprovalAnswer.parse(nil) == nil)
+
+    let update = """
+      {"update_id":9,"callback_query":{"id":"cb1","from":{"id":123,"is_bot":false},
+       "message":{"message_id":44,"chat":{"id":123,"type":"private"}},"data":"ok:\(token)"}}
+      """
+    let decoded = try JSONDecoder().decode(TelegramUpdate.self, from: Data(update.utf8))
+    #expect(decoded.message == nil)
+    #expect(decoded.callbackQuery?.from.id == 123)
+    #expect(decoded.callbackQuery?.message?.messageID == 44)
+    #expect(TelegramApprovalAnswer.parse(decoded.callbackQuery?.data) == .approve(token))
+  }
 }

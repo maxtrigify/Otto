@@ -326,7 +326,22 @@ private struct TelegramConnectionSettings: View {
           )
           .font(.caption).foregroundStyle(.secondary)
           Text(
-            "Telegram is not an approval channel. Permission prompts and sensitive actions must be reviewed in Otto on the Mac."
+            "Voice notes from the paired chat are transcribed on this Mac with the engine chosen in Voice settings, then sent to the bot as text."
+          )
+          .font(.caption).foregroundStyle(.secondary)
+        }
+        Section("Approvals") {
+          Toggle(
+            "Answer tool approvals from Telegram",
+            isOn: Binding(
+              get: { telegram.approvalsFromTelegram },
+              set: { telegram.setApprovalsFromTelegram($0) })
+          )
+          .accessibilityIdentifier("telegram-approvals")
+          Text(
+            telegram.approvalsFromTelegram
+              ? "When a bot you messaged from Telegram needs approval, the request (for an email, its recipient, subject and text) arrives with Approve and Deny buttons. Only the paired person's taps count, each button works once for that exact request, and the Mac can still answer it."
+              : "Off: approvals stay in Otto on the Mac, and Telegram only says that a bot is waiting. Once this is on, anyone holding your unlocked phone with Telegram open could approve actions."
           )
           .font(.caption).foregroundStyle(.secondary)
         }

@@ -485,6 +485,14 @@ final class VoiceController: ObservableObject {
         self.publishVoiceContext(snapshot: snapshot, canvas: canvas)
       }
     }
+    // Telegram voice notes are transcribed here, on the engine chosen in Voice settings first.
+    services.telegram.transcribeRecording = { url in
+      let chosen = UserDefaults.standard.string(forKey: "otto.voice.localSpeechEngine")
+      return try await AudioFileTranscription.transcribe(
+        url,
+        preferring: chosen.flatMap(AudioFileTranscriptionEngine.init(rawValue:)).map { [$0] }
+          ?? [])
+    }
   }
 
   private func publishVoiceContext(snapshot: WorkspaceSnapshot, canvas: OttoCanvas) {
