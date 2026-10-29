@@ -485,7 +485,9 @@ struct WorkspaceView: View {
         )
         showingHireBot = true
       },
-      quickLaunchAgent: quickLaunchAgentForChat
+      quickLaunchAgent: { provider, folder in
+        await quickLaunchAgentForChat(provider, workingDirectory: folder)
+      }
     )
     .environment(\.ottoWindowIsActive, scenePhase == .active && windowIsVisible)
     .ignoresSafeArea(.container, edges: .top)
@@ -722,7 +724,9 @@ struct WorkspaceView: View {
     Task { _ = await quickLaunchAgentForChat(provider) }
   }
 
-  private func quickLaunchAgentForChat(_ provider: AgentProvider) async -> UUID? {
+  private func quickLaunchAgentForChat(
+    _ provider: AgentProvider, workingDirectory: String? = nil
+  ) async -> UUID? {
     let point = nextPlacementPoint()
     let key =
       switch provider {
@@ -742,6 +746,7 @@ struct WorkspaceView: View {
       ?? .workspaceWrite
     return try? await services.spawnAgent(
       provider: provider,
+      workingDirectory: workingDirectory,
       at: point,
       permissionMode: mode
     ).agentID

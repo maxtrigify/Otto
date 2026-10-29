@@ -73,7 +73,8 @@ struct ChatWorkspaceView: View {
   @State private var notificationVisibilityID = UUID()
   @Binding var navigation: ChatSurfaceNavigationState
   let launchAgent: () -> Void
-  var quickLaunchAgent: (AgentProvider) async -> UUID? = { _ in nil }
+  /// Starts a session for a provider, in the given folder when it is not nil.
+  var quickLaunchAgent: (AgentProvider, String?) async -> UUID? = { _, _ in nil }
 
   @State private var showingProjectContext = false
   @State private var showingCreateProject = false
@@ -987,8 +988,11 @@ struct ChatWorkspaceView: View {
               showingSessionCreator = false
               sidebarList = .sessions
               let projectID = newSessionProjectID
+              // A project with a source folder runs its sessions there, so the repository's own
+              // agent setup (AGENTS.md, CLAUDE.md, skills, Buildline) applies.
+              let folder = services.conversationProjects.workingFolder(projectID: projectID)
               Task {
-                guard let agentID = await quickLaunchAgent(provider) else { return }
+                guard let agentID = await quickLaunchAgent(provider, folder) else { return }
                 do { try services.selectProject(channelID: agentID, projectID: projectID) } catch {
                   projectContextError = error.localizedDescription
                 }
@@ -1399,7 +1403,7 @@ struct ChatWorkspaceView: View {
     } else {
       switch target {
       case .provider(let provider):
-        guard let launched = await quickLaunchAgent(provider) else {
+        guard let launched = await quickLaunchAgent(provider, nil) else {
           throw NSError(
             domain: "Otto", code: 1,
             userInfo: [

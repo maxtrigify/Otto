@@ -491,4 +491,26 @@ extension ConversationProjectTests {
     #expect(restored.context(channelID: old).projectID == nil)
     #expect(restored.context(channelID: fresh).projectID == legacy.id)
   }
+
+  @Test("New sessions in a project start in its first existing source folder")
+  func sessionsStartInProjectFolder() throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let first = root.appending(path: "app")
+    let second = root.appending(path: "docs")
+    for folder in [first, second] {
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    }
+    let store = ConversationProjectStore(workspacePath: root.path)
+    let code = try store.create(name: "Code", sourceFolders: [first.path, second.path])
+    let writing = try store.create(name: "Writing")
+
+    #expect(store.workingFolder(projectID: code.id) == first.resolvingSymlinksInPath().path)
+    // A folder removed after the project was created is skipped, not handed to the agent.
+    try FileManager.default.removeItem(at: first)
+    #expect(store.workingFolder(projectID: code.id) == second.resolvingSymlinksInPath().path)
+    #expect(store.workingFolder(projectID: writing.id) == nil)
+    #expect(store.workingFolder(projectID: nil) == nil)
+    #expect(store.workingFolder(projectID: UUID()) == nil)
+  }
 }
