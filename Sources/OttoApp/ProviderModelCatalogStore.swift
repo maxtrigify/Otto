@@ -96,12 +96,14 @@ final class ProviderModelCatalogStore: ObservableObject {
     // Configuration is stored independently of network discovery, which can
     // be slow, stale, or unavailable when the local server is offline. Always
     // expose the explicitly saved model in every bot picker immediately.
-    let model = AgentModel(
-      id: OttoHarnessModelSelection.persistedID(provider: .local, modelID: local.modelID),
-      displayName: "Local · \(local.modelID)")
     var models = discovered ?? []
-    if !models.contains(where: { $0.id == model.id }) {
-      models.insert(model, at: 0)
+    for (index, modelID) in local.modelIDs.enumerated() {
+      let model = AgentModel(
+        id: OttoHarnessModelSelection.persistedID(provider: .local, modelID: modelID),
+        displayName: "Local · \(modelID)")
+      if !models.contains(where: { $0.id == model.id }) {
+        models.insert(model, at: min(index, models.count))
+      }
     }
     return models
   }

@@ -49,6 +49,18 @@ struct ProviderModelCatalogTests {
       ProviderModelCatalogStore.withConfiguredLocalModel(
         nil, provider: .codex, configuration: config) == nil)
   }
+
+  @Test("Every saved local model appears in the picker, the default first")
+  @MainActor
+  func severalLocalModelsAreVisible() throws {
+    let config = try LocalModelConfiguration(
+      baseURL: "http://gillai:4000/v1", modelID: "qwen3.8-flash",
+      additionalModelIDs: ["gpt-oss-20b"])
+    let existing = [AgentModel(id: "openai/gpt-5.6", displayName: "GPT")]
+    let models = ProviderModelCatalogStore.withConfiguredLocalModel(
+      existing, provider: .openAI, configuration: config)
+    #expect(models?.map(\.id) == ["local/qwen3.8-flash", "local/gpt-oss-20b", "openai/gpt-5.6"])
+  }
 }
 
 @Suite("Account catalog isolation")

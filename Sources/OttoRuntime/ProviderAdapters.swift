@@ -626,15 +626,16 @@ public struct OpenAIDirectAdapter: AgentAdapter {
           if modelProvider == .local {
             guard let configuration = LocalModelConfiguration.load() else { return [] }
             let storedKey = try? await credentialProvider(.local)
-            let configured = AgentModel(
-              id: OttoHarnessModelSelection.persistedID(
-                provider: .local, modelID: configuration.modelID),
-              displayName: "Local · \(configuration.modelID)")
+            let configured = configuration.modelIDs.map {
+              AgentModel(
+                id: OttoHarnessModelSelection.persistedID(provider: .local, modelID: $0),
+                displayName: "Local · \($0)")
+            }
             let discovered =
               await Self.discoverDirectModels(
                 provider: .local, apiKey: storedKey ?? "") ?? []
-            return discovered.contains(where: { $0.id == configured.id })
-              ? discovered : [configured] + discovered
+            return configured.filter { model in !discovered.contains { $0.id == model.id } }
+              + discovered
           }
           guard
             let key = try? await credentialProvider(modelProvider),
@@ -665,9 +666,11 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     }
   }
 
-  static func discoverDirectModels(
+  /// `local` lets Settings list a server's models before its address is saved.
+  public static func discoverDirectModels(
     provider: OttoHarnessProvider,
     apiKey: String,
+    local: LocalModelConfiguration? = nil,
     session: URLSession = .shared
   ) async -> [AgentModel]? {
     let endpoint: URL
@@ -677,7 +680,7 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .xAI: endpoint = URL(string: "https://api.x.ai/v1/models")!
     case .moonshot: endpoint = URL(string: "https://api.moonshot.ai/v1/models")!
     case .local:
-      guard let configuration = LocalModelConfiguration.load() else { return nil }
+      guard let configuration = local ?? LocalModelConfiguration.load() else { return nil }
       endpoint = configuration.modelsURL
     }
     var request = URLRequest(url: endpoint, timeoutInterval: 12)
