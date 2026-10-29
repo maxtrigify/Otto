@@ -181,12 +181,6 @@ private enum OttoOpenAIAgent {
         providerID: "xai",
         providerDisplayName: "xAI",
         endpoint: URL(string: "https://api.x.ai/v1/responses")!)
-    case "moonshot":
-      return OpenAIChatCompletionsBackend(
-        apiKey: apiKey,
-        providerID: "moonshot",
-        providerDisplayName: "Moonshot",
-        endpoint: URL(string: "https://api.moonshot.ai/v1/chat/completions")!)
     case "local":
       guard let rawURL = OttoEnvironment.value("MODEL_BASE_URL") else {
         throw DirectRuntimeError.invalidArguments(
@@ -197,7 +191,13 @@ private enum OttoOpenAIAgent {
         apiKey: apiKey, providerID: "local", providerDisplayName: "Local model",
         endpoint: config.completionsURL)
     default:
-      throw DirectRuntimeError.invalidArguments("Unknown model backend: \(id)")
+      // Moonshot, DeepSeek, Mistral, Groq, Gemini and OpenRouter share one compatible API.
+      guard let vendor = OttoHarnessCompatibleVendor(rawValue: id) else {
+        throw DirectRuntimeError.invalidArguments("Unknown model backend: \(id)")
+      }
+      return OpenAIChatCompletionsBackend(
+        apiKey: apiKey, providerID: id, providerDisplayName: vendor.displayName,
+        endpoint: vendor.chatCompletionsURL)
     }
   }
 
@@ -205,9 +205,8 @@ private enum OttoOpenAIAgent {
     switch id {
     case "anthropic": "Anthropic"
     case "xai": "xAI"
-    case "moonshot": "Moonshot"
     case "local": "Local model"
-    default: "OpenAI"
+    default: OttoHarnessCompatibleVendor(rawValue: id)?.displayName ?? "OpenAI"
     }
   }
 

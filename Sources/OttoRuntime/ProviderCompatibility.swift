@@ -39,7 +39,8 @@ public enum ProviderCompatibilityPolicy {
     if provider == .openAI {
       return ProviderCompatibilityResult(
         state: .supported,
-        detail: "Uses Otto's owned harness with direct OpenAI, Anthropic, xAI, or Moonshot models."
+        detail:
+          "Uses Otto's owned harness with OpenAI, Anthropic, xAI, Moonshot, DeepSeek, Mistral, Groq, Google Gemini, OpenRouter or local models."
       )
     }
     if provider == .hermes {

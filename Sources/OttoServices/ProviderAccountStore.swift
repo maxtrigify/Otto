@@ -143,7 +143,7 @@ public final class ProviderAccountStore: ObservableObject {
     return await hasSecret(account.apiKeyCredentialKey(for: provider))
   }
 
-  /// Otto Harness backends (OpenAI, Anthropic, xAI, Moonshot) are keyed by their base
+  /// Otto Harness backends (OpenAI, Anthropic, xAI, Moonshot, DeepSeek, ...) are keyed by their base
   /// credential key, e.g. `openai.api-key`.
   public func setHarnessKey(_ value: String?, accountID: UUID, credentialKey: String) async throws {
     guard let account = account(id: accountID) else {
@@ -385,9 +385,9 @@ public final class ProviderAccountStore: ObservableObject {
 
   // MARK: - Private
 
-  public static let harnessCredentialKeys = [
-    "openai.api-key", "anthropic.api-key", "xai.api-key", "moonshot.api-key",
-  ]
+  /// Every Otto Harness backend key except the local server's, which is Mac-wide only.
+  public static let harnessCredentialKeys = OttoHarnessProvider.allCases
+    .filter { $0 != .local }.map(\.credentialKey)
 
   private func validatedName(_ raw: String, excluding id: UUID? = nil) throws -> String {
     let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)

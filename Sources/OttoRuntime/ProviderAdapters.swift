@@ -686,7 +686,9 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .openAI: endpoint = URL(string: "https://api.openai.com/v1/models")!
     case .anthropic: endpoint = URL(string: "https://api.anthropic.com/v1/models?limit=100")!
     case .xAI: endpoint = URL(string: "https://api.x.ai/v1/models")!
-    case .moonshot: endpoint = URL(string: "https://api.moonshot.ai/v1/models")!
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter:
+      guard let vendor = provider.compatibleVendor else { return nil }
+      endpoint = vendor.modelsURL
     case .local:
       guard let configuration = LocalModelConfiguration.load() else { return nil }
       endpoint = configuration.modelsURL
@@ -712,8 +714,9 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     else { return [] }
     var seen = Set<String>()
     return rows.compactMap { row in
-      guard let id = row["id"] as? String, Self.isConversationalModel(id, provider: provider),
-        seen.insert(id).inserted
+      guard let listed = row["id"] as? String else { return nil }
+      let id = provider.compatibleVendor?.modelID(fromListedID: listed) ?? listed
+      guard Self.isConversationalModel(id, provider: provider), seen.insert(id).inserted
       else { return nil }
       let providerName = provider.displayName
       let suppliedName = row["display_name"] as? String
@@ -729,7 +732,8 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .openAI: id.hasPrefix("gpt-5")
     case .anthropic: id.hasPrefix("claude-")
     case .xAI: id.hasPrefix("grok-4")
-    case .moonshot: id.hasPrefix("kimi-")
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter:
+      provider.compatibleVendor?.isConversationalModel(id) ?? false
     case .local: !id.isEmpty && id.count <= 200 && !id.contains("\n")
     }
   }

@@ -23,16 +23,27 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
   case anthropic = "anthropic"
   case xAI = "xai"
   case moonshot = "moonshot"
+  case deepSeek = "deepseek"
+  case mistral = "mistral"
+  case groq = "groq"
+  case gemini = "gemini"
+  case openRouter = "openrouter"
   case local = "local"
 
   public var id: String { rawValue }
+
+  /// The OpenAI-compatible endpoint table entry, for vendors reached through chat completions.
+  public var compatibleVendor: OttoHarnessCompatibleVendor? {
+    OttoHarnessCompatibleVendor(rawValue: rawValue)
+  }
 
   public var displayName: String {
     switch self {
     case .openAI: "OpenAI"
     case .anthropic: "Anthropic"
     case .xAI: "xAI"
-    case .moonshot: "Moonshot"
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter:
+      compatibleVendor?.displayName ?? rawValue
     case .local: "Local (OpenAI compatible)"
     }
   }
@@ -42,7 +53,7 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
     case .openAI: "openai.api-key"
     case .anthropic: "anthropic.api-key"
     case .xAI: "xai.api-key"
-    case .moonshot: "moonshot.api-key"
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter: "\(rawValue).api-key"
     case .local: "local.openai.api-key"
     }
   }
@@ -81,6 +92,11 @@ public struct OttoHarnessModelSelection: Equatable, Sendable {
     case .anthropic: "claude-sonnet-5"
     case .xAI: "grok-4.6"
     case .moonshot: "kimi-k2.5"
+    case .deepSeek: "deepseek-chat"
+    case .mistral: "mistral-large-latest"
+    case .groq: "llama-3.3-70b-versatile"
+    case .gemini: "gemini-flash-latest"
+    case .openRouter: "openrouter/auto"
     case .local: "local-model"
     }
   }
@@ -133,6 +149,12 @@ public enum AgentModelCatalog {
         AgentModel(id: "xai/grok-4.6", displayName: "xAI · Grok 4.6"),
         AgentModel(id: "xai/grok-4.5", displayName: "xAI · Grok 4.5"),
         AgentModel(id: "moonshot/kimi-k2.5", displayName: "Moonshot · Kimi K2.5"),
+        AgentModel(id: "deepseek/deepseek-chat", displayName: "DeepSeek · DeepSeek Chat"),
+        AgentModel(id: "deepseek/deepseek-reasoner", displayName: "DeepSeek · DeepSeek Reasoner"),
+        AgentModel(id: "mistral/mistral-large-latest", displayName: "Mistral · Mistral Large"),
+        AgentModel(id: "groq/llama-3.3-70b-versatile", displayName: "Groq · Llama 3.3 70B"),
+        AgentModel(id: "gemini/gemini-flash-latest", displayName: "Google Gemini · Flash"),
+        AgentModel(id: "openrouter/openrouter/auto", displayName: "OpenRouter · Auto"),
       ]
     case .cursor:
       // Cursor's real catalog is account-specific and read from `cursor-agent models`; this is
@@ -178,8 +200,7 @@ public enum AgentModelCatalog {
       case .openAI: ["none", "low", "medium", "high", "xhigh", "max"]
       case .anthropic: ["low", "medium", "high", "max"]
       case .xAI: ["low", "medium", "high", "xhigh"]
-      case .moonshot: []
-      case .local: []
+      case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter, .local: []
       }
     default: []
     }

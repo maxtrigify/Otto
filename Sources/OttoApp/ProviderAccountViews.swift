@@ -390,10 +390,8 @@ private struct ProviderAccountSection: View {
   private static let providers: [AgentProvider] = [
     .claudeCode, .codex, .grok, .kimi, .cursor, .openCode, .pi, .hermes,
   ]
-  private static let harnessBackends: [(key: String, name: String)] = [
-    ("openai.api-key", "OpenAI"), ("anthropic.api-key", "Anthropic"), ("xai.api-key", "xAI"),
-    ("moonshot.api-key", "Moonshot"),
-  ]
+  private static let harnessBackends: [(key: String, name: String)] = OttoHarnessProvider.allCases
+    .filter { $0 != .local }.map { ($0.credentialKey, $0.displayName) }
 
   var body: some View {
     Section {
