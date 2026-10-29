@@ -70,7 +70,8 @@ struct SMTPConnectorTests {
     #expect(await connector.isConfigured == false)
     try await connector.save(configuration, password: "s3cret")
     #expect(await connector.isConfigured)
-    #expect(await SMTPConnector(workspacePath: path, secrets: secrets).configuration == configuration)
+    #expect(
+      await SMTPConnector(workspacePath: path, secrets: secrets).configuration == configuration)
     try await connector.disconnect()
     #expect(await connector.isConfigured == false)
     #expect(await SMTPConnector(workspacePath: path, secrets: secrets).configuration == nil)
@@ -89,6 +90,27 @@ struct SMTPConnectorTests {
     let connector = SMTPConnector(workspacePath: workspace(), secrets: InMemorySecretStore())
     await #expect(throws: SMTPError.notConfigured) {
       try await connector.send(to: "amy@example.com", subject: "Hi", body: "x")
+    }
+  }
+
+  @Test("Server and sender must be plain values before they reach curl")
+  func hostAndSenderValidation() {
+    #expect(SMTPConnector.isHostName("smtp.example.com"))
+    #expect(SMTPConnector.isHostName("192.168.1.10"))
+    #expect(!SMTPConnector.isHostName("smtp.example.com/evil"))
+    #expect(!SMTPConnector.isHostName("smtp example.com"))
+    #expect(!SMTPConnector.isHostName("-smtp.example.com"))
+    #expect(throws: SMTPError.invalidField("Host")) {
+      try SMTPConnector.validate(
+        SMTPConfiguration(
+          host: "a.com/x", port: 465, username: "u", fromAddress: "f@example.com",
+          security: .tls))
+    }
+    #expect(throws: SMTPError.invalidField("From address")) {
+      try SMTPConnector.validate(
+        SMTPConfiguration(
+          host: "smtp.example.com", port: 465, username: "u", fromAddress: "Me <f@example.com>",
+          security: .tls))
     }
   }
 }

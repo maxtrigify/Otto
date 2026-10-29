@@ -100,4 +100,38 @@ struct CalendarToolsTests {
         field: "description", required: false)
     }
   }
+
+  @Test("A range must start before it ends")
+  func rangeOrder() throws {
+    let (start, end) = try CalendarValidation.range(
+      start: "2026-10-29T09:00:00Z", end: "2026-10-29T10:00:00Z", names: ("start", "end"))
+    #expect(start == "2026-10-29T09:00:00Z" && end == "2026-10-29T10:00:00Z")
+    #expect(throws: ToolRegistryError.self) {
+      try CalendarValidation.range(
+        start: "2026-10-29T10:00:00Z", end: "2026-10-29T09:00:00Z", names: ("start", "end"))
+    }
+  }
+
+  @Test("Event lists keep only the fields an agent needs")
+  func compactEvents() throws {
+    let response = try JSONDecoder().decode(
+      JSONValue.self,
+      from: Data(
+        """
+        {"items": [{"id": "e1", "summary": "Standup", "status": "confirmed",
+          "start": {"dateTime": "2026-10-29T09:00:00Z"}, "end": {"date": "2026-10-30"},
+          "attendees": [{"email": "a@example.com"}, {"email": "b@example.com"}],
+          "conferenceData": {"entryPoints": []}}],
+         "nextPageToken": "next"}
+        """.utf8))
+    let compact = CalendarEventCodec.compactList(response)
+    let event = try #require(compact["events"]?.arrayValue?.first)
+    #expect(event["summary"]?.stringValue == "Standup")
+    #expect(event["start"]?.stringValue == "2026-10-29T09:00:00Z")
+    #expect(event["end"]?.stringValue == "2026-10-30")
+    #expect(event["attendeeCount"] == .number(2))
+    #expect(event["conferenceData"] == nil)
+    #expect(event["attendees"] == nil)
+    #expect(compact["nextPageToken"]?.stringValue == "next")
+  }
 }

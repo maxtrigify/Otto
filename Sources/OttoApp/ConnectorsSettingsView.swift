@@ -36,7 +36,9 @@ struct ConnectorsSettingsView: View {
             Button {
               selected = kind
             } label: {
-              ConnectorTile(kind: kind, botCount: access.bots(for: kind).count)
+              ConnectorTile(
+                kind: kind, botCount: access.bots(for: kind).count,
+                restricted: access.isRestricted(kind))
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("connector-tile-\(kind.rawValue)")
@@ -48,8 +50,8 @@ struct ConnectorsSettingsView: View {
   }
 }
 
-private extension ConnectorKind {
-  var symbol: String {
+extension ConnectorKind {
+  fileprivate var symbol: String {
     switch self {
     case .telegram: "paperplane.fill"
     case .iMessage: "message.fill"
@@ -64,6 +66,12 @@ private extension ConnectorKind {
 private struct ConnectorTile: View {
   let kind: ConnectorKind
   let botCount: Int
+  let restricted: Bool
+
+  private var accessSummary: String {
+    guard restricted else { return "All bots" }
+    return botCount == 0 ? "No bots allowed" : "\(botCount) bot\(botCount == 1 ? "" : "s") allowed"
+  }
 
   var body: some View {
     HStack(spacing: 10) {
@@ -73,8 +81,7 @@ private struct ConnectorTile: View {
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
       VStack(alignment: .leading, spacing: 1) {
         Text(kind.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-        Text(botCount == 0 ? "No bots allowed" : "\(botCount) bot\(botCount == 1 ? "" : "s") allowed")
-          .font(.caption2).foregroundStyle(.secondary)
+        Text(accessSummary).font(.caption2).foregroundStyle(.secondary)
       }
       Spacer(minLength: 0)
     }
@@ -110,7 +117,7 @@ private struct ConnectorDetail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
       Divider()
       BotAccessSection(kind: kind, services: services, access: access)
-        .frame(height: 250)
+        .frame(height: 200)
     }
   }
 
@@ -123,7 +130,7 @@ private struct ConnectorDetail: View {
     case .mobile:
       MobileSettingsView(services: services)
     case .gmail:
-      AppConnectionsView(connections: services.appConnections, onClose: onBack)
+      AppConnectionsView(connections: services.appConnections, embedded: true)
     case .calendar:
       CalendarConnectionSettings(connections: services.appConnections)
     case .email:
@@ -150,7 +157,7 @@ private struct BotAccessSection: View {
         Text("Create a bot in Chat → Bots first.").foregroundStyle(.secondary)
       } else {
         List(bots) { bot in
-          Toggle(isOn: binding(for: bot)) {
+          Toggle(isOn: binding(for: bot, everyBot: Set(bots.map(\.id)))) {
             VStack(alignment: .leading, spacing: 2) {
               Text(bot.name)
               Text("@\(bot.handle)").font(.caption).foregroundStyle(.secondary)
@@ -162,18 +169,22 @@ private struct BotAccessSection: View {
       if let error {
         Text(error).font(.caption).foregroundStyle(.red)
       }
-      Text("A bot only reaches \(kind.title) when it is ticked here.")
-        .font(.caption).foregroundStyle(.secondary)
+      Text(
+        access.isRestricted(kind)
+          ? "A bot only reaches \(kind.title) when it is ticked here."
+          : "Every bot can use \(kind.title) until you untick one."
+      )
+      .font(.caption).foregroundStyle(.secondary)
     }
     .padding(28)
   }
 
-  private func binding(for bot: AgentProfile) -> Binding<Bool> {
+  private func binding(for bot: AgentProfile, everyBot: Set<UUID>) -> Binding<Bool> {
     Binding(
       get: { access.canUse(kind, profileID: bot.id) },
       set: { allowed in
         do {
-          try access.setAllowed(allowed, profileID: bot.id, for: kind)
+          try access.setAllowed(allowed, profileID: bot.id, for: kind, everyBot: everyBot)
           error = nil
         } catch {
           self.error = error.localizedDescription
@@ -336,7 +347,8 @@ private struct TelegramConnectionSettings: View {
 
     }
     .formStyle(.grouped)
-    .frame(minWidth: 610, minHeight: 560)
+    // Fill the connector page; a fixed minimum height overflows it and hides the back button.
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }
 
@@ -372,7 +384,8 @@ private struct SMTPConnectionSettings: View {
       Section {
         HStack {
           Button("Save") { Task { await save() } }
-            .disabled(busy || host.isEmpty || username.isEmpty || fromAddress.isEmpty || password.isEmpty)
+            .disabled(
+              busy || host.isEmpty || username.isEmpty || fromAddress.isEmpty || password.isEmpty)
           if isConfigured {
             Button("Test connection") { Task { await test() } }
               .disabled(testing || busy)
@@ -446,4 +459,3 @@ private struct SMTPConnectionSettings: View {
     }
   }
 }
-

@@ -146,7 +146,8 @@ struct MessagingSettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .frame(width: 620, height: 650)
+    // Connectors hosts this page; a fixed size would overflow it and hide the back button.
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
   private func openTeam() {
     messaging.openTeam()

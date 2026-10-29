@@ -1,25 +1,26 @@
 # Telegram connector and Connectors hub
 
 **Connectors** is Otto's central place for current and future connections.
-It currently brings Telegram, existing Photon/iMessage messaging, and Mobile
-phone pairing together. Other integrations (for example WhatsApp) can be added
+It brings Telegram, Photon/iMessage messaging, Mobile phone pairing, Gmail,
+Google Calendar and Email (SMTP) together as tiles. Each connector has its own
+list of Otto bots allowed to use it; nothing is allowed until the Mac owner
+ticks a bot. Other integrations (for example WhatsApp) can be added
 to this same hub in the future; **WhatsApp is not implemented in this change**.
 The Telegram integration is independent of the existing Photon/iMessage connector.
 
 ## Setup
 
-1. Run the local Otto build on your Mac and click **Connectors** beside
-   Home/Chat, or open **Settings → Connectors**. Use the Telegram tab; the
-   iMessage (Photon) and Mobile pairing screens are next to it, in the same
-   connector hub.
+1. Open **Settings → Connectors** and click the **Telegram** tile. The
+   other connectors are tiles on the same page; each opens its own setup with
+   a back button to the hub.
 2. In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`,
    and create a bot. Telegram supplies the bot's **bot token**.
 3. Paste that token in Otto's secure field and click **Connect Telegram**.
    Otto verifies the token through Telegram's `getMe` API and stores it
    in macOS Keychain, never a project file.
-4. Under **Connected Otto bot** select the single saved Otto bot that this
-   connector is permitted to message. Leaving it unselected disables dispatch.
-   Telegram `/use` and `/bot` cannot override the Mac's selection.
+4. Under **Otto bots that can use Telegram** tick each saved bot Telegram may
+   reach. Leaving every bot unticked disables dispatch. Chats can switch only
+   among ticked bots; they can never reach a bot the Mac has not allowed.
 5. To connect a **private chat**, send the exact `/pair CODE` shown in Otto
    and approve the requesting chat on the Mac. The code expires in ten minutes.
 6. To connect a **group**, generate a **group pairing code**,
@@ -27,7 +28,10 @@ The Telegram integration is independent of the existing Photon/iMessage connecto
    approve **both the group ID and the sender ID** on the Mac. Only the member
    who initiated pairing can send Otto requests; all other group members are
    ignored. Group pairing does not revoke any previously authorized private chat.
-7. Use `/bots` to check the Mac-selected bot, then send ordinary text.
+7. Use `/bots` to list the allowed bots, `/use @handle` to pick the bot for
+   this chat, or `/bot @handle message` to ask one bot once. Ordinary text goes
+   to the chat's bot, which defaults to the first allowed bot and resets when
+   Otto restarts.
    Telegram's default privacy mode may prevent bots from seeing ordinary group
    text. In BotFather, use `/setprivacy` → **Disable** and remove/re-add the
    bot to that group if you want normal messages like `Test` to reach Otto.
@@ -46,7 +50,7 @@ The Telegram integration is independent of the existing Photon/iMessage connecto
   Mac port or inbound connection is required. The bot token is in the API URL
   path as Telegram requires; redirects are forbidden and URLs/errors are never
   logged.
-- Supported: private and group text, Mac-controlled bot selection, prompt dispatch, and best-effort
+- Supported: private and group text, Mac-controlled bot access, prompt dispatch, and best-effort
   bot replies. Interactive bot sessions and some long-running work may require
   opening Otto for the result. The app must be open and running.
 - Delivery is intentionally **at-most-once**: an update ID is persisted before

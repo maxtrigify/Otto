@@ -50,7 +50,8 @@ extension ApplicationServices {
         return .object(["sent": .bool(true), "to": .string(input.to)])
       },
       availability: { [weak self] context in
-        guard let self, let provider = await self.sharedAppsProvider(context, writes: true, connector: .email)
+        guard let self,
+          let provider = await self.sharedAppsProvider(context, writes: true, connector: .email)
         else { return false }
         return await self.smtp.isConfigured && SharedAppProviders.supported.contains(provider)
       })

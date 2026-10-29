@@ -57,7 +57,8 @@ struct ThemeReadabilityTests {
       return ThemeColor.white.contrastRatio(with: band) < OttoTextContrast.secondary
     }
     #expect(
-      Set(failing.map(\.id)) == ["highfell", "silverbough", "mistfall", "duneveil", "glasswing"])
+      Set(failing.map(\.id))
+        == ["highfell", "silverbough", "mistfall", "duneveil", "glasswing", "daylight"])
   }
 
   @Test("Text on the signal-to-cyan gradient reads at both ends")

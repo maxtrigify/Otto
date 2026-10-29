@@ -11,11 +11,30 @@ struct ConnectorAccessStoreTests {
     return root.path
   }
 
-  @Test("Nothing is allowed until the Mac owner grants it")
-  func defaultsToNobody() throws {
+  @Test("New connectors allow nobody until the Mac owner grants a bot")
+  func newConnectorsDefaultToNobody() throws {
     let store = ConnectorAccessStore(workspacePath: try workspace())
+    for kind in [ConnectorKind.email, .calendar, .telegram] {
+      #expect(!store.canUse(kind, profileID: UUID()), "\(kind)")
+      #expect(store.isRestricted(kind))
+    }
+  }
+
+  @Test("Existing connectors keep serving every bot until they are restricted")
+  func existingConnectorsStayOpenUntilRestricted() throws {
+    let store = ConnectorAccessStore(workspacePath: try workspace())
+    let kept = UUID()
+    let removed = UUID()
+    for kind in [ConnectorKind.gmail, .mobile, .iMessage] {
+      #expect(!store.isRestricted(kind))
+      #expect(store.canUse(kind, profileID: kept))
+    }
+    // Unticking one bot keeps every other current bot allowed.
+    try store.setAllowed(false, profileID: removed, for: .gmail, everyBot: [kept, removed])
+    #expect(store.isRestricted(.gmail))
+    #expect(store.canUse(.gmail, profileID: kept))
+    #expect(!store.canUse(.gmail, profileID: removed))
     #expect(!store.canUse(.gmail, profileID: UUID()))
-    #expect(store.bots(for: .telegram).isEmpty)
   }
 
   @Test("Grants are per connector and multi-select")

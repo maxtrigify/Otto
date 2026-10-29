@@ -16,6 +16,16 @@ public enum ConnectorKind: String, CaseIterable, Codable, Sendable, Identifiable
     case .email: "Email (SMTP)"
     }
   }
+
+  /// Gmail, Mobile and iMessage served every eligible bot before per-connector access existed.
+  /// Until the Mac owner edits their list they keep doing so, so upgrading never cuts them off.
+  /// Connectors added with access control start with no bots.
+  public var allowsEveryBotUntilRestricted: Bool {
+    switch self {
+    case .gmail, .mobile, .iMessage: true
+    case .telegram, .calendar, .email: false
+    }
+  }
 }
 
 private struct PersistedConnectorAccess: Codable {
@@ -23,8 +33,8 @@ private struct PersistedConnectorAccess: Codable {
   var grants: [String: [UUID]]
 }
 
-/// Which Otto bots may use each connector. Grants are multi-select and default to nobody, so a
-/// connector never reaches a bot until the Mac owner allows that bot explicitly.
+/// Which Otto bots may use each connector. A connector with a saved list allows exactly those
+/// bots; one without a list follows `ConnectorKind.allowsEveryBotUntilRestricted`.
 public final class ConnectorAccessStore: ObservableObject {
   public static let currentSchemaVersion = 1
 
@@ -46,15 +56,26 @@ public final class ConnectorAccessStore: ObservableObject {
     }
   }
 
+  /// False while a connector that allows every bot by default has never been restricted.
+  public func isRestricted(_ kind: ConnectorKind) -> Bool {
+    grants[kind] != nil || !kind.allowsEveryBotUntilRestricted
+  }
+
+  /// The explicit list. Empty for an unrestricted connector, which allows every bot instead.
   public func bots(for kind: ConnectorKind) -> Set<UUID> { grants[kind] ?? [] }
 
   public func canUse(_ kind: ConnectorKind, profileID: UUID) -> Bool {
-    grants[kind]?.contains(profileID) ?? false
+    guard isRestricted(kind) else { return true }
+    return grants[kind]?.contains(profileID) ?? false
   }
 
-  public func setAllowed(_ allowed: Bool, profileID: UUID, for kind: ConnectorKind) throws {
+  /// Ticks or unticks one bot. The first edit of an unrestricted connector starts from every bot
+  /// in `everyBot`, so unticking one bot leaves the others allowed.
+  public func setAllowed(
+    _ allowed: Bool, profileID: UUID, for kind: ConnectorKind, everyBot: Set<UUID> = []
+  ) throws {
     var next = grants
-    var set = next[kind] ?? []
+    var set = next[kind] ?? (isRestricted(kind) ? [] : everyBot)
     if allowed { set.insert(profileID) } else { set.remove(profileID) }
     next[kind] = set
     try persist(next)
@@ -71,7 +92,9 @@ public final class ConnectorAccessStore: ObservableObject {
     let payload = PersistedConnectorAccess(
       schemaVersion: Self.currentSchemaVersion,
       grants: Dictionary(
-        uniqueKeysWithValues: next.map { ($0.key.rawValue, $0.value.sorted { $0.uuidString < $1.uuidString }) }))
+        uniqueKeysWithValues: next.map {
+          ($0.key.rawValue, $0.value.sorted { $0.uuidString < $1.uuidString })
+        }))
     try WorkspaceJSONFile.save(payload, to: fileURL, fileManager: .default)
     grants = next
   }

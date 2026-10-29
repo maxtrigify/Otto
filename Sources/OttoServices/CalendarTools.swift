@@ -87,6 +87,22 @@ enum CalendarValidation {
     return value
   }
 
+  /// Validates both ends of a range and requires the start to come first.
+  static func range(start: String, end: String, names: (String, String)) throws -> (
+    String, String
+  ) {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    let from = try timestamp(start, field: names.0)
+    let to = try timestamp(end, field: names.1)
+    guard let first = formatter.date(from: from), let last = formatter.date(from: to),
+      first < last
+    else {
+      throw ToolRegistryError.invalidInput("\(names.0) must be before \(names.1)")
+    }
+    return (from, to)
+  }
+
   static func text(_ value: String?, field: String, required: Bool) throws -> String? {
     guard let value, !value.isEmpty else {
       if required { throw ToolRegistryError.invalidInput("\(field) is required") }
@@ -99,31 +115,54 @@ enum CalendarValidation {
   }
 }
 
+/// Keeps only what an agent needs from Google's event objects, so a busy calendar does not flood
+/// the model's context with attendee lists, conference data and other fields.
+enum CalendarEventCodec {
+  static func compactList(_ response: JSONValue) -> JSONValue {
+    .object([
+      "events": .array((response["items"]?.arrayValue ?? []).map(compact)),
+      "nextPageToken": response["nextPageToken"] ?? .null,
+    ])
+  }
+
+  static func compact(_ event: JSONValue) -> JSONValue {
+    var output: [String: JSONValue] = [:]
+    for key in ["id", "summary", "location", "status", "htmlLink"] {
+      if let value = event[key] { output[key] = value }
+    }
+    output["start"] = event["start"]?["dateTime"] ?? event["start"]?["date"] ?? .null
+    output["end"] = event["end"]?["dateTime"] ?? event["end"]?["date"] ?? .null
+    if let attendees = event["attendees"]?.arrayValue {
+      output["attendeeCount"] = .number(Double(attendees.count))
+    }
+    return .object(output)
+  }
+}
+
 extension ApplicationServices {
   func registerCalendarTools() async throws {
     try await registry.register(
       CalendarEventsTool { [weak self] input, context in
         guard let self else { throw AppConnectionError.unavailable }
-        let account = try await self.calendarAccount(
-          input.accountID, context: context, scope: AppConnectionsStore.calendarReadScope)
         let count = input.maxResults ?? 20
         guard (1...50).contains(count) else {
           throw ToolRegistryError.invalidInput("maxResults must be 1–50")
         }
-        return try await self.appConnections.request(
+        let (timeMin, timeMax) = try CalendarValidation.range(
+          start: input.timeMin, end: input.timeMax, names: ("timeMin", "timeMax"))
+        let account = try await self.calendarAccount(
+          input.accountID, context: context, scope: AppConnectionsStore.calendarReadScope)
+        let response = try await self.appConnections.request(
           account: account, path: "calendars/primary/events",
           query: [
-            URLQueryItem(
-              name: "timeMin",
-              value: try CalendarValidation.timestamp(input.timeMin, field: "timeMin")),
-            URLQueryItem(
-              name: "timeMax",
-              value: try CalendarValidation.timestamp(input.timeMax, field: "timeMax")),
+            URLQueryItem(name: "timeMin", value: timeMin),
+            URLQueryItem(name: "timeMax", value: timeMax),
             URLQueryItem(name: "singleEvents", value: "true"),
             URLQueryItem(name: "orderBy", value: "startTime"),
             URLQueryItem(name: "maxResults", value: String(count)),
           ],
           base: AppConnectionsStore.calendarBaseURL)
+        return CalendarEventCodec.compactList(response)
       },
       availability: { [weak self] context in
         await self?.calendarAvailable(context, scope: AppConnectionsStore.calendarReadScope)
@@ -132,31 +171,31 @@ extension ApplicationServices {
     try await registry.register(
       CalendarCreateEventTool { [weak self] input, context in
         guard let self else { throw AppConnectionError.unavailable }
+        let summary = try CalendarValidation.text(input.summary, field: "summary", required: true)
+        let location = try CalendarValidation.text(
+          input.location, field: "location", required: false)
+        let description = try CalendarValidation.text(
+          input.description, field: "description", required: false)
+        let (start, end) = try CalendarValidation.range(
+          start: input.start, end: input.end, names: ("start", "end"))
         let account = try await self.calendarAccount(
           input.accountID, context: context, scope: AppConnectionsStore.calendarEventsScope,
           writes: true)
-        let summary = try CalendarValidation.text(input.summary, field: "summary", required: true)
-        let location = try CalendarValidation.text(input.location, field: "location", required: false)
-        let description = try CalendarValidation.text(
-          input.description, field: "description", required: false)
         var event: [String: JSONValue] = [
           "summary": .string(summary ?? ""),
-          "start": .object([
-            "dateTime": .string(
-              try CalendarValidation.timestamp(input.start, field: "start"))
-          ]),
-          "end": .object([
-            "dateTime": .string(try CalendarValidation.timestamp(input.end, field: "end"))
-          ]),
+          "start": .object(["dateTime": .string(start)]),
+          "end": .object(["dateTime": .string(end)]),
         ]
         if let location { event["location"] = .string(location) }
         if let description { event["description"] = .string(description) }
-        return try await self.appConnections.request(
+        let created = try await self.appConnections.request(
           account: account, path: "calendars/primary/events", method: "POST",
           body: .object(event), base: AppConnectionsStore.calendarBaseURL)
+        return CalendarEventCodec.compact(created)
       },
       availability: { [weak self] context in
-        await self?.calendarAvailable(context, scope: AppConnectionsStore.calendarEventsScope, writes: true)
+        await self?.calendarAvailable(
+          context, scope: AppConnectionsStore.calendarEventsScope, writes: true)
           ?? false
       })
   }
@@ -164,7 +203,8 @@ extension ApplicationServices {
   private func calendarAvailable(
     _ context: ToolContext, scope: String, writes: Bool = false
   ) async -> Bool {
-    guard let provider = await sharedAppsProvider(context, writes: writes, connector: .calendar) else { return false }
+    guard let provider = await sharedAppsProvider(context, writes: writes, connector: .calendar)
+    else { return false }
     return appConnections.available(provider: provider, scope: scope)
   }
 

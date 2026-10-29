@@ -4,8 +4,9 @@ import OttoSecurity
 
 /// Outgoing mail over SMTP. Sending is delegated to the system `curl`, which already speaks
 /// implicit TLS (smtps) and STARTTLS, so Otto carries no SMTP protocol code of its own.
-/// The password lives only in the Keychain and reaches curl through a 0600 config file that
-/// is deleted straight after the call; it never appears in argv.
+/// The password is kept in the secret store (the Keychain in release builds, the user-only dev
+/// secrets file in development builds) and reaches curl through a 0600 config file in a 0700
+/// directory that is deleted straight after the call; it never appears in argv.
 public struct SMTPConfiguration: Codable, Equatable, Sendable {
   public enum Security: String, Codable, Sendable {
     /// Implicit TLS, usually port 465.
@@ -104,29 +105,20 @@ public actor SMTPConnector {
     guard let password = try await secrets.value(for: passwordKey) else {
       throw SMTPError.notConfigured
     }
-    let directory = FileManager.default.temporaryDirectory.appending(
-      path: "otto-smtp-check-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(
-      at: directory, withIntermediateDirectories: true,
-      attributes: [.posixPermissions: 0o700])
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let configURL = directory.appending(path: "curl.conf")
-    let config = "user = \"\(configuration.username.escapedForCurlConfig):\(password.escapedForCurlConfig)\"\n"
-    try Data(config.utf8).write(to: configURL)
-    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
-
-    let scheme = configuration.security == .tls ? "smtps" : "smtp"
-    // NOOP makes curl log in and then ask the server to acknowledge, without sending mail.
-    var arguments = [
-      "--silent", "--show-error", "--max-time", "30",
-      "--config", configURL.path,
-      "--url", "\(scheme)://\(configuration.host):\(configuration.port)",
-      "--request", "NOOP",
-    ]
-    if configuration.security == .startTLS { arguments.append("--ssl-reqd") }
-    let result = try await Self.runCurl(arguments)
-    guard result.status == 0 else {
-      throw SMTPError.checkFailed(String(result.stderr.prefix(200)))
+    try await Self.withCurlLogin(username: configuration.username, password: password) {
+      _, configURL in
+      // NOOP makes curl log in and then ask the server to acknowledge, without sending mail.
+      var arguments = [
+        "--silent", "--show-error", "--max-time", "30",
+        "--config", configURL.path,
+        "--url", Self.serverURL(configuration),
+        "--request", "NOOP",
+      ]
+      if configuration.security == .startTLS { arguments.append("--ssl-reqd") }
+      let result = try await Self.runCurl(arguments)
+      guard result.status == 0 else {
+        throw SMTPError.checkFailed(String(result.stderr.prefix(200)))
+      }
     }
   }
 
@@ -156,10 +148,12 @@ public actor SMTPConnector {
         throw SMTPError.invalidField(name)
       }
     }
-    let encodedSubject = subject.allSatisfy(\.isASCII)
+    let encodedSubject =
+      subject.allSatisfy(\.isASCII)
       ? subject
       : "=?UTF-8?B?\(Data(subject.utf8).base64EncodedString())?="
-    let normalizedBody = body
+    let normalizedBody =
+      body
       .replacingOccurrences(of: "\r\n", with: "\n")
       .replacingOccurrences(of: "\n", with: "\r\n")
     let headers = [
@@ -183,7 +177,22 @@ public actor SMTPConnector {
     for (name, value) in fields where value.isEmpty || value.contains(where: \.isNewline) {
       throw SMTPError.invalidField(name)
     }
+    // The host and sender go into curl's URL and envelope, so only plain values are accepted.
+    guard isHostName(configuration.host) else { throw SMTPError.invalidField("Host") }
+    guard isBareAddress(configuration.fromAddress) else {
+      throw SMTPError.invalidField("From address")
+    }
     guard (1...65535).contains(configuration.port) else { throw SMTPError.invalidField("Port") }
+  }
+
+  /// A DNS name or IPv4 address: letters, digits, dots and hyphens, at most 253 characters.
+  static func isHostName(_ value: String) -> Bool {
+    guard (1...253).contains(value.count), !value.hasPrefix("."), !value.hasPrefix("-") else {
+      return false
+    }
+    return value.unicodeScalars.allSatisfy {
+      CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "." || $0 == "-"
+    }
   }
 
   private static func domain(of address: String) -> String {
@@ -211,42 +220,54 @@ public actor SMTPConnector {
   private static func deliver(
     message: String, recipient: String, configuration: SMTPConfiguration, password: String
   ) async throws {
+    try await withCurlLogin(username: configuration.username, password: password) {
+      directory, configURL in
+      let messageURL = directory.appending(path: "message.eml")
+      try Data(message.utf8).write(to: messageURL)
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o600], ofItemAtPath: messageURL.path)
+      var arguments = [
+        "--silent", "--show-error", "--max-time", "60",
+        "--config", configURL.path,
+        "--url", serverURL(configuration),
+        "--mail-from", configuration.fromAddress,
+        "--mail-rcpt", recipient,
+        "--upload-file", messageURL.path,
+      ]
+      if configuration.security == .startTLS { arguments.append("--ssl-reqd") }
+      let result = try await runCurl(arguments)
+      guard result.status == 0 else {
+        throw SMTPError.sendFailed(String(result.stderr.prefix(200)))
+      }
+    }
+  }
+
+  /// Runs `body` with a private 0700 directory holding a 0600 curl config for the login. The
+  /// directory is removed afterwards, so the password never outlives the call.
+  private static func withCurlLogin(
+    username: String, password: String,
+    _ body: (_ directory: URL, _ configURL: URL) async throws -> Void
+  ) async throws {
     let directory = FileManager.default.temporaryDirectory.appending(
       path: "otto-smtp-\(UUID().uuidString)")
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700])
     defer { try? FileManager.default.removeItem(at: directory) }
-
-    let messageURL = directory.appending(path: "message.eml")
     let configURL = directory.appending(path: "curl.conf")
-    try Data(message.utf8).write(to: messageURL)
-    let escapedUser = configuration.username.escapedForCurlConfig
-    let escapedPassword = password.escapedForCurlConfig
-    let config = "user = \"\(escapedUser):\(escapedPassword)\"\n"
+    let config = "user = \"\(username.escapedForCurlConfig):\(password.escapedForCurlConfig)\"\n"
     try Data(config.utf8).write(to: configURL)
-    for url in [messageURL, configURL] {
-      try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-    }
-
-    let scheme = configuration.security == .tls ? "smtps" : "smtp"
-    var arguments = [
-      "--silent", "--show-error", "--max-time", "60",
-      "--config", configURL.path,
-      "--url", "\(scheme)://\(configuration.host):\(configuration.port)",
-      "--mail-from", configuration.fromAddress,
-      "--mail-rcpt", recipient,
-      "--upload-file", messageURL.path,
-    ]
-    if configuration.security == .startTLS { arguments.append("--ssl-reqd") }
-
-    let result = try await runCurl(arguments)
-    guard result.status == 0 else {
-      throw SMTPError.sendFailed(String(result.stderr.prefix(200)))
-    }
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
+    try await body(directory, configURL)
   }
 
-  private static func runCurl(_ arguments: [String]) async throws -> (status: Int32, stderr: String) {
+  private static func serverURL(_ configuration: SMTPConfiguration) -> String {
+    let scheme = configuration.security == .tls ? "smtps" : "smtp"
+    return "\(scheme)://\(configuration.host):\(configuration.port)"
+  }
+
+  private static func runCurl(_ arguments: [String]) async throws -> (status: Int32, stderr: String)
+  {
     try await Task.detached(priority: .utility) {
       let process = Process()
       process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")

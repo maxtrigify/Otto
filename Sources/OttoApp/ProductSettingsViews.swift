@@ -163,7 +163,8 @@ struct MobileSettingsView: View {
       }
     }
     .padding(24)
-    .frame(width: 680, height: 650)
+    // Connectors hosts this page; a fixed size would overflow it and hide the back button.
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .task {
       if services.mobilePairingPayload == nil, services.mobileHostEndpoint != nil {
         await refreshOffer()

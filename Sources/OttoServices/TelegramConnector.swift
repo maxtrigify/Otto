@@ -489,14 +489,16 @@ public final class TelegramConnector: ObservableObject {
       try? await client.send("Otto bots you can reach:\n" + lines.joined(separator: "\n"), to: chat)
     case .use(let handle):
       guard let bot = allowedBot(matching: handle) else {
-        try? await client.send("No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
+        try? await client.send(
+          "No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
         return
       }
       activeBotByChatID[chat] = bot.id
       try? await client.send("This chat now talks to @\(bot.handle).", to: chat)
     case .send(let handle, let text):
       guard let bot = allowedBot(matching: handle) else {
-        try? await client.send("No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
+        try? await client.send(
+          "No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
         return
       }
       await sendPrompt(text, to: bot, client: client, chat: chat)

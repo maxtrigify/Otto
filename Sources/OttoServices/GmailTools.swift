@@ -155,11 +155,16 @@ extension ApplicationServices {
     }
     // The Mac owner decides per connector which Otto bots may use it.
     if let connector {
+      let profileID = node.agentDefinition?.profileID
       // Archived or deleted bots lose connector access even while their process still runs.
-      guard let profileID = node.agentDefinition?.profileID,
-        agentProfiles.profile(id: profileID)?.isArchived == false,
-        connectorAccess.canUse(connector, profileID: profileID)
-      else { return nil }
+      if let profileID, agentProfiles.profile(id: profileID)?.isArchived != false { return nil }
+      // An unrestricted connector keeps its earlier behaviour, ad-hoc sessions included; a
+      // restricted one serves only the bots on its list.
+      if connectorAccess.isRestricted(connector) {
+        guard let profileID, connectorAccess.canUse(connector, profileID: profileID) else {
+          return nil
+        }
+      }
     }
     return snapshot.provider
   }
