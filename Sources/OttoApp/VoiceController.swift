@@ -185,6 +185,8 @@ final class VoiceController: ObservableObject {
   @Published private(set) var pushToTalkHeld = false
   @Published private(set) var parakeetInstallationState = ParakeetInstallationState.notInstalled
   @Published private(set) var parakeetWarmState = ParakeetWarmState.inactive
+  @Published private(set) var whistleInstallationState = WhistleInstallationState.notInstalled
+  @Published private(set) var whistleTermsAccepted = WhistleTerms.isAccepted()
   @Published private(set) var wakeWordStatus = WakeWordStatus.disabled
   @Published private(set) var wakeQualificationRecordingState =
     WakeQualificationRecordingState.idle
@@ -261,6 +263,7 @@ final class VoiceController: ObservableObject {
   private let store: CanvasStore
   private let services: ApplicationServices
   private let parakeetInstaller: ParakeetInstaller
+  private let whistleInstaller: WhistleInstaller
   private var dictation: DictationSession?
   private var dictationTask: Task<Void, Never>?
   private var dictationListening = false
@@ -280,6 +283,7 @@ final class VoiceController: ObservableObject {
   private var traceTask: Task<Void, Never>?
   private var previewTask: Task<Void, Never>?
   private var parakeetInstallerTask: Task<Void, Never>?
+  private var whistleInstallerTask: Task<Void, Never>?
   private var parakeetRecognizer: ParakeetWarmRecognizer?
   private var parakeetPrewarmTask: Task<Void, Never>?
   private var wakeWordDetector: (any AcousticWakeWordDetecting)?
@@ -317,6 +321,8 @@ final class VoiceController: ObservableObject {
     self.services = services
     let parakeetInstaller = ParakeetInstaller()
     self.parakeetInstaller = parakeetInstaller
+    let whistleInstaller = WhistleInstaller()
+    self.whistleInstaller = whistleInstaller
     self.knownWorkspaces = [workspacePath]
     let savedEngine =
       VoiceEngine(rawValue: UserDefaults.standard.string(forKey: "otto.voice.engine") ?? "")
@@ -385,6 +391,13 @@ final class VoiceController: ObservableObject {
       for await state in parakeetInstaller.updates {
         guard !Task.isCancelled else { break }
         self?.parakeetInstallationState = state
+        if state == .installed { await self?.resetLocalSpeechSessions() }
+      }
+    }
+    whistleInstallerTask = Task { [weak self, whistleInstaller] in
+      for await state in whistleInstaller.updates {
+        guard !Task.isCancelled else { break }
+        self?.whistleInstallationState = state
         if state == .installed { await self?.resetLocalSpeechSessions() }
       }
     }
@@ -550,6 +563,7 @@ final class VoiceController: ObservableObject {
     commandTask?.cancel()
     previewTask?.cancel()
     parakeetInstallerTask?.cancel()
+    whistleInstallerTask?.cancel()
     parakeetPrewarmTask?.cancel()
     wakeWordTask?.cancel()
   }
@@ -950,6 +964,24 @@ final class VoiceController: ObservableObject {
     await parakeetInstaller.install()
   }
 
+  var isWhistleInstalled: Bool {
+    WhistleRuntimeConfiguration.installed() != nil
+  }
+
+  /// Records agreement to Whistle's license terms for the pinned files. Downloading needs it.
+  func acceptWhistleTerms() {
+    WhistleTerms.accept()
+    whistleTermsAccepted = true
+  }
+
+  func installWhistle() async {
+    await whistleInstaller.install()
+  }
+
+  func removeWhistle() async {
+    await whistleInstaller.remove()
+  }
+
   var localSpeechEngineDetail: String {
     switch localSpeechEngine {
     case .apple:
@@ -958,6 +990,10 @@ final class VoiceController: ObservableObject {
       "Installed locally. Audio is processed offline with sherpa-onnx."
     case .parakeet:
       "Runtime and model are not installed yet. Command and Dictate will show an installation error."
+    case .whistle where isWhistleInstalled:
+      "Installed locally. Audio is processed offline by Cactus Compute's needle engine."
+    case .whistle:
+      "Not downloaded yet. Download it below after reviewing its license."
     }
   }
 
@@ -976,6 +1012,13 @@ final class VoiceController: ObservableObject {
         return UnavailableSpeechTranscriber(
           message: "Install the Parakeet runtime and model in Voice Settings first."
         )
+      }
+    case .whistle:
+      if let configuration = WhistleRuntimeConfiguration.installed() {
+        return WhistleSpeechTranscriber(configuration: configuration)
+      } else {
+        return UnavailableSpeechTranscriber(
+          message: "Download Whistle in Voice Settings first.")
       }
     }
   }
