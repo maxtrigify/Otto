@@ -225,6 +225,15 @@ server API key** field and click **Save securely**. No key is required for
 servers that accept unauthenticated requests. Choose the discovered or saved
 `Local · <model>` choice in an Otto Harness bot's model picker.
 
+The model ID must be **exactly the ID advertised to the API key** by the
+configured server's authenticated `GET /v1/models` response. In particular,
+LiteLLM gateways often expose a short deployment alias such as `my-coder`,
+while their backend configuration uses a different identifier such as
+`openai/my-coder-27b`. Use the gateway alias, **not** the backend identifier;
+otherwise the gateway can reject requests even though the underlying model is
+healthy. Re-select that ID on an existing bot/session after changing its model:
+editing only the global Local default does not rewrite already saved bot models.
+
 The runtime sends OpenAI-compatible `POST /v1/chat/completions` requests with
 the model's ordinary `messages` and `tools` fields; model discovery reads
 `GET /v1/models`. Servers must support the Chat Completions response shape;
@@ -234,11 +243,17 @@ remains in Otto's secure credential store and is never written to a config file
 or command-line argument. Each agent process receives only its configured
 endpoint and its own credential.
 
-For HTTP, only localhost, loopback, private IPv4, and local network hosts are
-accepted. Use HTTPS for nonlocal endpoints and whenever sending a credential
-across an untrusted network. Never include a token in the URL; no key is sent
-when left blank. This provider is local/private-network **outbound** model
-access, not a public API endpoint exposed by Otto.
+For HTTP, only localhost, loopback, private IPv4 (including the shared CGNAT /
+Tailscale `100.64.0.0/10` range), and local network hosts pass URL validation.
+Missing schemes on such addresses are normalized to HTTP; public HTTP URLs
+remain disallowed. **Passing URL validation does not bypass macOS App Transport
+Security (ATS)**: plain HTTP to a remote/Tailnet IP can still fail at the
+network layer. For those servers, prefer a properly configured HTTPS endpoint;
+this change does not add a global ATS exception or bundle a user-specific
+host/IP address. Use HTTPS whenever sending a credential across an untrusted
+network. Never include a token in the URL; no key is sent when left blank.
+This provider is local/private-network **outbound** model access, not a public
+API endpoint exposed by Otto.
 
 ## Otto control context
 

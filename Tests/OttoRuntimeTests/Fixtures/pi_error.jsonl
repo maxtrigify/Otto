@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"01a181cb-e1e7-7642-a765-8fc56ff02962","timestamp":"2026-10-28T09:16:24.936Z","cwd":"/Users/max/project"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_end","message":{"role":"assistant","content":[],"api":"anthropic-messages","provider":"anthropic","model":"claude-sonnet-5","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"error","errorMessage":"401 Unauthorized: invalid x-api-key","timestamp":1761643024000}}
+{"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"401 Unauthorized: invalid x-api-key","timestamp":1761643024000},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled","aborted":false}

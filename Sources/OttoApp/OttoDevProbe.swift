@@ -10,9 +10,11 @@
   ///   snapshot:<directory>                    one PNG per visible window, plus windows.txt
   ///   tool:<output file>\n<tool name>\n<json>  call an Otto tool in the active space
   ///   permission:<agent UUID>:approve|deny:<report file>  what the chat card's Approve/Deny do
+  ///   settings[:<page>]                        open the Settings window, optionally on a page
   @MainActor
   final class OttoDevProbe {
     static let shared = OttoDevProbe()
+    static let openSettingsNotification = Notification.Name("io.openotto.dev.probe.openSettings")
     private weak var services: ApplicationServices?
     private var installed = false
 
@@ -31,6 +33,15 @@
     private func handle(_ command: String) {
       if command.hasPrefix("snapshot:") {
         snapshot(into: String(command.dropFirst(9)))
+      } else if command == "settings" || command.hasPrefix("settings:") {
+        // SwiftUI opens the Settings scene through its environment action, which the app's
+        // root view performs on this notification; AppKit's showSettingsWindow: is not enough.
+        if command.hasPrefix("settings:") {
+          UserDefaults.standard.set(
+            String(command.dropFirst(9)), forKey: OttoSettingsPage.storageKey)
+        }
+        NSApp.activate()
+        NotificationCenter.default.post(name: Self.openSettingsNotification, object: nil)
       } else if command.hasPrefix("permission:") {
         // permission:<agent UUID>:approve|deny:<report file>
         let parts = command.dropFirst(11).split(separator: ":", maxSplits: 2).map(String.init)

@@ -524,6 +524,6 @@ struct AutomationModelPicker: View {
 /// Every harness Otto can run an automation on, in a sensible order.
 enum AutomationHarnesses {
   static let all: [AgentProvider] = [
-    .claudeCode, .codex, .cursor, .openCode, .grok, .kimi, .hermes, .openAI,
+    .claudeCode, .codex, .cursor, .openCode, .pi, .grok, .kimi, .hermes, .openAI,
   ]
 }

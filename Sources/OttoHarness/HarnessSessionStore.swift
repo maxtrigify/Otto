@@ -50,7 +50,23 @@ public actor HarnessSessionStore {
       return HarnessSession(providerID: providerID, modelID: modelID)
     }
     guard HarnessSession.isOttoID(sessionID) else { throw HarnessError.invalidSessionID }
-    let data = try Data(contentsOf: fileURL(for: sessionID))
+    let data: Data
+    do {
+      data = try Data(contentsOf: fileURL(for: sessionID))
+    } catch {
+      let readError = error as NSError
+      // Bot channels may outlive an older provider session file. Starting a
+      // fresh provider session is safer than permanently failing every new
+      // prompt, and does not delete the existing Otto chat transcript.
+      // Never do this for invalid JSON or permission failures: those are
+      // different problems that must stay visible for recovery.
+      if readError.domain == NSCocoaErrorDomain,
+        readError.code == NSFileReadNoSuchFileError
+      {
+        return HarnessSession(providerID: providerID, modelID: modelID)
+      }
+      throw error
+    }
     var session = try decoder().decode(HarnessSession.self, from: data)
     session.providerID = providerID
     session.modelID = modelID

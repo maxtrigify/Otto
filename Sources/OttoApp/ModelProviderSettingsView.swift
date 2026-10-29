@@ -13,9 +13,16 @@ struct ModelProviderSettingsView: View {
   @State private var message: String?
   @State private var isError = false
   private let secrets: any SecretStore
+  private let onLocalSaved: (() -> Void)?
 
-  init(secrets: any SecretStore = makeDefaultSecretStore()) {
+  init(
+    secrets: any SecretStore = makeDefaultSecretStore(),
+    initialProvider: OttoHarnessProvider = .openAI,
+    onLocalSaved: (() -> Void)? = nil
+  ) {
     self.secrets = secrets
+    self._provider = State(initialValue: initialProvider)
+    self.onLocalSaved = onLocalSaved
   }
 
   var body: some View {
@@ -138,7 +145,9 @@ struct ModelProviderSettingsView: View {
       localURL = configuration.baseURL.absoluteString
       localModel = configuration.modelID
       hasLocalSettings = true
-      message = "Local model saved. Refresh the model picker or reopen the bot to select it."
+      ProviderModelCatalogStore.shared.invalidate()
+      onLocalSaved?()
+      message = "Local model saved. It is now available under Otto Harness → Model."
       isError = false
     } catch {
       message = error.localizedDescription

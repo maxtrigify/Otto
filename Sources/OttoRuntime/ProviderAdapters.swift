@@ -1577,6 +1577,248 @@ public struct OpenCodeAdapter: AgentAdapter {
   }
 }
 
+/// Pi (pi.dev, the `@earendil-works/pi-coding-agent` npm package) is a small Node-based coding
+/// agent. Otto drives it through `--mode json`, which streams one JSONL event per line and exits
+/// when the prompt is answered, resumes by real session id, appends Otto's guidance to the system
+/// prompt, and registers the otto bridge through a project-level `.pi/mcp.json`.
+///
+/// Pi has no approval system of its own: every tool it declares runs without asking. Otto's
+/// permission modes therefore map to which tools are declared, not to prompts. Read-only
+/// allowlists the inspection tools only; workspace-write and unrestricted both run Pi's default
+/// tool set, with Otto's `agent.ask_user` tool available for questions.
+public struct PiAdapter: AgentAdapter {
+  public let provider = AgentProvider.pi
+  private let executablePath: String?
+  private let homeDirectory: String
+
+  public init(executablePath: String? = nil, homeDirectory: String = NSHomeDirectory()) {
+    self.executablePath = executablePath
+    self.homeDirectory = homeDirectory
+  }
+
+  /// The tools Pi declares for a read-only run. Pi's own documentation names these as the
+  /// inspection set; MCP tools stay available because no entry starts with `mcp__`.
+  public static let readOnlyTools = "read,grep,find,ls"
+
+  public func detectInstallation() async -> InstallationStatus {
+    // npm/bun global installs land in directories a LaunchServices-started app never has on PATH.
+    let candidates =
+      executablePath.map { [$0] }
+      ?? ExecutableLocator.candidates(
+        "pi",
+        homeDirectory: homeDirectory,
+        preferredPaths: [
+          "\(homeDirectory)/.bun/bin/pi",
+          "\(homeDirectory)/.npm-global/bin/pi",
+          "\(homeDirectory)/.local/bin/pi",
+        ] + nodeDirectories().map { "\($0)/pi" }
+      )
+    guard
+      let installation = await ExecutableLocator.firstWorking(
+        candidates: candidates, environment: launchEnvironment())
+    else {
+      return .missing(
+        remediation:
+          "Install Pi (npm install -g @earendil-works/pi-coding-agent), then run `pi` once in Terminal and sign in to a model provider with /login."
+      )
+    }
+    return .installed(path: installation.path, version: installation.version)
+  }
+
+  public func availableModels() async -> [AgentModel] {
+    await discoverModels() ?? []
+  }
+
+  public func availableModels(environment: [String: String]) async -> [AgentModel] {
+    await discoverModels(environment: environment) ?? []
+  }
+
+  /// `pi --list-models` prints the models of every provider the user has signed into, so the
+  /// catalog is account-specific and read live. A Pi with no credentials prints a sign-in hint
+  /// and no table, which reads as "no catalog" rather than an empty picker.
+  public func discoverModels(environment: [String: String] = [:]) async -> [AgentModel]? {
+    guard case .installed(let path, _) = await detectInstallation() else { return nil }
+    var merged = launchEnvironment()
+    merged.merge(environment) { _, account in account }
+    guard
+      let output = await ExecutableLocator.captureOutput(
+        executable: path, arguments: ["--list-models"], environment: merged)
+    else { return nil }
+    let models = Self.parseModels(output)
+    return models.isEmpty ? nil : models
+  }
+
+  /// Parses the `--list-models` table: a header row of `provider  model  context  max-out
+  /// thinking  images`, then one row per model with columns separated by two or more spaces.
+  /// Ids are `provider/model`, the form `--model` accepts unambiguously.
+  public static func parseModels(_ output: String) -> [AgentModel] {
+    var seen = Set<String>()
+    var models: [AgentModel] = []
+    for line in output.components(separatedBy: .newlines) {
+      let columns = line.split(separator: /\s{2,}/, omittingEmptySubsequences: true)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+      guard columns.count >= 2 else { continue }
+      let provider = columns[0]
+      let model = columns[1]
+      guard provider != "provider", !provider.contains(where: \.isWhitespace),
+        !model.contains(where: \.isWhitespace), !provider.isEmpty, !model.isEmpty
+      else { continue }
+      let id = "\(provider)/\(model)"
+      guard seen.insert(id).inserted else { continue }
+      models.append(AgentModel(id: id, displayName: "\(model) · \(provider)"))
+    }
+    return models
+  }
+
+  public func buildLaunchSpec(_ request: AgentLaunchRequest) async throws -> ProcessLaunchSpec {
+    guard case .installed(let path, _) = await detectInstallation() else {
+      throw RuntimeError.launchFailed("Pi is not installed")
+    }
+    guard request.executionStrategy.isSupported(by: .pi) else {
+      throw RuntimeError.launchFailed(
+        "\(request.executionStrategy.rawValue) is not supported by Pi")
+    }
+
+    var arguments: [String] = []
+    if request.prompt != nil { arguments += ["--mode", "json"] }
+    // `--session` accepts a session id and looks in the current project first, so a resumed
+    // Otto node reopens exactly the Pi session the header announced.
+    if let sessionID = request.resumeSessionID { arguments += ["--session", sessionID] }
+    if let model = request.model { arguments += ["--model", model] }
+    if let effort = request.effort { arguments += ["--thinking", effort] }
+    if request.permissionMode == .readOnly { arguments += ["--tools", Self.readOnlyTools] }
+
+    if let mcpExecutable = request.ottoMCPExecutable {
+      registerOttoMCPServer(command: mcpExecutable, workingDirectory: request.workspacePath)
+      // Project `.pi/mcp.json` is trust-gated and a JSON run cannot paint the trust prompt, so
+      // the workspace is trusted for this process. Interactive Kimi and Cursor runs answer the
+      // same prompt the same way; the saved trust decision in ~/.pi/agent/trust.json is untouched.
+      arguments.append("--approve")
+    }
+
+    // Guidance, the bot's profile, and the memory bootstrap share one appended system prompt so
+    // they reach every turn, including resumed sessions, without landing in the transcript.
+    let profile = request.profileInstructions?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let systemPrompt = [
+      ClaudeCodeAdapter.ottoWorkspaceGuidance,
+      profile.flatMap { $0.isEmpty ? nil : "Your role and operating instructions:\n\($0)" },
+      request.memoryBootstrap,
+    ]
+    .compactMap { $0 }
+    .joined(separator: "\n\n")
+    arguments += ["--append-system-prompt", systemPrompt]
+
+    if let prompt = request.prompt {
+      arguments += ["--", Self.promptArgument(prompt, for: request.executionStrategy)]
+    }
+
+    return ProcessLaunchSpec(
+      executable: path,
+      arguments: arguments,
+      environment: launchEnvironment(),
+      workingDirectory: request.workspacePath
+    )
+  }
+
+  /// Pi reads a leading `@` in a message argument as a file to attach, so a chat message that
+  /// starts with a mention is given a plain lead-in instead of vanishing into a missing file.
+  public static func promptArgument(_ prompt: String, for strategy: AgentExecutionStrategy)
+    -> String
+  {
+    let prepared =
+      strategy == .delegated
+      ? "Execution strategy: delegated. Split independent work where your tools allow, wait for "
+        + "real results, then synthesize and verify them.\n\n" + prompt
+      : prompt
+    return prepared.hasPrefix("@") ? "Task from the user:\n\(prepared)" : prepared
+  }
+
+  /// Pi is a Node program behind an `#!/usr/bin/env node` shim, so the interpreter's directory
+  /// has to be on the child's PATH. A LaunchServices-started app inherits only the system PATH,
+  /// which has neither Homebrew nor a version manager on it.
+  func launchEnvironment(
+    inheriting parent: [String: String] = ProcessInfo.processInfo.environment
+  ) -> [String: String] {
+    let existing = parent["PATH"]?.split(separator: ":").map(String.init) ?? []
+    let missing = nodeDirectories().filter { !existing.contains($0) }
+    guard !missing.isEmpty else { return [:] }
+    return ["PATH": (existing + missing).joined(separator: ":")]
+  }
+
+  /// Directories that hold a `node` binary, newest version-manager install first.
+  private func nodeDirectories() -> [String] {
+    let manager = FileManager.default
+    var directories: [String] = []
+    let nvmRoot = "\(homeDirectory)/.nvm/versions/node"
+    let nvmVersions = ((try? manager.contentsOfDirectory(atPath: nvmRoot)) ?? [])
+      .filter { $0.hasPrefix("v") }
+      .sorted { lhs, rhs in
+        lhs.dropFirst().split(separator: ".").compactMap { Int($0) }.lexicographicallyPrecedes(
+          rhs.dropFirst().split(separator: ".").compactMap { Int($0) }) == false
+      }
+    directories += nvmVersions.map { "\(nvmRoot)/\($0)/bin" }
+    directories += [
+      "\(homeDirectory)/.volta/bin", "\(homeDirectory)/.local/share/fnm/aliases/default/bin",
+      "/opt/homebrew/bin", "/usr/local/bin",
+    ]
+    return directories.filter { manager.isExecutableFile(atPath: "\($0)/node") }
+  }
+
+  /// Pi takes no MCP flag: servers come from `mcp.json`, user-level under ~/.pi/agent or
+  /// project-level in `.pi/`. Otto writes only the project file and only its own `otto` entry,
+  /// leaving the user's global configuration untouched.
+  ///
+  /// Pi starts stdio servers with a minimal environment rather than its own, so the entry names
+  /// the control variables explicitly as `${OTTO_…}` placeholders that Pi resolves from its
+  /// process environment at connect time. The file therefore stays identical for every Pi node
+  /// and carries no token, so two nodes sharing a directory cannot overwrite each other with
+  /// another node's scoped credentials.
+  func registerOttoMCPServer(command: String, workingDirectory: String) {
+    guard !workingDirectory.isEmpty else { return }
+    let directory = URL(fileURLWithPath: workingDirectory, isDirectory: true)
+      .appending(path: ".pi", directoryHint: .isDirectory)
+    let file = directory.appending(path: "mcp.json")
+    var root =
+      (try? Data(contentsOf: file)).flatMap {
+        try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+      } ?? [:]
+    var servers = root["mcpServers"] as? [String: Any] ?? [:]
+    let entry = Self.ottoServerEntry(command: command)
+    let cleaned = OttoMCPRegistration.removingLegacyEntry(
+      from: servers, writtenKeys: Set(entry.keys))
+    if cleaned.count == servers.count,
+      let existing = servers[OttoMCPRegistration.serverName] as? [String: Any],
+      NSDictionary(dictionary: existing).isEqual(to: entry)
+    {
+      return
+    }
+    servers = cleaned
+    servers[OttoMCPRegistration.serverName] = entry
+    root["mcpServers"] = servers
+    guard
+      let data = try? JSONSerialization.data(
+        withJSONObject: root, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    else { return }
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try? data.write(to: file, options: .atomic)
+  }
+
+  static func ottoServerEntry(command: String) -> [String: Any] {
+    [
+      "command": command,
+      // Only variables every Otto launch sets: an unresolvable placeholder stops the server.
+      "env": Dictionary(
+        uniqueKeysWithValues: [
+          "OTTO_CONTROL_SOCKET", "OTTO_CONTROL_TOKEN", "OTTO_NODE_ID", "OTTO_WORKSPACE_ID",
+        ].map { ($0, "${\($0)}") }),
+      // agent.ask_user blocks on a human answer, so the per-request timeout (seconds) must be
+      // hour-scale rather than Pi's 60-second default.
+      "timeout": 3_600,
+      "description": "Otto: the app this agent runs in (browser, documents, chat, memory).",
+    ]
+  }
+}
+
 public struct GrokAdapter: AgentAdapter {
   public let provider = AgentProvider.grok
   private let executablePath: String?

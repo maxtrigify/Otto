@@ -352,7 +352,7 @@ struct PersonalHomeView: View {
         if conversationTarget == .newSession {
           Menu {
             ForEach(
-              [AgentProvider.codex, .claudeCode, .hermes, .kimi, .cursor, .openCode, .grok],
+              [AgentProvider.codex, .claudeCode, .hermes, .kimi, .cursor, .openCode, .pi, .grok],
               id: \.self
             ) { option in
               Button(option.rawValue) { provider = option }

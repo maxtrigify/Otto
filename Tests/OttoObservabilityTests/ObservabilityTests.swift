@@ -49,6 +49,15 @@ struct ObservabilityTests {
     defer { try? FileManager.default.removeItem(at: directory) }
     let first = try ObservabilityStore(directory: directory, appVersion: "1.0")
     try await first.beginSession()
+    // A crash leaves the marker behind with the process gone. The same process starting
+    // again would read as a second running instance, so hand the marker to one that exited.
+    let exited = Process()
+    exited.executableURL = URL(fileURLWithPath: "/bin/sh")
+    exited.arguments = ["-c", "exit 0"]
+    try exited.run()
+    exited.waitUntilExit()
+    try Data(String(exited.processIdentifier).utf8)
+      .write(to: directory.appending(path: "active-session.marker"))
 
     let afterCrash = try ObservabilityStore(directory: directory, appVersion: "1.0")
     try await afterCrash.beginSession()

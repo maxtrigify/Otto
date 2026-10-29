@@ -14,6 +14,7 @@ public enum OttoPreferenceKey {
   public static let cursorPermissionMode = "otto.agents.permissions.cursor"
   public static let kimiPermissionMode = "otto.agents.permissions.kimi"
   public static let openCodePermissionMode = "otto.agents.permissions.openCode"
+  public static let piPermissionMode = "otto.agents.permissions.pi"
   public static let grokPermissionMode = "otto.agents.permissions.grok"
   public static let shellPermissionMode = "otto.agents.permissions.shell"
   public static let hermesConnectionMode = "otto.agents.hermes.connectionMode"

@@ -145,6 +145,8 @@ struct ChatWorkspaceView: View {
   @State private var showingTeam = false
   @State private var showingSessionCreator = false
   @State private var hoveredSessionID: UUID?
+  @State private var renamingSessionID: UUID?
+  @State private var sessionNameDraft = ""
   @State private var panelRoutineID: UUID?
   @State private var teamDraft = ""
   @State private var teamMentions: [TeamMention] = []
@@ -398,6 +400,21 @@ struct ChatWorkspaceView: View {
       }
     }
     .overlay(alignment: .topLeading) { sessionCreatorLayer }
+    .alert(
+      "Rename session",
+      isPresented: Binding(
+        get: { renamingSessionID != nil },
+        set: { if !$0 { renamingSessionID = nil } }
+      )
+    ) {
+      TextField("Business or project name", text: $sessionNameDraft)
+        .accessibilityIdentifier("session-rename-name")
+      Button("Cancel", role: .cancel) { renamingSessionID = nil }
+      Button("Rename") { saveSessionName() }
+        .disabled(sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    } message: {
+      Text("Name this conversation without changing the bot or its history.")
+    }
     .onAppear {
       if sessionCanvasID == nil { sessionCanvasID = store.activeCanvas.id }
       repairSelection()
@@ -2757,6 +2774,19 @@ struct ChatWorkspaceView: View {
 
       if hovered {
         Button {
+          beginSessionRename(node)
+        } label: {
+          Image(systemName: "pencil")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(palette.muted)
+            .frame(width: 18, height: 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Rename session")
+        .accessibilityLabel("Rename session \(node.displayName)")
+
+        Button {
           closeSession(node)
         } label: {
           Image(systemName: "xmark")
@@ -2781,6 +2811,32 @@ struct ChatWorkspaceView: View {
         hoveredSessionID = nil
       }
     }
+    .contextMenu {
+      Button("Rename session…", systemImage: "pencil") { beginSessionRename(node) }
+      Divider()
+      Button("Close session", systemImage: "xmark", role: .destructive) {
+        closeSession(node)
+      }
+    }
+  }
+
+  private func beginSessionRename(_ node: OttoNode) {
+    guard sessionAgents.contains(where: { $0.id == node.id }) else { return }
+    sessionNameDraft = node.displayName
+    renamingSessionID = node.id
+  }
+
+  private func saveSessionName() {
+    defer { renamingSessionID = nil }
+    guard let nodeID = renamingSessionID else { return }
+    let name = sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty,
+      sessionAgents.contains(where: { $0.id == nodeID }),
+      let canvasID = store.snapshot.canvases.first(where: { canvas in
+        canvas.nodes.contains(where: { $0.id == nodeID })
+      })?.id
+    else { return }
+    store.dispatch(.renameNode(id: nodeID, name: name), targetCanvasID: canvasID)
   }
 
   /// What a session is *about*, for the rail's second line. The brief — the first thing
@@ -4435,6 +4491,7 @@ struct HireBotSheet: View {
   @State private var saving = false
   @State private var errorMessage: String?
   @State private var showingAdvanced = false
+  @State private var showingLocalModelSettings = false
 
   private let colors = ["#397b69", "#ad6a66", "#526b8e", "#a46e21", "#087f83"]
 
@@ -4503,6 +4560,30 @@ struct HireBotSheet: View {
       }
       alignSelections(for: provider)
       catalogStore.load(provider, accountID: modelAccountID)
+    }
+    .sheet(isPresented: $showingLocalModelSettings) {
+      VStack(spacing: 0) {
+        HStack {
+          Text("Add an OpenAI-compatible model")
+            .font(.headline)
+          Spacer()
+          Button("Done") { showingLocalModelSettings = false }
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(16)
+        Divider()
+        ModelProviderSettingsView(initialProvider: .local) {
+          guard let saved = LocalModelConfiguration.load() else { return }
+          // Keep the bot draft intact: this chooses only its model and does
+          // not save or overwrite the bot until Save changes is pressed.
+          model = OttoHarnessModelSelection.persistedID(
+            provider: .local, modelID: saved.modelID)
+          effort = ""
+          catalogStore.load(.openAI, accountID: modelAccountID)
+        }
+      }
+      .frame(width: 625, height: 660)
+      .onExitCommand { showingLocalModelSettings = false }
     }
   }
 
@@ -4811,6 +4892,27 @@ struct HireBotSheet: View {
 
   @ViewBuilder
   private var advancedModel: some View {
+    if provider == .openAI {
+      VStack(alignment: .leading, spacing: 6) {
+        Button {
+          showingLocalModelSettings = true
+        } label: {
+          Label(
+            LocalModelConfiguration.load() == nil
+              ? "Add OpenAI-compatible local model…"
+              : "Edit OpenAI-compatible local model…",
+            systemImage: "plus.circle")
+        }
+        .accessibilityIdentifier("bot-local-model-setup")
+        if LocalModelConfiguration.load() == nil {
+          Text(
+            "No local model is configured yet. Add the server URL and model ID here, then select it below."
+          )
+          .font(.ottoMono(8))
+          .foregroundStyle(palette.muted)
+        }
+      }
+    }
     if !modelOptions.isEmpty {
       VStack(alignment: .leading, spacing: 7) {
         advancedLabel("MODEL")

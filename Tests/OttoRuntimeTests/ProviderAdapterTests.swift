@@ -796,6 +796,142 @@ struct ProviderAdapterTests {
     #expect(garbled.state == .untested)
   }
 
+  @Test("Pi runs stream JSON, trust a project mcp.json naming Otto, and carry Otto guidance")
+  func piLaunchSpecification() async throws {
+    let stub = try stubProvider(named: "pi", version: "1.4.0")
+    defer { try? FileManager.default.removeItem(at: stub.deletingLastPathComponent()) }
+    let adapter = PiAdapter(executablePath: stub.path)
+    let workspace = FileManager.default.temporaryDirectory.appending(
+      path: "otto-pi-workspace-\(UUID().uuidString.prefix(8))", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+
+    switch await adapter.detectInstallation() {
+    case .installed(let path, let version):
+      #expect(path == stub.path)
+      #expect(version == "pi 1.4.0")
+      #expect(
+        ProviderCompatibilityPolicy.evaluate(provider: .pi, reportedVersion: version).state
+          == .supported)
+    case .missing(let remediation):
+      Issue.record("stub pi should be detected: \(remediation)")
+    }
+    // A version-only stub prints no model table, so discovery fails explicitly.
+    #expect(await adapter.availableModels().isEmpty)
+
+    let launch = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: workspace.path,
+        prompt: "Add authentication coverage.",
+        model: "anthropic/claude-sonnet-5",
+        effort: "high",
+        ottoMCPExecutable: "/opt/otto/otto-mcp",
+        profileInstructions: "You are Beck, the release engineer.",
+        memoryBootstrap: "# Otto agent bootstrap"
+      ))
+    #expect(launch.arguments.starts(with: ["--mode", "json"]))
+    #expect(launch.arguments.contains("--approve"))
+    let modelIndex = try #require(launch.arguments.firstIndex(of: "--model"))
+    #expect(launch.arguments[modelIndex + 1] == "anthropic/claude-sonnet-5")
+    let thinkingIndex = try #require(launch.arguments.firstIndex(of: "--thinking"))
+    #expect(launch.arguments[thinkingIndex + 1] == "high")
+    // Workspace-write runs keep Pi's default tool set; only read-only narrows it.
+    #expect(!launch.arguments.contains("--tools"))
+    // Guidance, profile and bootstrap travel in the system prompt, not the transcript.
+    let systemIndex = try #require(launch.arguments.firstIndex(of: "--append-system-prompt"))
+    let systemPrompt = launch.arguments[systemIndex + 1]
+    #expect(systemPrompt.contains("browser.open"))
+    #expect(systemPrompt.contains("You are Beck, the release engineer."))
+    #expect(systemPrompt.contains("# Otto agent bootstrap"))
+    // The task is the final positional argument, after `--` so a leading dash is never a flag.
+    #expect(launch.arguments.suffix(2) == ["--", "Add authentication coverage."])
+    #expect(launch.workingDirectory == workspace.path)
+
+    // The bridge is registered in the project file with placeholders, never a token: the file is
+    // identical for every node and two nodes sharing a directory cannot clobber each other.
+    let file = workspace.appending(path: ".pi/mcp.json")
+    let root = try #require(
+      try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+    let servers = try #require(root["mcpServers"] as? [String: Any])
+    let otto = try #require(servers["otto"] as? [String: Any])
+    #expect(otto["command"] as? String == "/opt/otto/otto-mcp")
+    #expect(otto["timeout"] as? Int == 3_600)
+    let env = try #require(otto["env"] as? [String: String])
+    #expect(env["OTTO_CONTROL_TOKEN"] == "${OTTO_CONTROL_TOKEN}")
+    #expect(env["OTTO_CONTROL_SOCKET"] == "${OTTO_CONTROL_SOCKET}")
+    #expect(env["OTTO_NODE_ID"] == "${OTTO_NODE_ID}")
+    #expect(env["OTTO_WORKSPACE_ID"] == "${OTTO_WORKSPACE_ID}")
+    #expect(!env.values.contains { !$0.hasPrefix("${") })
+
+    // A user-authored server in the same file survives re-registration untouched.
+    var edited = root
+    var editedServers = servers
+    editedServers["docs"] = ["url": "https://example.com/mcp"]
+    edited["mcpServers"] = editedServers
+    try JSONSerialization.data(withJSONObject: edited).write(to: file)
+    _ = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: workspace.path, prompt: "Again.", ottoMCPExecutable: "/opt/otto/otto-mcp"))
+    let rewritten = try #require(
+      try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+    let rewrittenServers = try #require(rewritten["mcpServers"] as? [String: Any])
+    #expect((rewrittenServers["docs"] as? [String: String])?["url"] == "https://example.com/mcp")
+    #expect(rewrittenServers["otto"] != nil)
+
+    // Read-only declares only the inspection tools, which Pi then never offers the model.
+    let readOnly = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: workspace.path, prompt: "Look around.", permissionMode: .readOnly,
+        resumeSessionID: "01a181cc-561f-75f3-b9b5-889ecc5ce8b6"))
+    let toolsIndex = try #require(readOnly.arguments.firstIndex(of: "--tools"))
+    #expect(readOnly.arguments[toolsIndex + 1] == "read,grep,find,ls")
+    let sessionIndex = try #require(readOnly.arguments.firstIndex(of: "--session"))
+    #expect(readOnly.arguments[sessionIndex + 1] == "01a181cc-561f-75f3-b9b5-889ecc5ce8b6")
+    // Without a bridge there is nothing to trust the project for.
+    #expect(!readOnly.arguments.contains("--approve"))
+
+    // Interactive launches open Pi's own TUI: no JSON mode and no positional prompt.
+    let interactive = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(workspacePath: workspace.path, ottoMCPExecutable: "/opt/otto/otto-mcp"))
+    #expect(!interactive.arguments.contains("--mode"))
+    #expect(!interactive.arguments.contains("--"))
+    #expect(interactive.arguments.contains("--approve"))
+    #expect(interactive.arguments.contains("--append-system-prompt"))
+  }
+
+  @Test("Pi prompts that start with a mention are not read as file attachments")
+  func piPromptArgument() {
+    #expect(
+      PiAdapter.promptArgument("@Beck review this", for: .direct)
+        .hasPrefix("Task from the user:\n@Beck"))
+    #expect(PiAdapter.promptArgument("Review this", for: .direct) == "Review this")
+    #expect(
+      PiAdapter.promptArgument("Review this", for: .delegated)
+        .hasPrefix("Execution strategy: delegated."))
+  }
+
+  @Test("Pi model tables become provider-qualified ids")
+  func parsesPiModelTable() {
+    let output = """
+      provider   model                      context  max-out  thinking  images
+      anthropic  claude-sonnet-5            200K     64K      yes       yes
+      anthropic  claude-opus-5              200K     32K      yes       yes
+      openai     gpt-5.6                    400K     128K     yes       yes
+      anthropic  claude-sonnet-5            200K     64K      yes       yes
+      """
+    let models = PiAdapter.parseModels(output)
+    #expect(
+      models.map(\.id) == [
+        "anthropic/claude-sonnet-5", "anthropic/claude-opus-5", "openai/gpt-5.6",
+      ])
+    #expect(models.first?.displayName == "claude-sonnet-5 · anthropic")
+    // A signed-out Pi prints a hint instead of a table.
+    #expect(
+      PiAdapter.parseModels(
+        "No models available. Use /login to log into a provider via OAuth or API key. See:\n  /x/docs/providers.md"
+      ).isEmpty)
+  }
+
   @Test("OpenCode runs stream JSON events and carry Otto's config through the environment")
   func openCodeLaunchSpecification() async throws {
     let stub = try stubProvider(named: "opencode", version: "1.18.15")

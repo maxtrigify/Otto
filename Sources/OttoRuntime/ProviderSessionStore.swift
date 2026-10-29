@@ -60,11 +60,12 @@ public enum ProviderSessionStore {
       return parseCodexRollout(
         file, workingDirectory: workingDirectory, since: since,
         sessionID: sessionID)
-    case .openAI, .cursor, .grok, .hermes, .kimi, .openCode, .shell:
+    case .openAI, .cursor, .grok, .hermes, .kimi, .openCode, .pi, .shell:
       // Kimi keeps its own history under ~/.kimi-code, but Otto resumes it with `--continue`
       // rather than by id, so there is no session file to attribute turns to yet. OpenCode and
       // Grok do resume by real id, but keep sessions in a database / ACP update log rather than
-      // a readable transcript Otto can attribute, so turns come from the live event stream.
+      // a readable transcript Otto can attribute, so turns come from the live event stream. Pi
+      // writes readable JSONL under ~/.pi/agent/sessions, but Otto does not attribute from it yet.
       return Harvest()
     }
   }
@@ -96,7 +97,7 @@ public enum ProviderSessionStore {
         workingDirectory: workingDirectory,
         sessionID: sessionID
       )
-    case .openAI, .cursor, .grok, .hermes, .kimi, .openCode, .shell:
+    case .openAI, .cursor, .grok, .hermes, .kimi, .openCode, .pi, .shell:
       return Harvest()
     }
   }

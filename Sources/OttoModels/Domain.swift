@@ -142,6 +142,7 @@ public enum AgentProvider: String, Codable, CaseIterable, Sendable {
   case hermes = "Hermes"
   case kimi = "Kimi"
   case openCode = "OpenCode"
+  case pi = "Pi"
   case shell = "Shell"
 }
 

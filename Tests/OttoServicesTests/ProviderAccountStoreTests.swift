@@ -295,6 +295,20 @@ struct ProviderAccountStoreTests {
         == ["login", "--device-auth"])
   }
 
+  @Test func piLoginOpensPiInTheAccountHomeAndSaysToTypeLogin() {
+    // Pi signs in with /login inside its own TUI, so the login runs Pi itself, without saving
+    // a session, and the guidance says what to type.
+    let isolation = ProviderAccountIsolation.descriptor(for: .pi)
+    #expect(isolation.supportsLogin)
+    #expect(isolation.loginArguments == ["--no-session"])
+    #expect(isolation.codeLoginArguments == nil)
+    let guidance = ApplicationServices.loginGuidance(
+      provider: AgentProvider.pi.rawValue, account: "Work", macLogin: nil, usesCodeLogin: false)
+    #expect(guidance.contains("/login"))
+    #expect(guidance.contains("Work"))
+    #expect(guidance.contains("private window"))
+  }
+
   @Test func isolatedModesScrubHostCredentialsButSystemDefaultDoesNot() async throws {
     let fixture = fixture()
     defer { fixture.cleanUp() }

@@ -34,7 +34,7 @@ public struct GmailConnection: Codable, Identifiable, Equatable, Sendable {
 
 public enum SharedAppProviders {
   public static let supported: Set<AgentProvider> = [
-    .claudeCode, .codex, .cursor, .grok, .kimi, .openCode,
+    .claudeCode, .codex, .cursor, .grok, .kimi, .openCode, .pi,
   ]
 }
 

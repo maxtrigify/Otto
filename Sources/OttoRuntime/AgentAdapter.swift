@@ -155,7 +155,9 @@ public enum AgentModelCatalog {
           id: "kimi-code/kimi-for-coding-highspeed", displayName: "Kimi for Coding · High Speed"),
         AgentModel(id: "kimi-code/kimi-for-coding", displayName: "Kimi for Coding"),
       ]
-    case .hermes, .openCode, .shell:
+    case .hermes, .openCode, .pi, .shell:
+      // Pi's catalog is whatever providers the user has signed into, read live from
+      // `pi --list-models`; there is no safe static list.
       []
     }
   }
@@ -165,6 +167,8 @@ public enum AgentModelCatalog {
   public static func effortLevels(for provider: AgentProvider, modelID: String? = nil) -> [String] {
     switch provider {
     case .claudeCode, .grok: ["low", "medium", "high", "xhigh", "max"]
+    // Pi takes `--thinking` and clamps it to what the chosen model supports.
+    case .pi: ["minimal", "low", "medium", "high", "xhigh", "max"]
     case .codex:
       modelID == "gpt-5.6-luna"
         ? ["low", "medium", "high", "xhigh", "max"]
@@ -430,10 +434,13 @@ public enum ExecutableLocator {
 
   public static func firstWorking(
     candidates: [String],
-    versionArguments: [String] = ["--version"]
+    versionArguments: [String] = ["--version"],
+    environment: [String: String] = [:]
   ) async -> (path: String, version: String)? {
     for path in candidates {
-      if let version = await version(executable: path, arguments: versionArguments) {
+      if let version = await version(
+        executable: path, arguments: versionArguments, environment: environment)
+      {
         return (path, version)
       }
     }
@@ -494,15 +501,20 @@ public enum ExecutableLocator {
     }
   }
 
+  /// `environment` is applied on top of the inherited one; a CLI that is really a `node` script
+  /// behind an `env` shebang needs its interpreter's directory on PATH before it can report a
+  /// version at all.
   public static func version(
     executable: String,
-    arguments: [String] = ["--version"]
+    arguments: [String] = ["--version"],
+    environment: [String: String] = [:]
   ) async -> String? {
     do {
       let process = try PTYProcess.spawn(
         ProcessLaunchSpec(
           executable: executable,
           arguments: arguments,
+          environment: environment,
           workingDirectory: FileManager.default.currentDirectoryPath
         ))
       var data = Data()

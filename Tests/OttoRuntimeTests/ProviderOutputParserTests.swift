@@ -464,6 +464,91 @@ struct ProviderOutputParserTests {
     #expect(closing.compactMap(\.result).isEmpty)
   }
 
+  @Test("Pi events project a session, reasoning, tools, files, and the settled answer")
+  func piSuccess() throws {
+    var parser = PiOutputParser()
+    let events = try fixtureLines("pi_success", extension: "jsonl")
+      .flatMap { parser.ingest(line: $0) }
+
+    // The session header is the first record and carries the id `--session` resumes by.
+    #expect(events.first == .sessionStarted("01a181cc-561f-75f3-b9b5-889ecc5ce8b6"))
+    #expect(events.contains(.state(.working, confidence: 0.99)))
+    #expect(events.contains(.reasoning("I should read the auth module before answering.")))
+    #expect(events.contains(.toolInvoked(name: "bash", detail: "swift test")))
+    #expect(events.contains(.toolInvoked(name: "edit", detail: "sign(token, key: sessionKey)")))
+    #expect(events.contains(.assistantMessage("Authentication uses signed sessions.")))
+    // Streaming deltas never post as messages of their own.
+    #expect(!events.contains(.assistantMessage("Authentication ")))
+
+    // `agent_settled` closes the run on its own line, so the result exists before output ends
+    // and the end-of-stream hook has nothing left to add.
+    let result = try #require(events.compactMap(\.result).last)
+    #expect(result.status == .done)
+    #expect(result.summaryCandidate == "Authentication uses signed sessions.")
+    #expect(result.commandsRun == ["swift test"])
+    #expect(result.filesChanged == ["Sources/Auth.swift"])
+    #expect(events.contains(.state(.done, confidence: 0.99)))
+    #expect(parser.finish().isEmpty)
+  }
+
+  @Test("A real Pi 1.4.0 JSON run (gpt-5.6-luna over a PTY) projects the read tool and answer")
+  func piLiveCapture() throws {
+    // Captured on 28 Oct 2026 from `pi --mode json --model openai/gpt-5.6-luna` under `script`,
+    // the way Otto's PTY launches it; `message_update` deltas included.
+    var parser = PiOutputParser()
+    let events = try fixtureLines("pi_live", extension: "jsonl")
+      .flatMap { parser.ingest(line: $0) }
+    #expect(events.first == .sessionStarted("01a18263-a7c9-758d-b8f8-aa9d7a476eb7"))
+    #expect(events.contains(.toolInvoked(name: "read", detail: "note.txt")))
+    #expect(events.contains(.assistantMessage("The launch code is otter-42.")))
+    let result = try #require(events.compactMap(\.result).last)
+    #expect(result.summaryCandidate == "The launch code is otter-42.")
+    #expect(result.filesChanged.isEmpty)
+    #expect(events.last == .state(.done, confidence: 0.99))
+    #expect(parser.finish().isEmpty)
+  }
+
+  @Test("A Pi assistant message that stopped with an error fails the run")
+  func piError() throws {
+    var parser = PiOutputParser()
+    let events = try fixtureLines("pi_error", extension: "jsonl")
+      .flatMap { parser.ingest(line: $0) }
+    #expect(events.contains(.diagnostic("401 Unauthorized: invalid x-api-key")))
+    #expect(events.contains(.state(.failed, confidence: 0.99)))
+    #expect(events.compactMap(\.result).isEmpty)
+    #expect(parser.finish().isEmpty)
+  }
+
+  @Test("A Pi run that dies before settling reports its last stderr line as the reason")
+  func piUnsettledExit() {
+    var parser = PiOutputParser()
+    _ = parser.ingest(
+      line:
+        #"{"type":"session","version":3,"id":"01a1","timestamp":"2026-10-28T09:16:24.936Z","cwd":"/w"}"#
+    )
+    // Pi's stdout is JSON only; this is its stderr, interleaved by the shared terminal.
+    _ = parser.ingest(line: "No API key found for the selected model.")
+    _ = parser.ingest(line: "")
+    let closing = parser.finish()
+    #expect(closing.contains(.diagnostic("No API key found for the selected model.")))
+    #expect(closing.contains(.state(.failed, confidence: 0.9)))
+    #expect(closing.compactMap(\.result).isEmpty)
+    // Finishing is idempotent.
+    #expect(parser.finish().isEmpty)
+  }
+
+  @Test("A Pi turn with text but no settle record still yields its answer at end of stream")
+  func piFinishWithText() {
+    var parser = PiOutputParser()
+    _ = parser.ingest(
+      line:
+        #"{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Done."}],"stopReason":"stop","timestamp":1}}"#
+    )
+    let closing = parser.finish()
+    #expect(closing.compactMap(\.result).last?.summaryCandidate == "Done.")
+    #expect(closing.contains(.state(.done, confidence: 0.99)))
+  }
+
   @Test("Kimi's workspace trust prompt answers itself so project MCP servers stay enabled")
   func kimiWorkspaceTrust() throws {
     let frame = """

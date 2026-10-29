@@ -290,6 +290,20 @@ public struct ProviderAccountIsolation: Equatable, Sendable {
         loginArguments: ["auth", "login"],
         homeSubdirectory: "opencode"
       )
+    case .pi:
+      // Pi keeps credentials (auth.json), sessions, and settings under its agent directory,
+      // which PI_CODING_AGENT_DIR relocates wholesale. Sign-in happens with /login inside Pi's
+      // own TUI rather than a login subcommand, so the login opens Pi itself, in the account's
+      // home, without saving a session; the guidance tells the user to type /login.
+      ProviderAccountIsolation(
+        homeVariable: "PI_CODING_AGENT_DIR",
+        defaultHomePath: ".pi/agent",
+        loginArguments: ["--no-session"],
+        sharedEntries: [
+          "settings.json", "keybindings.json", "mcp.json", "models.json", "AGENTS.md",
+          "APPEND_SYSTEM.md", "extensions", "skills", "prompts", "themes",
+        ]
+      )
     case .cursor:
       // cursor-agent has no relocatable home; a per-account API key is the only isolation.
       ProviderAccountIsolation(apiKeyVariable: "CURSOR_API_KEY")
@@ -315,6 +329,7 @@ extension AgentProvider {
     case .hermes: "hermes"
     case .kimi: "kimi"
     case .openCode: "opencode"
+    case .pi: "pi"
     case .shell: "shell"
     }
   }

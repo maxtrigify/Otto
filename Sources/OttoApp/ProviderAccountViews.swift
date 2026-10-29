@@ -388,7 +388,7 @@ private struct ProviderAccountSection: View {
   @State private var loginTick = 0
 
   private static let providers: [AgentProvider] = [
-    .claudeCode, .codex, .grok, .kimi, .cursor, .openCode, .hermes,
+    .claudeCode, .codex, .grok, .kimi, .cursor, .openCode, .pi, .hermes,
   ]
   private static let harnessBackends: [(key: String, name: String)] = [
     ("openai.api-key", "OpenAI"), ("anthropic.api-key", "Anthropic"), ("xai.api-key", "xAI"),

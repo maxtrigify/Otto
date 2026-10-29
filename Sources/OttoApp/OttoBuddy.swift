@@ -40,7 +40,9 @@ enum OttoBuddyPreferences {
     AgentProvider(rawValue: defaults.string(forKey: providerKey) ?? "") ?? .codex
   }
 
-  static let providers: [AgentProvider] = [.codex, .claudeCode, .cursor, .openCode, .grok, .kimi]
+  static let providers: [AgentProvider] = [
+    .codex, .claudeCode, .cursor, .openCode, .grok, .kimi, .pi,
+  ]
 }
 
 enum OttoBuddySize: String, CaseIterable, Identifiable {
@@ -1519,6 +1521,7 @@ final class OttoBuddyController: NSObject {
       case .cursor: OttoPreferenceKey.cursorPermissionMode
       case .kimi: OttoPreferenceKey.kimiPermissionMode
       case .openCode: OttoPreferenceKey.openCodePermissionMode
+      case .pi: OttoPreferenceKey.piPermissionMode
       case .grok: OttoPreferenceKey.grokPermissionMode
       case .shell: OttoPreferenceKey.shellPermissionMode
       }

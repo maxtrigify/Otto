@@ -163,7 +163,7 @@ public struct AgentSetPermissionDefaultTool: OttoTool {
     inputSchema: .objectSchema(
       properties: [
         "provider": .stringSchema(
-          description: "claudeCode, codex, cursor, grok, hermes, kimi, openCode, or shell"),
+          description: "claudeCode, codex, cursor, grok, hermes, kimi, openCode, pi, or shell"),
         "permissionMode": .stringSchema(description: "readOnly, workspaceWrite, or unrestricted"),
       ],
       required: ["provider", "permissionMode"]
@@ -230,6 +230,7 @@ public func permissionKey(_ provider: AgentProvider) -> String {
   case .cursor: OttoPreferenceKey.cursorPermissionMode
   case .kimi: OttoPreferenceKey.kimiPermissionMode
   case .openCode: OttoPreferenceKey.openCodePermissionMode
+  case .pi: OttoPreferenceKey.piPermissionMode
   case .grok: OttoPreferenceKey.grokPermissionMode
   case .shell: OttoPreferenceKey.shellPermissionMode
   }

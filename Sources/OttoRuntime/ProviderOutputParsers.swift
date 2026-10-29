@@ -340,6 +340,8 @@ public enum InteractiveCompletionDetector {
       return hasPrompt("❯") || hasPrompt("›")
     case .openCode:
       return hasPrompt("❯") || hasPrompt(">_")
+    case .pi:
+      return hasPrompt("❯") || hasPrompt(">")
     case .grok:
       return hasPrompt("❯") || hasPrompt("›")
     case .shell:
@@ -1111,6 +1113,157 @@ public struct OpenCodeOutputParser: Sendable {
   }
 }
 
+/// Pi's `--mode json` emits one JSONL event per line: a `session` header, then agent, turn,
+/// message and tool-execution events, closing with `agent_settled` once no automatic work
+/// (retries, compaction recovery, queued follow-ups) remains. Stdout is reserved for JSON, so a
+/// non-JSON line is Pi's stderr arriving through the shared terminal — a sign-in hint or a crash
+/// — and is kept as the failure reason when the run ends without an answer.
+public struct PiOutputParser: Sendable {
+  private var finalText = ""
+  private var diagnostics: [String] = []
+  private var commands: [String] = []
+  private var files: [String] = []
+  private var failed = false
+  private var settled = false
+
+  public init() {}
+
+  private var nativeChildren = NativeChildEventParser(provider: .pi)
+
+  public mutating func ingest(line: String) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(line)
+    return children.events + (children.nested ? [] : ingestParent(line: line))
+  }
+
+  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
+    guard let object = jsonObject(line) else {
+      let noise = line.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !noise.isEmpty, !noise.hasPrefix("/") {
+        diagnostics.append(String(noise.prefix(500)))
+        diagnostics = Array(diagnostics.suffix(10))
+      }
+      return fallbackEvents(line)
+    }
+    var events: [ParsedAgentEvent] = []
+    switch object["type"] as? String {
+    case "session":
+      if let sessionID = object["id"] as? String, !sessionID.isEmpty {
+        events.append(.sessionStarted(sessionID))
+      }
+    case "agent_start", "turn_start":
+      events.append(.state(.working, confidence: 0.99))
+    case "message_end":
+      guard let message = object["message"] as? [String: Any],
+        message["role"] as? String == "assistant"
+      else { break }
+      for block in message["content"] as? [[String: Any]] ?? [] {
+        guard block["type"] as? String == "thinking",
+          let thinking = (block["thinking"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !thinking.isEmpty
+        else { continue }
+        events.append(.reasoning(thinking))
+      }
+      let text = Self.messageText(message["content"])
+      if !text.isEmpty {
+        finalText = text
+        events.append(.assistantMessage(text))
+      }
+      if message["stopReason"] as? String == "error" {
+        let reason =
+          (message["errorMessage"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+          ?? "Pi's model request failed"
+        failed = true
+        diagnostics.append(reason)
+        events.append(.diagnostic(reason))
+        events.append(.state(.failed, confidence: 0.99))
+      }
+    case "tool_execution_start":
+      guard let name = object["toolName"] as? String else { break }
+      let input = object["args"] as? [String: Any] ?? [:]
+      if let command = input["command"] as? String { commands.append(command) }
+      if ["edit", "write"].contains(name),
+        let path = (input["path"] ?? input["file_path"] ?? input["filePath"]) as? String,
+        !path.isEmpty
+      {
+        files.append(path)
+      }
+      events.append(
+        .toolInvoked(name: name, detail: ClaudeOutputParser.toolDetail(name: name, input: input)))
+    case "auto_retry_start":
+      if let message = object["errorMessage"] as? String, !message.isEmpty {
+        events.append(.diagnostic("Retrying after: \(message)"))
+      }
+    case "auto_retry_end":
+      if object["success"] as? Bool == false {
+        let reason = object["finalError"] as? String ?? "Pi gave up retrying the model request"
+        failed = true
+        diagnostics.append(reason)
+        events.append(.diagnostic(reason))
+        events.append(.state(.failed, confidence: 0.99))
+      }
+    case "extension_error":
+      if let message = object["error"] as? String, !message.isEmpty {
+        events.append(.diagnostic("Pi extension error: \(message)"))
+      }
+    case "agent_settled":
+      guard !settled else { break }
+      settled = true
+      if object["aborted"] as? Bool == true, !failed {
+        events.append(.diagnostic("Pi run was aborted"))
+        events.append(.state(.stopped, confidence: 0.99))
+        failed = true
+      } else {
+        events += completion()
+      }
+    default:
+      break
+    }
+    return events
+  }
+
+  /// Joins the text blocks of an assistant message's content array.
+  public static func messageText(_ content: Any?) -> String {
+    guard let blocks = content as? [[String: Any]] else {
+      return ((content as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return blocks.compactMap { block -> String? in
+      guard block["type"] as? String == "text" else { return nil }
+      return block["text"] as? String
+    }
+    .joined()
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  /// A run that exits without `agent_settled` (a crash, or a sign-in failure before the first
+  /// turn) is closed here when output ends.
+  public mutating func finish() -> [ParsedAgentEvent] {
+    guard !settled, !failed else { return [] }
+    settled = true
+    return completion()
+  }
+
+  private func completion() -> [ParsedAgentEvent] {
+    guard !failed else { return [] }
+    guard !finalText.isEmpty else {
+      return [
+        .diagnostic(diagnostics.last ?? "Pi completed without a response"),
+        .state(.failed, confidence: 0.9),
+      ]
+    }
+    return [
+      .result(
+        AgentResult(
+          status: .done,
+          summaryCandidate: finalText,
+          rawText: finalText,
+          filesChanged: unique(files),
+          commandsRun: unique(commands)
+        )),
+      .state(.done, confidence: 0.99),
+    ]
+  }
+}
+
 public enum ProviderParser: Sendable {
   case markers
   case claude(ClaudeOutputParser)
@@ -1119,6 +1272,7 @@ public enum ProviderParser: Sendable {
   case cursor(CursorOutputParser)
   case kimi(KimiOutputParser)
   case openCode(OpenCodeOutputParser)
+  case pi(PiOutputParser)
 
   public static func forProvider(_ provider: AgentProvider) -> ProviderParser {
     switch provider {
@@ -1129,6 +1283,7 @@ public enum ProviderParser: Sendable {
     case .cursor: .cursor(CursorOutputParser())
     case .kimi: .kimi(KimiOutputParser())
     case .openCode: .openCode(OpenCodeOutputParser())
+    case .pi: .pi(PiOutputParser())
     case .grok: .claude(ClaudeOutputParser())
     case .shell: .markers
     }
@@ -1138,10 +1293,19 @@ public enum ProviderParser: Sendable {
   /// ending the stream rather than by a terminating record, so the supervisor asks every parser
   /// for these when output ends; the rest have already reported their result and return nothing.
   public mutating func finish() -> [ParsedAgentEvent] {
-    guard case .openCode(var parser) = self else { return [] }
-    let events = parser.finish()
-    self = .openCode(parser)
-    return events
+    switch self {
+    case .openCode(var parser):
+      let events = parser.finish()
+      self = .openCode(parser)
+      return events
+    case .pi(var parser):
+      // Pi normally settles explicitly; this covers a process that died before it could.
+      let events = parser.finish()
+      self = .pi(parser)
+      return events
+    default:
+      return []
+    }
   }
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
@@ -1171,6 +1335,10 @@ public enum ProviderParser: Sendable {
     case .openCode(var parser):
       let events = parser.ingest(line: line)
       self = .openCode(parser)
+      return events
+    case .pi(var parser):
+      let events = parser.ingest(line: line)
+      self = .pi(parser)
       return events
     }
   }

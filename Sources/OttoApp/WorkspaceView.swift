@@ -664,6 +664,15 @@ struct WorkspaceView: View {
         perform: { quickLaunchAgent(.openCode) }
       ),
       PaletteQuickAction(
+        id: "agent.pi",
+        title: "New Pi session",
+        subtitle: "Start a new Pi conversation",
+        symbol: "function",
+        keywords: "pi pi.dev earendil zechner agent ai chat launch spawn",
+        agentProvider: .pi,
+        perform: { quickLaunchAgent(.pi) }
+      ),
+      PaletteQuickAction(
         id: "agent.grok",
         title: "New Grok session",
         subtitle: "Start a new Grok conversation",
@@ -719,6 +728,7 @@ struct WorkspaceView: View {
       case .cursor: OttoPreferenceKey.cursorPermissionMode
       case .kimi: OttoPreferenceKey.kimiPermissionMode
       case .openCode: OttoPreferenceKey.openCodePermissionMode
+      case .pi: OttoPreferenceKey.piPermissionMode
       case .grok: OttoPreferenceKey.grokPermissionMode
       case .shell: OttoPreferenceKey.shellPermissionMode
       }

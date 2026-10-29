@@ -2583,6 +2583,7 @@ struct AgentConversationBody: View {
     case .cursor: "Cursor"
     case .kimi: "Kimi"
     case .openCode: "OpenCode"
+    case .pi: "Pi"
     case .grok: "Grok"
     case .shell: node.displayName
     }

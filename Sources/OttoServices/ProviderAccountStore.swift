@@ -231,6 +231,7 @@ public final class ProviderAccountStore: ObservableObject {
     case .kimi: ["credentials"]
     case .hermes: [".env", "auth.json", "config.yaml"]
     case .openCode: ["auth.json"]
+    case .pi: ["auth.json"]
     case .cursor, .openAI, .shell: []
     }
   }

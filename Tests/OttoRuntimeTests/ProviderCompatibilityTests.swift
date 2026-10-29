@@ -30,6 +30,9 @@ struct ProviderCompatibilityTests {
     )
     #expect(grok.state == .supported)
     #expect(grok.detail == "Tested with Grok 1.0.0–<2.0.0.")
+    let pi = ProviderCompatibilityPolicy.evaluate(provider: .pi, reportedVersion: "1.4.0")
+    #expect(pi.state == .supported)
+    #expect(pi.detail == "Tested with Pi 1.0.0–<2.0.0.")
     #expect(
       ProviderCompatibilityPolicy.evaluate(
         provider: .shell,
@@ -58,5 +61,9 @@ struct ProviderCompatibilityTests {
     let oldGrok = ProviderCompatibilityPolicy.evaluate(provider: .grok, reportedVersion: "0.9.9")
     #expect(oldGrok.state == .unsupported)
     #expect(oldGrok.detail.contains("Update Grok to 1.0.0"))
+    // The deprecated @mariozechner package tops out at 0.73 and lacks the flags Otto drives.
+    let oldPi = ProviderCompatibilityPolicy.evaluate(provider: .pi, reportedVersion: "0.73.1")
+    #expect(oldPi.state == .unsupported)
+    #expect(oldPi.detail.contains("Update Pi to 1.0.0"))
   }
 }

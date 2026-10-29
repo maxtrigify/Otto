@@ -4,6 +4,21 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## Unreleased
+
+### New
+
+- **Rename a session.** Right-click a session in the Sessions sidebar (or use the pencil that appears when you hover it) and give it a name that says what it's about, such as the business or project you're working on in that chat. The bot, its history and your other sessions stay as they are, and the name survives a restart. Contributed by onlinegill (issue #17).
+- **Settings has a sidebar, and a Connectors page.** Every Settings page is now reachable from a list on the left; with the old row of tabs, the ones that didn't fit (Cloud and Mobile) couldn't be opened. Messaging (iMessage via Photon) and Mobile pairing now live together under Settings → Connectors, beside a new Telegram connector. Contributed by onlinegill.
+- **Talk to one of your Otto bots from Telegram.** In Settings → Connectors → Telegram, paste a bot token from BotFather (it goes in your Mac's Keychain), pair your own Telegram chat with a one-time code that you approve on the Mac, and choose the one saved Otto bot Telegram may message. Messages from that chat go to the bot and its reply comes back; approvals and permission prompts stay in Otto on the Mac, and nothing sent from Telegram can grant them. A group can be approved too, limited to the member who paired it. Contributed by onlinegill.
+- **Local models are easier to set up.** Pasting a bare address such as `192.168.1.20:8000/v1` works, Tailscale addresses (100.64.0.0/10) are accepted over plain HTTP, and a saved local model shows in the bot's model picker straight away, with a shortcut in the bot editor to add or edit it. A bot whose older provider session file has gone now starts a fresh one instead of failing every prompt; its conversation is kept. Contributed by onlinegill.
+- **Pi is a harness you can run agents and bots on.** Pi (pi.dev) is a small open-source coding agent that works with whichever model providers you sign into. Install it with `npm install -g @earendil-works/pi-coding-agent`, run `pi` once in Terminal and sign in with `/login`, and it appears beside Claude Code, Codex and the others when you start a session, hire a bot or build an automation. Otto reads Pi's live model list, streams its work into the chat, resumes sessions, and gives it Otto's tools through a `.pi/mcp.json` in the workspace. Pi has no approval prompts of its own, so Read only limits it to inspection tools, while Workspace and Unrestricted run with Pi's normal tools.
+
+### Fixes
+
+- **Otto no longer counts a second running copy as a crash.** Opening Otto while it was already running, or a helper starting a session while the app was up, was recorded in diagnostics as an abnormal exit. The session marker now names its process, and only a marker left by a process that has gone counts as a crash. Reported with the fix shape by mattabate (issue #23).
+- **Builds with Xcode 26.5.** One expression in the welcome view took the Swift 6.3.2 compiler too long to type-check. Contributed by pat-dubois.
+
 ## 0.2.11 — 2026-10-28
 
 ### New

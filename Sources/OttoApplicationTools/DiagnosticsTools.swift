@@ -56,7 +56,7 @@ public struct DiagnosticsRunTool: OttoTool {
       adapters ?? [
         ClaudeCodeAdapter(), CodexAdapter(), OpenAIDirectAdapter(), CursorAdapter(), GrokAdapter(),
         HermesAdapter(),
-        KimiAdapter(), OpenCodeAdapter(), ShellAdapter(),
+        KimiAdapter(), OpenCodeAdapter(), PiAdapter(), ShellAdapter(),
       ]
     self.mcpExecutablePath = mcpExecutablePath
   }
@@ -147,6 +147,7 @@ private func diagnosticProviderID(_ provider: AgentProvider) -> String {
   case .cursor: "provider.cursor"
   case .kimi: "provider.kimi"
   case .openCode: "provider.opencode"
+  case .pi: "provider.pi"
   case .grok: "provider.grok"
   case .shell: "provider.shell"
   }

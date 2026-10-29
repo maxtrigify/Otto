@@ -707,7 +707,7 @@ public struct AgentSetModelTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "agent.set_model",
     description:
-      "Switches which model and reasoning effort an agent uses from its next run onward. Otto Harness accepts provider-prefixed ids such as openai/gpt-5.6, anthropic/claude-sonnet-5, xai/grok-4.6, and moonshot/kimi-k2.5. Claude Code, Codex, Cursor, Grok, Kimi, and OpenCode accept ids from their live model catalogs. Pass model \"default\" to return to the provider default. Hermes and shell sessions do not expose model switching here.",
+      "Switches which model and reasoning effort an agent uses from its next run onward. Otto Harness accepts provider-prefixed ids such as openai/gpt-5.6, anthropic/claude-sonnet-5, xai/grok-4.6, and moonshot/kimi-k2.5. Claude Code, Codex, Cursor, Grok, Kimi, OpenCode, and Pi accept ids from their live model catalogs (Pi ids are provider/model). Pass model \"default\" to return to the provider default. Hermes and shell sessions do not expose model switching here.",
     inputSchema: .objectSchema(
       properties: [
         "agentID": .stringSchema(description: "Stable agent node UUID"),
@@ -1522,6 +1522,7 @@ private func launchCommand(for provider: AgentProvider) -> String {
   case .cursor: "cursor-agent"
   case .kimi: "kimi"
   case .openCode: "opencode"
+  case .pi: "pi"
   case .grok: "grok"
   case .shell: "shell"
   }
@@ -1531,7 +1532,7 @@ private func providerAdapters() -> [any AgentAdapter] {
   [
     ClaudeCodeAdapter(), CodexAdapter(), OpenAIDirectAdapter(), CursorAdapter(), GrokAdapter(),
     HermesAdapter(),
-    KimiAdapter(), OpenCodeAdapter(), ShellAdapter(),
+    KimiAdapter(), OpenCodeAdapter(), PiAdapter(), ShellAdapter(),
   ]
 }
 

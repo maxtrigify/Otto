@@ -101,6 +101,26 @@ public enum ProviderConversationProjection {
         else { continue }
         completedMessage = text
         streamedText = ""
+      case .pi:
+        // Deltas stream as `message_update` records and the authoritative text arrives in the
+        // assistant `message_end`, so the newest completed message is the readable answer.
+        guard let type = object["type"] as? String else { continue }
+        if type == "message_update",
+          let update = object["assistantMessageEvent"] as? [String: Any],
+          update["type"] as? String == "text_delta",
+          let delta = update["delta"] as? String
+        {
+          streamedText += delta
+        } else if type == "message_end",
+          let message = object["message"] as? [String: Any],
+          message["role"] as? String == "assistant"
+        {
+          let text = PiOutputParser.messageText(message["content"])
+          if !text.isEmpty {
+            completedMessage = text
+            streamedText = ""
+          }
+        }
       case .shell:
         // Shell output is terminal output by definition and must never leak into agent chat.
         return nil

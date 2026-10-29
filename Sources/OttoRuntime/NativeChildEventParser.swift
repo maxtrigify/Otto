@@ -28,7 +28,8 @@ struct NativeChildEventParser: Sendable {
     case .kimi: kimi(object)
     case .cursor: cursor(object)
     case .openCode: openCode(object)
-    case .shell: break
+    // Pi has no built-in subagents; anything of the kind comes from user extensions.
+    case .pi, .shell: break
     }
     let isTaskEvent =
       string(object, "type") == "system"

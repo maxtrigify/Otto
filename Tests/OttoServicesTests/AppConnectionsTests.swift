@@ -94,7 +94,7 @@ struct AppConnectionsTests {
       clientID: "fixture.apps.googleusercontent.com")
   }
 
-  @Test("One connection serves six provider identities and denies Hermes and unbound callers")
+  @Test("One connection serves every shared-app provider and denies Hermes and unbound callers")
   func sharedProviders() async throws {
     let root = try root()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -149,7 +149,7 @@ struct AppConnectionsTests {
           #expect(!names.contains("gmail.send"))
         }
       }
-      #expect(await requests.count() == 6)
+      #expect(await requests.count() == SharedAppProviders.supported.count)
       let unbound = ToolContext(actorID: "fixture", scopes: [.agentRead], source: .agent)
       #expect(await services.registry.definitions(for: unbound).isEmpty)
     } catch {

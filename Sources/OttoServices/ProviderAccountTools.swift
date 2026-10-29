@@ -230,9 +230,13 @@ extension ApplicationServices {
       macLogin.map { "This Mac already uses \(provider) as \($0). " }
       ?? "Your browser may already be signed in to \(provider). "
     let action =
-      usesCodeLogin
-      ? "Open the link below in a private browser window (Shift-Command-N), sign in to the account you want for \(account), then enter the code."
-      : "If your browser opens already signed in to that account, close the tab and open the link printed below in a private browser window (Shift-Command-N) instead, then sign in to the account you want for \(account)."
+      if provider == AgentProvider.pi.rawValue {
+        "Pi opens below. Type /login, pick the model provider, and sign in to the account you want for \(account); if the browser is already signed in to another account, copy the link into a private window (Shift-Command-N) instead. Quit Pi with /quit when it says you are signed in."
+      } else if usesCodeLogin {
+        "Open the link below in a private browser window (Shift-Command-N), sign in to the account you want for \(account), then enter the code."
+      } else {
+        "If your browser opens already signed in to that account, close the tab and open the link printed below in a private browser window (Shift-Command-N) instead, then sign in to the account you want for \(account)."
+      }
     return existing + action
   }
 

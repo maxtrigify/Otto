@@ -136,6 +136,11 @@ public enum HarnessPluginCatalog {
         workspace.appending(path: "opencode.jsonc"),
         workspace.appending(path: ".mcp.json"),
       ]
+    case .pi:
+      return [
+        home.appending(path: ".pi/agent/mcp.json"),
+        workspace.appending(path: ".pi/mcp.json"),
+      ]
     case .hermes:
       return [
         home.appending(path: ".hermes/config.yaml"),

@@ -75,13 +75,35 @@ final class ProviderModelCatalogStore: ObservableObject {
   /// Hermes owns model selection remotely. Other selectable harnesses expose a live catalog.
   static func isDiscovered(_ provider: AgentProvider) -> Bool {
     switch provider {
-    case .claudeCode, .codex, .openAI, .cursor, .kimi, .openCode, .grok: true
+    case .claudeCode, .codex, .openAI, .cursor, .kimi, .openCode, .pi, .grok: true
     case .hermes, .shell: false
     }
   }
 
   func catalog(for provider: AgentProvider, accountID: UUID? = nil) -> [AgentModel]? {
-    catalogs[Key(provider: provider, accountID: accountID)]
+    let discovered = catalogs[Key(provider: provider, accountID: accountID)]
+    return Self.withConfiguredLocalModel(
+      discovered, provider: provider, configuration: LocalModelConfiguration.load())
+  }
+
+  static func withConfiguredLocalModel(
+    _ discovered: [AgentModel]?, provider: AgentProvider,
+    configuration: LocalModelConfiguration?
+  ) -> [AgentModel]? {
+    guard provider == .openAI, let local = configuration else {
+      return discovered
+    }
+    // Configuration is stored independently of network discovery, which can
+    // be slow, stale, or unavailable when the local server is offline. Always
+    // expose the explicitly saved model in every bot picker immediately.
+    let model = AgentModel(
+      id: OttoHarnessModelSelection.persistedID(provider: .local, modelID: local.modelID),
+      displayName: "Local · \(local.modelID)")
+    var models = discovered ?? []
+    if !models.contains(where: { $0.id == model.id }) {
+      models.insert(model, at: 0)
+    }
+    return models
   }
 
   /// Starts discovery unless a recent result exists or discovery is already running.
@@ -140,6 +162,7 @@ final class ProviderModelCatalogStore: ObservableObject {
     case .cursor: models = await CursorAdapter().discoverModels(environment: environment) ?? []
     case .kimi: models = await KimiAdapter().discoverModels(environment: environment) ?? []
     case .openCode: models = await OpenCodeAdapter().discoverModels(environment: environment) ?? []
+    case .pi: models = await PiAdapter().discoverModels(environment: environment) ?? []
     case .grok: models = await GrokAdapter().discoverModels(environment: environment) ?? []
     case .hermes, .shell: models = AgentModelCatalog.options(for: provider)
     }

@@ -89,6 +89,12 @@ public enum ProviderCompatibilityPolicy {
       // resume and an OPENCODE_CONFIG_CONTENT injection, which is the surface documented for
       // 1.18; older builds are rejected rather than launched blind.
       bounds = (SemanticVersion(1, 18, 0), SemanticVersion(2, 0, 0))
+    case .pi:
+      // Pi 1.0 (the @earendil-works/pi-coding-agent package) is the first release with
+      // `--mode json`, `--session-id`, `--approve`, `--tools` allowlists and built-in MCP, which
+      // is the surface Otto drives. The deprecated 0.x @mariozechner package lacks `--approve`
+      // and MCP and is rejected rather than launched blind.
+      bounds = (SemanticVersion(1, 0, 0), SemanticVersion(2, 0, 0))
     case .grok:
       // Grok Build TUI 1.0 ships `-p` headless, `streaming-messages-json`, `--resume` by session
       // id, `--permission-mode`, `--sandbox`, and project `.grok/config.toml` MCP. Older 0.x
