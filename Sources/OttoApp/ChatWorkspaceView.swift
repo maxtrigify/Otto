@@ -3697,12 +3697,12 @@ struct ChatWorkspaceView: View {
       .simultaneousGesture(
         DragGesture(minimumDistance: 0)
           .onChanged { _ in
-            guard usesPressAndHoldVoice, !voice.pushToTalkHeld else { return }
-            Task { await voice.beginPushToTalk() }
+            guard usesPressAndHoldVoice, !voice.isHoldingVoice else { return }
+            Task { await voice.beginHeldVoice() }
           }
           .onEnded { _ in
             guard usesPressAndHoldVoice else { return }
-            Task { await voice.endPushToTalk() }
+            Task { await voice.endHeldVoice() }
           }
       )
       .disabled(voice.isVoiceActionInFlight)
@@ -3770,6 +3770,7 @@ struct ChatWorkspaceView: View {
   }
 
   private var voiceStatusLabel: String {
+    if voice.localTranscribing { return "Transcribing…" }
     if voice.isMicrophoneActive {
       return "Listening · \(voice.operatingMode.displayName)"
     }

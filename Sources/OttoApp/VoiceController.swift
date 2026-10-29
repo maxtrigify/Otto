@@ -183,6 +183,11 @@ final class VoiceController: ObservableObject {
   @Published private(set) var previewError: String?
   @Published private(set) var talkTransition: VoiceTalkTransition?
   @Published private(set) var pushToTalkHeld = false
+  /// The on-device mode being held down (button or shortcut) in Push to Talk, if any.
+  @Published private(set) var heldLocalMode: VoiceInteractionMode?
+  /// True between releasing an on-device capture and its transcript arriving. Batch engines
+  /// such as Whistle and Parakeet show nothing while listening, so this is their feedback.
+  @Published private(set) var localTranscribing = false
   @Published private(set) var parakeetInstallationState = ParakeetInstallationState.notInstalled
   @Published private(set) var parakeetWarmState = ParakeetWarmState.inactive
   @Published private(set) var whistleInstallationState = WhistleInstallationState.notInstalled
@@ -302,6 +307,8 @@ final class VoiceController: ObservableObject {
   private var lastVoiceContext: VoiceContext?
   private var knownNodeStatuses: [UUID: NodeStatus] = [:]
   private var pushToTalkMonitor: VoicePushToTalkMonitor?
+  private var commandHoldMonitor: VoicePushToTalkMonitor?
+  private var dictateHoldMonitor: VoicePushToTalkMonitor?
   private var cloudMicrophoneEnabled = false
 
   init(
@@ -643,13 +650,72 @@ final class VoiceController: ObservableObject {
         guard let self else { return }
         Task {
           if operatingMode == .pushToTalk || operatingMode == .outputOnly {
-            if pressed { await beginPushToTalk() } else { await endPushToTalk() }
+            if pressed { await beginHeldVoice() } else { await endHeldVoice() }
           } else if pressed, operatingMode == .alwaysListening {
             await toggleTalk()
           }
         }
       }
     )
+    // In Push to Talk, Command and Dictate follow the same gesture as Talk: hold to listen,
+    // release to transcribe. Handled presses are consumed, so the menu's toggle does not also
+    // fire; in other modes the monitors stand aside and the menu toggles as before.
+    commandHoldMonitor = localHoldMonitor(.command) { [weak self] in self?.commandShortcut }
+    dictateHoldMonitor = localHoldMonitor(.dictate) { [weak self] in self?.dictateShortcut }
+  }
+
+  private func localHoldMonitor(
+    _ mode: VoiceInteractionMode, shortcut: @escaping () -> VoiceShortcut?
+  ) -> VoicePushToTalkMonitor {
+    VoicePushToTalkMonitor(
+      shortcut: { shortcut() ?? mode.defaultShortcut },
+      isEnabled: { [weak self] in
+        self?.spaceIsActive == true && self?.localVoiceHoldsToTalk == true
+      },
+      changed: { [weak self] pressed in
+        Task {
+          if pressed { await self?.beginHeldLocal(mode) } else { await self?.endHeldLocal() }
+        }
+      })
+  }
+
+  /// Push to Talk and Output Only use a hold gesture for every voice action.
+  var localVoiceHoldsToTalk: Bool {
+    operatingMode == .pushToTalk || operatingMode == .outputOnly
+  }
+
+  var isHoldingVoice: Bool { pushToTalkHeld || heldLocalMode != nil }
+
+  /// Holding the voice button or Talk shortcut: realtime Talk when a cloud voice key is stored,
+  /// otherwise on-device Command, so the gesture works without a cloud provider.
+  func beginHeldVoice() async {
+    if hasAPIKey { await beginPushToTalk() } else { await beginHeldLocal(.command) }
+  }
+
+  func endHeldVoice() async {
+    if heldLocalMode != nil { await endHeldLocal() } else { await endPushToTalk() }
+  }
+
+  /// Starts on-device listening for a hold. Releasing calls `endHeldLocal`.
+  func beginHeldLocal(_ mode: VoiceInteractionMode) async {
+    guard heldLocalMode == nil, mode != .talk else { return }
+    heldLocalMode = mode
+    switch mode {
+    case .command where !(activeMode == .command && commandListening): await toggleCommand()
+    case .dictate where !(activeMode == .dictate && dictationListening): await toggleDictation()
+    default: break
+    }
+  }
+
+  /// Ends a hold: stops listening, then transcribes and runs (Command) or delivers (Dictate).
+  func endHeldLocal() async {
+    guard let mode = heldLocalMode else { return }
+    heldLocalMode = nil
+    switch mode {
+    case .command where activeMode == .command && commandListening: await toggleCommand()
+    case .dictate where activeMode == .dictate && dictationListening: await toggleDictation()
+    default: break
+    }
   }
 
   private func saveNotificationPolicy() {
@@ -784,7 +850,9 @@ final class VoiceController: ObservableObject {
     let command = ensureCommandSession()
     if activeMode == .command, commandListening {
       commandListening = false
+      localTranscribing = true
       await command.stopAndExecute()
+      localTranscribing = false
       releaseCapture(owner: "command")
       activeMode = nil
       await reconcileWakeWord()
@@ -811,7 +879,9 @@ final class VoiceController: ObservableObject {
     let dictation = ensureDictationSession()
     if activeMode == .dictate, dictationListening {
       dictationListening = false
+      localTranscribing = true
       await dictation.stopAndDeliver(to: focusedDictationTarget())
+      localTranscribing = false
       releaseCapture(owner: "dictation")
       activeMode = nil
       await reconcileWakeWord()
