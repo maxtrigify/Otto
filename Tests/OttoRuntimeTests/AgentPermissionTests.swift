@@ -190,6 +190,31 @@ struct AgentPermissionTests {
     #expect(spec.arguments.last == "List the repository files.")
   }
 
+  @Test("Claude passes Otto's tools to Otto's own approval in ask-to-approve mode")
+  func claudeAllowsOttoServerTools() async throws {
+    let adapter = ClaudeCodeAdapter(executablePath: "/bin/echo")
+    let spec = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        prompt: "Send the report.",
+        permissionMode: .workspaceWrite,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp"
+      ))
+    let index = try #require(spec.arguments.firstIndex(of: "--allowedTools"))
+    #expect(spec.arguments[index + 1] == "mcp__otto")
+    // The next argument is a flag, so the variadic list ends before the prompt.
+    #expect(spec.arguments[index + 2].hasPrefix("--"))
+    #expect(spec.arguments.last == "Send the report.")
+
+    let readOnly = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        permissionMode: .readOnly,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp"
+      ))
+    #expect(!readOnly.arguments.contains("--allowedTools"))
+  }
+
   @Test("The permission prompt flag requires the otto MCP bridge")
   func noPermissionPromptToolWithoutBridge() async throws {
     let adapter = ClaudeCodeAdapter(executablePath: "/bin/echo")

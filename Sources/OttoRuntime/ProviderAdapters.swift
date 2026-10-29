@@ -119,6 +119,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       let mcpConfig = Self.mcpConfigJSON(
         command: mcpExecutable, environment: request.controlEnvironment)
     {
+      // Otto confirms its own consequential tools (smtp.send, gmail.send, ...) through its
+      // permission card, so Claude need not ask again for Otto's server. Read-only bots keep
+      // Claude's plan-mode prompts. The variadic flag sits before another flag so it cannot
+      // swallow the trailing positional prompt.
+      if request.permissionMode == .workspaceWrite {
+        arguments += ["--allowedTools", "mcp__\(OttoMCPRegistration.serverName)"]
+      }
       arguments += ["--mcp-config", mcpConfig]
       // One appended system prompt carries both the workspace guidance and, when the memory layer
       // is active, the run's bootstrap packet (charter, compact context, memory rules).
