@@ -188,6 +188,8 @@ final class VoiceController: ObservableObject {
   /// True between releasing an on-device capture and its transcript arriving. Batch engines
   /// such as Whistle and Parakeet show nothing while listening, so this is their feedback.
   @Published private(set) var localTranscribing = false
+  /// The on-device mode whose result the voice control shows, until the next capture starts.
+  @Published private(set) var lastLocalResultMode: VoiceInteractionMode?
   @Published private(set) var parakeetInstallationState = ParakeetInstallationState.notInstalled
   @Published private(set) var parakeetWarmState = ParakeetWarmState.inactive
   @Published private(set) var whistleInstallationState = WhistleInstallationState.notInstalled
@@ -680,6 +682,41 @@ final class VoiceController: ObservableObject {
       })
   }
 
+  /// What the last on-device command or dictation heard and did, for the voice control. Short
+  /// enough for one line; `localVoiceResultDetail` carries the full explanation.
+  var localVoiceResult: String? {
+    switch lastLocalResultMode {
+    case .command:
+      let heard = commandUpdate.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+      switch commandUpdate.outcome {
+      case .completed(_, let confirmation): return confirmation
+      case .unrecognized, .clarification:
+        return heard.isEmpty ? "Heard nothing" : "Heard “\(heard)”: not a command"
+      case .sleeping: return nil
+      case nil: return commandUpdate.detail.isEmpty ? nil : commandUpdate.detail
+      }
+    case .dictate:
+      let heard = dictationUpdate.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+      if dictationUpdate.delivered, !heard.isEmpty { return "Typed “\(heard)”" }
+      if heard.isEmpty { return "Heard nothing" }
+      return dictationUpdate.detail.isEmpty ? "Heard “\(heard)”" : dictationUpdate.detail
+    case .talk, nil:
+      return nil
+    }
+  }
+
+  var localVoiceResultDetail: String? {
+    switch lastLocalResultMode {
+    case .command:
+      switch commandUpdate.outcome {
+      case .unrecognized(let reason), .clarification(let reason): return reason
+      default: return commandUpdate.detail.isEmpty ? nil : commandUpdate.detail
+      }
+    case .dictate: return dictationUpdate.detail.isEmpty ? nil : dictationUpdate.detail
+    case .talk, nil: return nil
+    }
+  }
+
   /// Push to Talk and Output Only use a hold gesture for every voice action.
   var localVoiceHoldsToTalk: Bool {
     operatingMode == .pushToTalk || operatingMode == .outputOnly
@@ -854,6 +891,7 @@ final class VoiceController: ObservableObject {
       localTranscribing = true
       await command.stopAndExecute()
       localTranscribing = false
+      lastLocalResultMode = .command
       releaseCapture(owner: "command")
       activeMode = nil
       await reconcileWakeWord()
@@ -870,6 +908,7 @@ final class VoiceController: ObservableObject {
     }
     activeMode = .command
     commandListening = true
+    lastLocalResultMode = nil
     await command.start()
   }
 
@@ -883,6 +922,7 @@ final class VoiceController: ObservableObject {
       localTranscribing = true
       await dictation.stopAndDeliver(to: focusedDictationTarget())
       localTranscribing = false
+      lastLocalResultMode = .dictate
       releaseCapture(owner: "dictation")
       activeMode = nil
       await reconcileWakeWord()
@@ -898,6 +938,7 @@ final class VoiceController: ObservableObject {
       }
       activeMode = .dictate
       dictationListening = true
+      lastLocalResultMode = nil
       await dictation.start()
     }
   }

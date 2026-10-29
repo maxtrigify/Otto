@@ -3707,7 +3707,7 @@ struct ChatWorkspaceView: View {
       )
       .disabled(voice.isVoiceActionInFlight)
       .opacity(voice.isVoiceActionInFlight ? 0.68 : 1)
-      .help(voice.primaryVoiceActionLabel)
+      .help(voice.localVoiceResultDetail ?? voice.primaryVoiceActionLabel)
       .accessibilityLabel(voice.primaryVoiceActionLabel)
 
       voiceModeMenu
@@ -3774,6 +3774,7 @@ struct ChatWorkspaceView: View {
 
   private var voiceStatusLabel: String {
     if voice.localTranscribing { return "Transcribing…" }
+    if !voiceShowsListening, let result = voice.localVoiceResult { return result }
     if voiceShowsListening {
       return "Listening · \(voice.operatingMode.displayName)"
     }
