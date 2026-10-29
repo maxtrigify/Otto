@@ -119,7 +119,8 @@ struct AppConnectionsTests {
           store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))).affectedNodeIDs
             .first)
         // Gmail reaches only bots the Mac owner allowed for it.
-        let profileID = UUID()
+        let profileID = try services.saveAgentProfile(
+          AgentProfile(name: "Fixture \(UUID())", instructions: "Test", provider: provider)).id
         try services.connectorAccess.setAllowed(true, profileID: profileID, for: .gmail)
         var definition = AgentDefinition(
           provider: provider,
@@ -348,7 +349,8 @@ struct AppConnectionsTests {
     var definition = AgentDefinition(
       provider: .codex, workingDirectory: root.path,
       launchCommand: "fixture", permissionMode: "workspaceWrite")
-    let profileID = UUID()
+    let profileID = try services.saveAgentProfile(
+      AgentProfile(name: "Fixture", instructions: "Test", provider: .codex)).id
     definition.profileID = profileID
     try services.connectorAccess.setAllowed(true, profileID: profileID, for: .gmail)
     store.dispatch(.setAgentDefinition(id: id, definition: definition))
