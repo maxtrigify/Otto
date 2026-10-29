@@ -733,11 +733,20 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     guard request.executionStrategy.isSupported(by: .openAI) else {
       throw RuntimeError.launchFailed("Otto Harness bots do not support scripted workflows")
     }
-    let selection = OttoHarnessModelSelection.resolve(request.model)
+    var selection = OttoHarnessModelSelection.resolve(request.model)
     // An account's own backend key wins; otherwise fall back to the Mac-wide Models key.
     var apiKey = request.account?.harnessCredentials[selection.provider.credentialKey]
     if apiKey == nil { apiKey = try await credentialProvider(selection.provider) }
     apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+    // A bot with no model chosen defaults to OpenAI. On a Mac set up only for a local server,
+    // use that server's default model instead of failing for a missing OpenAI key.
+    if (request.model ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      apiKey?.isEmpty != false, let local = LocalModelConfiguration.load()
+    {
+      selection = OttoHarnessModelSelection(provider: .local, modelID: local.modelID)
+      apiKey = try await credentialProvider(.local)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     guard selection.provider == .local || (apiKey?.isEmpty == false) else {
       throw RuntimeError.launchFailed(
         "\(selection.provider.displayName) API key is missing. Add it in Otto Settings → Models, then retry."
