@@ -45,7 +45,13 @@ struct HiddenBrowserTests {
       nodeID: id,
       request: BrowserInteractionRequest(
         revision: page.pageRevision, kind: .click, elementID: button.id))
-    let changed = try await runtime.inspectPage(nodeID: id)
+    // The click is delivered to WebKit, which updates the DOM on its own schedule; a slow CI
+    // runner can inspect before the handler has run. Poll briefly rather than inspect once.
+    var changed = try await runtime.inspectPage(nodeID: id)
+    for _ in 0..<40 where !changed.elements.contains(where: { $0.name == "Clicked" }) {
+      try await Task.sleep(for: .milliseconds(100))
+      changed = try await runtime.inspectPage(nodeID: id)
+    }
     #expect(changed.elements.contains(where: { $0.name == "Clicked" }))
     let capture = try await runtime.capture(nodeID: id)
     #expect(capture.pixelWidth > 0)

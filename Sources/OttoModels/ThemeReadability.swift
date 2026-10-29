@@ -29,8 +29,9 @@ extension ThemeColor {
     if contrastRatio(with: background) >= target { return self }
     let extreme: ThemeColor = {
       if let anchor, anchor.contrastRatio(with: background) >= target { return anchor }
-      return Self.black.contrastRatio(with: background) >= Self.white.contrastRatio(
-        with: background) ? Self.black : Self.white
+      return Self.black.contrastRatio(with: background)
+        >= Self.white.contrastRatio(
+          with: background) ? Self.black : Self.white
     }()
     // Contrast against a fixed background is monotonic along the blend toward the extreme, so
     // a short bisection finds the least change that clears the floor.

@@ -39,7 +39,8 @@ struct ThemeContrastSnapshotTests {
       .padding(8)
       .background(palette.ink)
       .environment(\.ottoPalette, palette)
-      try await capture(terminal, size: NSSize(width: 576, height: 166), to: directory,
+      try await capture(
+        terminal, size: NSSize(width: 576, height: 166), to: directory,
         name: "terminal-\(theme.id)")
 
       let band = VStack(spacing: 0) {
@@ -60,7 +61,8 @@ struct ThemeContrastSnapshotTests {
       }
       .frame(width: 420)
       .environment(\.ottoPalette, palette)
-      try await capture(band, size: NSSize(width: 420, height: 102), to: directory,
+      try await capture(
+        band, size: NSSize(width: 420, height: 102), to: directory,
         name: "header-band-\(theme.id)")
     }
   }

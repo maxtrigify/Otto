@@ -134,7 +134,9 @@ struct TerminalContrastFilterTests {
           continue
         }
         var end = text.index(after: afterEscape)
-        while end < text.endIndex, !(text[end].asciiValue.map { (0x40...0x7E).contains($0) } ?? false) {
+        while end < text.endIndex,
+          !(text[end].asciiValue.map { (0x40...0x7E).contains($0) } ?? false)
+        {
           end = text.index(after: end)
         }
         let parameters = String(text[text.index(after: afterEscape)..<end])

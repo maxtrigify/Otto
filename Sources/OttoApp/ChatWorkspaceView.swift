@@ -400,21 +400,11 @@ struct ChatWorkspaceView: View {
       }
     }
     .overlay(alignment: .topLeading) { sessionCreatorLayer }
-    .alert(
-      "Rename session",
-      isPresented: Binding(
-        get: { renamingSessionID != nil },
-        set: { if !$0 { renamingSessionID = nil } }
-      )
-    ) {
-      TextField("Business or project name", text: $sessionNameDraft)
-        .accessibilityIdentifier("session-rename-name")
-      Button("Cancel", role: .cancel) { renamingSessionID = nil }
-      Button("Rename") { saveSessionName() }
-        .disabled(sessionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    } message: {
-      Text("Name this conversation without changing the bot or its history.")
-    }
+    .modifier(
+      SessionRenameAlert(
+        isPresented: isRenamingSession, name: $sessionNameDraft,
+        cancel: { renamingSessionID = nil }, save: saveSessionName)
+    )
     .onAppear {
       if sessionCanvasID == nil { sessionCanvasID = store.activeCanvas.id }
       repairSelection()
@@ -2818,6 +2808,14 @@ struct ChatWorkspaceView: View {
         closeSession(node)
       }
     }
+  }
+
+  // Kept out of `body`: the inline binding and alert closures pushed Swift 6.2's type checker
+  // over its time limit for the whole body expression (Xcode 26.3, which CI pins).
+  private var isRenamingSession: Binding<Bool> {
+    Binding(
+      get: { renamingSessionID != nil },
+      set: { if !$0 { renamingSessionID = nil } })
   }
 
   private func beginSessionRename(_ node: OttoNode) {
@@ -5851,6 +5849,31 @@ private struct CreateConversationProjectSheet: View {
     for url in panel.urls {
       let path = url.standardizedFileURL.resolvingSymlinksInPath().path
       if !folders.contains(path) { folders.append(path) }
+    }
+  }
+}
+
+/// The rename dialog for a one-off session. A modifier rather than an inline `.alert` so the
+/// chat workspace's body stays cheap for the type checker.
+private struct SessionRenameAlert: ViewModifier {
+  @Binding var isPresented: Bool
+  @Binding var name: String
+  let cancel: () -> Void
+  let save: () -> Void
+
+  private var trimmedName: String {
+    name.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  func body(content: Content) -> some View {
+    content.alert("Rename session", isPresented: $isPresented) {
+      TextField("Business or project name", text: $name)
+        .accessibilityIdentifier("session-rename-name")
+      Button("Cancel", role: .cancel, action: cancel)
+      Button("Rename", action: save)
+        .disabled(trimmedName.isEmpty)
+    } message: {
+      Text("Name this conversation without changing the bot or its history.")
     }
   }
 }

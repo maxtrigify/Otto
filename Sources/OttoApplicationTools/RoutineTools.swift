@@ -168,7 +168,9 @@ public struct RoutineCreateTool: OttoTool {
 
 public struct RoutineUpdateTool: OttoTool {
   public static let definition = ToolDefinition(
-    name: "routine.update", description: "Updates an automation. Use routine.get first, then pass the full routine with enabled set to true to turn it on or false to pause it. Bots and sessions can enable automations. Webhook automations need a signing secret configured before they can turn on.",
+    name: "routine.update",
+    description:
+      "Updates an automation. Use routine.get first, then pass the full routine with enabled set to true to turn it on or false to pause it. Bots and sessions can enable automations. Webhook automations need a signing secret configured before they can turn on.",
     inputSchema: routineSchema, outputSchema: .objectSchema(), requiredScopes: [.canvasWrite],
     riskLevel: .consequential)
   private let handler: @MainActor @Sendable (Routine, ToolContext) async throws -> Routine
