@@ -1884,7 +1884,8 @@ struct ChatWorkspaceView: View {
         mentionProfiles: mentionableProfiles,
         mentionAppearance: { services.botAppearance.appearance(for: $0) },
         waitingTerminals: waitingTerminalNotices(owner: node.id),
-        openTerminal: { services.revealTerminal($0) }
+        openTerminal: { services.revealTerminal($0) },
+        voiceInsertion: isSelected ? voice.chatVoiceInsertion : nil
       )
       .id(node.id)
     }
@@ -3698,7 +3699,8 @@ struct ChatWorkspaceView: View {
         DragGesture(minimumDistance: 0)
           .onChanged { _ in
             guard usesPressAndHoldVoice, !voice.isHoldingVoice else { return }
-            Task { await voice.beginHeldVoice() }
+            let toChat = selectedAgent != nil
+            Task { await voice.beginHeldVoice(fallingBackToChat: toChat) }
           }
           .onEnded { _ in
             guard usesPressAndHoldVoice else { return }

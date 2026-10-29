@@ -190,6 +190,11 @@ final class VoiceController: ObservableObject {
   @Published private(set) var localTranscribing = false
   /// The on-device mode whose result the voice control shows, until the next capture starts.
   @Published private(set) var lastLocalResultMode: VoiceInteractionMode?
+  /// Speech a hold in Chat heard that was not a command, for the open chat's composer.
+  @Published private(set) var chatVoiceInsertion: ChatVoiceInsertion?
+  @Published private(set) var lastCommandWentToChat = false
+  /// Set by a hold that started in Chat until its command result arrives.
+  private var heldFallsBackToChat = false
   @Published private(set) var parakeetInstallationState = ParakeetInstallationState.notInstalled
   @Published private(set) var parakeetWarmState = ParakeetWarmState.inactive
   @Published private(set) var whistleInstallationState = WhistleInstallationState.notInstalled
@@ -691,7 +696,9 @@ final class VoiceController: ObservableObject {
       switch commandUpdate.outcome {
       case .completed(_, let confirmation): return confirmation
       case .unrecognized, .clarification:
-        return heard.isEmpty ? "Heard nothing" : "Heard “\(heard)”: not a command"
+        if heard.isEmpty { return "Heard nothing" }
+        return lastCommandWentToChat
+          ? "Added “\(heard)” to chat" : "Heard “\(heard)”: not a command"
       case .sleeping: return nil
       case nil: return commandUpdate.detail.isEmpty ? nil : commandUpdate.detail
       }
@@ -709,6 +716,8 @@ final class VoiceController: ObservableObject {
     switch lastLocalResultMode {
     case .command:
       switch commandUpdate.outcome {
+      case .unrecognized where lastCommandWentToChat, .clarification where lastCommandWentToChat:
+        return "Not a command, so it went into the chat box. Press Return to send it."
       case .unrecognized(let reason), .clarification(let reason): return reason
       default: return commandUpdate.detail.isEmpty ? nil : commandUpdate.detail
       }
@@ -725,9 +734,15 @@ final class VoiceController: ObservableObject {
   var isHoldingVoice: Bool { pushToTalkHeld || heldLocalMode != nil }
 
   /// Holding the voice button or Talk shortcut: realtime Talk when a cloud voice key is stored,
-  /// otherwise on-device Command, so the gesture works without a cloud provider.
-  func beginHeldVoice() async {
-    if hasAPIKey { await beginPushToTalk() } else { await beginHeldLocal(.command) }
+  /// otherwise on-device Command, so the gesture works without a cloud provider. From Chat,
+  /// speech that is not a command goes into the chat box instead.
+  func beginHeldVoice(fallingBackToChat: Bool = false) async {
+    if hasAPIKey {
+      await beginPushToTalk()
+    } else {
+      await beginHeldLocal(.command)
+      heldFallsBackToChat = fallingBackToChat
+    }
   }
 
   func endHeldVoice() async {
@@ -738,6 +753,7 @@ final class VoiceController: ObservableObject {
   func beginHeldLocal(_ mode: VoiceInteractionMode) async {
     guard heldLocalMode == nil, mode != .talk else { return }
     heldLocalMode = mode
+    heldFallsBackToChat = false
     switch mode {
     case .command where !(activeMode == .command && commandListening): await toggleCommand()
     case .dictate where !(activeMode == .dictate && dictationListening): await toggleDictation()
@@ -909,6 +925,7 @@ final class VoiceController: ObservableObject {
     activeMode = .command
     commandListening = true
     lastLocalResultMode = nil
+    lastCommandWentToChat = false
     await command.start()
   }
 
@@ -1022,6 +1039,7 @@ final class VoiceController: ObservableObject {
       for await update in created.updates {
         guard !Task.isCancelled else { break }
         self?.commandUpdate = update
+        if let outcome = update.outcome { self?.handOffToChat(outcome, heard: update.transcript) }
         if case .completed? = update.outcome {
           // Ticks "Say a command" on Home's Getting started card.
           UserDefaults.standard.set(true, forKey: FirstRunPreferences.voiceCommandUsed)
@@ -1422,6 +1440,20 @@ final class VoiceController: ObservableObject {
     relayQualificationSpeakerCount = summary.speakers
   }
 
+  /// A Chat hold's speech that is not a command goes into the open chat's composer.
+  private func handOffToChat(_ outcome: LocalVoiceCommandOutcome, heard: String) {
+    defer { heldFallsBackToChat = false }
+    let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard heldFallsBackToChat, !text.isEmpty else { return }
+    switch outcome {
+    case .unrecognized, .clarification:
+      chatVoiceInsertion = ChatVoiceInsertion(text: text)
+      lastCommandWentToChat = true
+    case .completed, .sleeping:
+      break
+    }
+  }
+
   /// Dictation lands on the focused agent or terminal node; anything else has no harness.
   private func focusedDictationTarget() -> UUID? {
     guard let selected = store.activeCanvas.selectedNodeID,
@@ -1774,4 +1806,10 @@ private final class UnavailableSpeechTranscriber: SpeechTranscriber, @unchecked 
   }
 
   func stopTranscribing() async {}
+}
+
+/// One piece of speech for the chat composer; each has its own id so repeats still arrive.
+struct ChatVoiceInsertion: Equatable {
+  let id = UUID()
+  let text: String
 }
