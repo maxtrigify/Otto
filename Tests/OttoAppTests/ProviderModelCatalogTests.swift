@@ -9,11 +9,13 @@ import Testing
 
 @Suite("Provider model picker catalog")
 struct ProviderModelCatalogTests {
-  @Test("One-off sessions expose harnesses without the owned API transport")
+  @Test("One-off sessions offer every agent runtime, Otto's harness under its own name")
   func oneOffSessionProviders() {
     #expect(SessionLaunchProviderCatalog.providers.contains(.codex))
-    #expect(!SessionLaunchProviderCatalog.providers.contains(.openAI))
+    #expect(SessionLaunchProviderCatalog.providers.contains(.openAI))
     #expect(!SessionLaunchProviderCatalog.providers.contains(.shell))
+    #expect(SessionLaunchProviderCatalog.title(for: .openAI) == "Otto Harness · API & local models")
+    #expect(SessionLaunchProviderCatalog.title(for: .codex) == "Codex")
   }
 
   @Test("Every account-aware provider is loaded through the shared catalog")

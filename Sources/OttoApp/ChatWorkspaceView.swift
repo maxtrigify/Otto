@@ -997,7 +997,7 @@ struct ChatWorkspaceView: View {
             } label: {
               HStack(spacing: 10) {
                 AgentProviderLogo(provider: provider, size: 15, color: palette.paper)
-                Text(provider.rawValue)
+                Text(SessionLaunchProviderCatalog.title(for: provider))
                   .font(.ottoDisplay(12).weight(.medium))
                 Spacer()
               }

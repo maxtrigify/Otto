@@ -6,10 +6,15 @@ import OttoServices
 import SwiftUI
 
 enum SessionLaunchProviderCatalog {
-  /// The owned multi-provider transport exists to give durable bots a literal system prompt. A
-  /// one-off terminal session should offer actual harness products, so it must not show the
-  /// legacy `OpenAI API` enum label as a second Codex-looking choice.
-  static let providers = AgentProvider.allCases.filter { $0 != .shell && $0 != .openAI }
+  /// Every agent runtime a one-off session can start, including Otto's own harness, which is
+  /// the only way to run local (OpenAI-compatible) models and direct API models in a session.
+  static let providers = AgentProvider.allCases.filter { $0 != .shell }
+
+  /// The harness is listed under its own name. Its legacy `OpenAI API` enum label would read as a
+  /// second Codex choice, which is why it was hidden before.
+  static func title(for provider: AgentProvider) -> String {
+    provider == .openAI ? "Otto Harness · API & local models" : provider.rawValue
+  }
 }
 
 /// Process-wide cache of provider model catalogs that have to be read from a CLI.
