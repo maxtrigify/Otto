@@ -10,8 +10,10 @@ struct BackupSettingsView: View {
   @State private var status: String?
   @State private var isWorking = false
 
-  private static let backupType =
-    UTType(filenameExtension: OttoBackup.fileExtension, conformingTo: .zip) ?? .zip
+  /// Otto declares no document type, so macOS gives `.ottobackup` files a dynamic type made from
+  /// the extension alone. Building the same type here is what lets the open panel select them;
+  /// a type that also conforms to zip never matches the files on disk.
+  private static let backupType = UTType(filenameExtension: OttoBackup.fileExtension) ?? .data
 
   var body: some View {
     Form {
