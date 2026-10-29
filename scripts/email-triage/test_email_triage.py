@@ -52,6 +52,20 @@ class DistillTests(unittest.TestCase):
         self.assertNotIn("HTML version", record["body"])
         self.assertEqual(record["uid"], 7)
         self.assertEqual(record["subject"], "Quick question")
+        self.assertNotIn("message_id", record)
+
+    def test_keeps_threading_headers_for_replies(self):
+        raw = make_message(
+            headers={
+                "Message-ID": "<m2@example.com>",
+                "Reply-To": "billing@example.com",
+                "References": "<m0@example.com>   <m1@example.com>",
+            }
+        )
+        record = triage.distill(raw, 8, blocked=set(), allowed=set())
+        self.assertEqual(record["message_id"], "<m2@example.com>")
+        self.assertEqual(record["reply_to"], "billing@example.com")
+        self.assertEqual(record["references"], "<m0@example.com> <m1@example.com>")
 
     def test_falls_back_to_html_when_no_plain_part(self):
         msg = EmailMessage()

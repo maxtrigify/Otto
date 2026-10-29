@@ -905,7 +905,8 @@ public actor AgentSupervisor {
     toolName: String,
     detail: String = "",
     timeout: Duration? = nil,
-    isProviderPermission: Bool = false
+    isProviderPermission: Bool = false,
+    detailLimit: Int = 240
   ) async throws -> Bool {
     guard let agent = agents[agentID], agent.snapshot.exitCode == nil else {
       throw RuntimeError.agentNotFound(agentID)
@@ -916,7 +917,8 @@ public actor AgentSupervisor {
     if isBypassEligible && agent.bypassProviderPermissions { return true }
     let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
     let reason = sanitizedAttentionReason(
-      trimmedDetail.isEmpty ? "Wants to use \(toolName)" : "\(toolName): \(trimmedDetail)"
+      trimmedDetail.isEmpty ? "Wants to use \(toolName)" : "\(toolName): \(trimmedDetail)",
+      limit: detailLimit
     )
     return try await withCheckedThrowingContinuation { continuation in
       let requestID = UUID()
@@ -1603,10 +1605,10 @@ public actor AgentSupervisor {
     agent.harvestedTurnCount = harvest.turns.count
   }
 
-  private func sanitizedAttentionReason(_ reason: String) -> String {
+  private func sanitizedAttentionReason(_ reason: String, limit: Int = 240) -> String {
     let plain = TerminalOutputSearch.plainText(reason)
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    return String(plain.prefix(240))
+    return String(plain.prefix(limit))
   }
 
   private func appendTranscript(

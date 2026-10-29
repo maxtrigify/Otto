@@ -7,6 +7,8 @@ struct SMTPSendInput: Codable, Sendable {
   var to: String
   var subject: String
   var body: String
+  var inReplyTo: String?
+  var references: String?
 }
 
 /// Sends mail through the SMTP server the user configured under Connectors. Like gmail.send,
@@ -17,12 +19,16 @@ struct SMTPSendTool: OttoTool {
   static let definition = ToolDefinition(
     name: "smtp.send",
     description:
-      "Send a plain-text email through the SMTP account configured in Otto. Requires Otto confirmation of the exact recipient, subject and body. Never retry an uncertain send without checking with the user.",
+      "Send a plain-text email through the SMTP account configured in Otto. To reply, pass the original's Message-ID as inReplyTo (and its References, if known) so the reply stays in the thread. Requires Otto confirmation of the exact recipient, subject and body. Never retry an uncertain send without checking with the user.",
     inputSchema: .objectSchema(
       properties: [
         "to": .stringSchema(description: "Recipient email address"),
         "subject": .stringSchema(description: "Complete subject"),
         "body": .stringSchema(description: "Complete plain-text message"),
+        "inReplyTo": .stringSchema(
+          description: "Message-ID of the email replied to, such as <abc@example.com>"),
+        "references": .stringSchema(
+          description: "The replied-to email's References header, if known"),
       ], required: ["to", "subject", "body"]),
     outputSchema: .object(["type": .string("object")]),
     requiredScopes: [.agentRead], riskLevel: .consequential,
@@ -46,7 +52,9 @@ extension ApplicationServices {
         guard subject.utf8.count <= 998, body.utf8.count <= 200_000 else {
           throw ToolRegistryError.invalidInput("Subject or body is too long")
         }
-        try await self.smtp.send(to: input.to, subject: subject, body: body)
+        try await self.smtp.send(
+          to: input.to, subject: subject, body: body, inReplyTo: input.inReplyTo,
+          references: input.references)
         return .object(["sent": .bool(true), "to": .string(input.to)])
       },
       availability: { [weak self] context in

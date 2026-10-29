@@ -99,7 +99,9 @@ public struct AgentRequestPermissionTool: OttoTool {
         timeout: input.toolName == "browser.click" ? browserConfirmationTimeout : nil,
         // Dotted Otto tools are app confirmations; the supervisor also applies tool bypass
         // to browser.click, while account access and other app confirmations stay explicit.
-        isProviderPermission: !input.toolName.contains(".")
+        isProviderPermission: !input.toolName.contains("."),
+        detailLimit: EmailApprovalSummary.tools.contains(input.toolName)
+          ? EmailApprovalSummary.limit : 240
       )
       if approved {
         return .allow(updatedInput: input.input ?? .object([:]))
@@ -124,11 +126,38 @@ public struct AgentRequestPermissionTool: OttoTool {
 
   private static func detail(toolName: String, input: JSONValue?) -> String {
     guard case .object(let object)? = input else { return "" }
+    if let email = EmailApprovalSummary.text(toolName: toolName, input: object) { return email }
     var bridged: [String: Any] = [:]
     for (key, value) in object {
       if case .string(let string) = value { bridged[key] = string }
     }
     return ClaudeOutputParser.toolDetail(name: toolName, input: bridged)
+  }
+}
+
+/// What the approval card shows before an email goes out: the recipient, the subject and the
+/// body itself, so the person approves the exact message rather than a one-line excerpt.
+public enum EmailApprovalSummary {
+  public static let tools: Set<String> = ["gmail.send", "gmail.reply", "smtp.send"]
+  /// Room for the headers and a long body; longer bodies say how much is not shown.
+  public static let limit = 2_400
+  public static let bodyLimit = 2_000
+
+  public static func text(toolName: String, input: [String: JSONValue]) -> String? {
+    guard tools.contains(toolName) else { return nil }
+    let to = input["to"]?.stringValue ?? "(no recipient)"
+    let subject = input["subject"]?.stringValue ?? "(no subject)"
+    let body = (input["body"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    var lines = ["Send email to \(to)", "Subject: \(subject)"]
+    if toolName == "gmail.reply" || input["inReplyTo"]?.stringValue != nil {
+      lines.append("Reply in the original thread")
+    }
+    lines.append("")
+    lines.append(String(body.prefix(bodyLimit)))
+    if body.count > bodyLimit {
+      lines.append("…and \(body.count - bodyLimit) more characters")
+    }
+    return lines.joined(separator: "\n")
   }
 }
 

@@ -563,6 +563,7 @@ public final class ApplicationServices: ObservableObject {
       try await registerAppConnectionTools()
       try await registerCalendarTools()
       try await registerSMTPTools()
+      try await registerEmailTriageTools()
       await migrateLegacyBotNotesToBrain()
       try await registerRoutineTools()
       try await registerBriefTools()

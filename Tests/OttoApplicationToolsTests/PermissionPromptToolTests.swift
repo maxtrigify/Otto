@@ -193,6 +193,48 @@ struct PermissionPromptToolTests {
     try await supervisor.stop(agentID: agentID)
   }
 
+  @Test("An email approval shows the recipient, subject and the whole body")
+  func emailApprovalShowsMessage() async throws {
+    let supervisor = AgentSupervisor()
+    let registry = ToolRegistry()
+    try await registry.register(AgentRequestPermissionTool(supervisor: supervisor))
+    let agentID = try await spawnLongRunningOneShot(supervisor: supervisor)
+    let body = "Hi Amy,\n\n" + String(repeating: "The invoice is approved. ", count: 30) + "\nSam"
+
+    let call = Task {
+      try await registry.call(
+        name: AgentPermissionPrompt.toolName,
+        input: .object([
+          "tool_name": .string("smtp.send"),
+          "input": .object([
+            "to": .string("amy@example.com"), "subject": .string("Re: Invoice"),
+            "body": .string(body), "inReplyTo": .string("<m1@example.com>"),
+          ]),
+        ]),
+        context: agentContext(agentID: agentID)
+      )
+    }
+    try await waitForState(.waitingPermission, id: agentID, supervisor: supervisor)
+    let reason = try #require(try await supervisor.snapshot(agentID: agentID).attentionReason)
+    #expect(reason.hasPrefix("smtp.send: Send email to amy@example.com\nSubject: Re: Invoice\n"))
+    #expect(reason.contains("Reply in the original thread"))
+    #expect(reason.hasSuffix(body))
+    try await supervisor.resolvePermission(agentID: agentID, approved: false)
+    _ = try await call.value
+    try await supervisor.stop(agentID: agentID)
+  }
+
+  @Test("A long email body says how much the approval card leaves out")
+  func longEmailBodyIsCounted() {
+    let body = String(repeating: "a", count: EmailApprovalSummary.bodyLimit + 25)
+    let text = EmailApprovalSummary.text(
+      toolName: "gmail.send",
+      input: ["to": .string("amy@example.com"), "subject": .string("Hi"), "body": .string(body)])
+    #expect(text?.hasSuffix("…and 25 more characters") == true)
+    #expect(text?.contains("Reply in the original thread") == false)
+    #expect(EmailApprovalSummary.text(toolName: "Bash", input: [:]) == nil)
+  }
+
   @Test("A denied request returns the deny contract with a user-facing message")
   func deniedRequestExplains() async throws {
     let supervisor = AgentSupervisor()

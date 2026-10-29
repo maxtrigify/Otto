@@ -20,10 +20,13 @@ protocol GmailOperation: Sendable {
   static var required: [String] { get }
   static var scope: String { get }
   static var writes: Bool { get }
+  /// Sends mail, so every call needs the person's approval of the exact message.
+  static var sends: Bool { get }
 }
 extension GmailOperation {
   static var scope: String { AppConnectionsStore.readScope }
   static var writes: Bool { false }
+  static var sends: Bool { false }
 }
 enum GmailSearch: GmailOperation {
   static let name = "gmail.search"
@@ -46,7 +49,7 @@ enum GmailThread: GmailOperation {
 enum GmailDraft: GmailOperation {
   static let name = "gmail.draft"
   static let description =
-    "Save a plain-text draft in Gmail connected in Otto. Does not send. Supply the complete recipient, subject and body."
+    "Save a plain-text draft in Gmail connected in Otto. Does not send. Supply the complete recipient, subject and body. Pass messageID to save it as a reply in that message's thread."
   static let required = ["to", "subject", "body"]
   static var scope: String { AppConnectionsStore.composeScope }
   static let writes = true
@@ -58,6 +61,16 @@ enum GmailSend: GmailOperation {
   static let required = ["to", "subject", "body"]
   static var scope: String { AppConnectionsStore.sendScope }
   static let writes = true
+  static let sends = true
+}
+enum GmailReply: GmailOperation {
+  static let name = "gmail.reply"
+  static let description =
+    "Reply to a Gmail message in its own thread. Supply messageID and the complete recipient, subject (usually \"Re: \" and the original subject) and body. Requires Otto confirmation of the exact message; draft with gmail.draft first when the person may want changes."
+  static let required = ["messageID", "to", "subject", "body"]
+  static var scope: String { AppConnectionsStore.sendScope }
+  static let writes = true
+  static let sends = true
 }
 struct GmailTool<Operation: GmailOperation>: OttoTool {
   static var definition: ToolDefinition {
@@ -73,7 +86,9 @@ struct GmailTool<Operation: GmailOperation>: OttoTool {
             "type": .string("integer"), "minimum": .number(1), "maximum": .number(20),
           ]),
           "pageToken": .stringSchema(description: "nextPageToken returned by gmail.search"),
-          "messageID": .stringSchema(description: "Gmail message ID"),
+          "messageID": .stringSchema(
+            description: "Gmail message ID; for gmail.draft and gmail.reply, the message replied to"
+          ),
           "threadID": .stringSchema(description: "Gmail thread ID"),
           "to": .stringSchema(description: "Recipient email address"),
           "subject": .stringSchema(description: "Complete subject"),
@@ -81,10 +96,9 @@ struct GmailTool<Operation: GmailOperation>: OttoTool {
         ], required: Operation.required),
       outputSchema: .object(["type": .string("object")]),
       requiredScopes: [.agentRead],
-      riskLevel: Operation.name == "gmail.send"
-        ? .consequential : (Operation.writes ? .reversible : .read),
-      requiresConfirmation: Operation.name == "gmail.send",
-      externalEffect: Operation.name == "gmail.send" ? .sendOrPublish : nil)
+      riskLevel: Operation.sends ? .consequential : (Operation.writes ? .reversible : .read),
+      requiresConfirmation: Operation.sends,
+      externalEffect: Operation.sends ? .sendOrPublish : nil)
   }
   let handler: @Sendable (GmailToolInput, ToolContext) async throws -> JSONValue
   func call(_ input: GmailToolInput, context: ToolContext) async throws -> JSONValue {
@@ -123,6 +137,7 @@ extension ApplicationServices {
     try await registerGmail(GmailThread.self)
     try await registerGmail(GmailDraft.self)
     try await registerGmail(GmailSend.self)
+    try await registerGmail(GmailReply.self)
   }
   private func registerGmail<O: GmailOperation>(_ operation: O.Type) async throws {
     try await registry.register(
@@ -239,13 +254,28 @@ extension ApplicationServices {
             GmailMessageCodec.normalized($0, includeBody: true)
           }),
       ])
-    case "gmail.draft", "gmail.send":
-      let raw = try GmailMessageCodec.raw(to: input.to, subject: input.subject, body: input.body)
-      let message = JSONValue.object(["raw": .string(raw)])
+    case "gmail.draft", "gmail.send", "gmail.reply":
+      // A draft with messageID, and every reply, is threaded under the original message.
+      var thread: GmailMessageCodec.ReplyThread?
+      if O.name == "gmail.reply" || (O.name == "gmail.draft" && input.messageID != nil) {
+        let id = try GmailMessageCodec.identifier(input.messageID)
+        let original = try await appConnections.request(
+          account: account, path: "messages/\(id)",
+          query: [URLQueryItem(name: "format", value: "metadata")]
+            + ["Message-ID", "References"].map {
+              URLQueryItem(name: "metadataHeaders", value: $0)
+            })
+        thread = try GmailMessageCodec.replyThread(original)
+      }
+      let raw = try GmailMessageCodec.raw(
+        to: input.to, subject: input.subject, body: input.body, replyingTo: thread)
+      var message: [String: JSONValue] = ["raw": .string(raw)]
+      if let thread { message["threadId"] = .string(thread.threadID) }
+      let sends = O.name != "gmail.draft"
       return try await appConnections.request(
         account: account,
-        path: O.name == "gmail.send" ? "messages/send" : "drafts", method: "POST",
-        body: O.name == "gmail.send" ? message : .object(["message": message]))
+        path: sends ? "messages/send" : "drafts", method: "POST",
+        body: sends ? .object(message) : .object(["message": .object(message)]))
     default: throw AppConnectionError.unavailable
     }
   }
@@ -262,7 +292,30 @@ enum GmailMessageCodec {
     }
     return value
   }
-  static func raw(to: String?, subject: String?, body: String?) throws -> String {
+  /// What a reply needs from the original message to stay in its thread.
+  struct ReplyThread: Equatable {
+    var threadID: String
+    var messageID: String
+    var references: String
+  }
+
+  static func replyThread(_ original: JSONValue) throws -> ReplyThread {
+    let headers = original["payload"]?["headers"]?.arrayValue ?? []
+    func header(_ name: String) -> String? {
+      headers.first { $0["name"]?.stringValue?.caseInsensitiveCompare(name) == .orderedSame }?[
+        "value"]?.stringValue
+    }
+    let threadID = try identifier(original["threadId"]?.stringValue)
+    guard let messageID = header("Message-ID"), MailHeaders.isMessageID(messageID) else {
+      throw AppConnectionError.invalidMessage
+    }
+    let references = MailHeaders.references(appending: messageID, to: header("References"))
+    return ReplyThread(threadID: threadID, messageID: messageID, references: references)
+  }
+
+  static func raw(
+    to: String?, subject: String?, body: String?, replyingTo thread: ReplyThread? = nil
+  ) throws -> String {
     guard let to, let subject, let body, !to.isEmpty, to.utf8.count <= 512,
       subject.utf8.count <= 998, body.utf8.count <= 1_000_000,
       !to.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }),
@@ -283,8 +336,10 @@ enum GmailMessageCodec {
     let encodedBody = Data(body.utf8).base64EncodedString(options: [
       .lineLength76Characters, .endLineWithCarriageReturn, .endLineWithLineFeed,
     ])
+    let threading =
+      thread.map { "In-Reply-To: \($0.messageID)\r\nReferences: \($0.references)\r\n" } ?? ""
     return Data(
-      "To: \(to)\r\nSubject: \(encodedSubject)\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n\(encodedBody)"
+      "To: \(to)\r\nSubject: \(encodedSubject)\r\n\(threading)MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n\(encodedBody)"
         .utf8
     ).base64URL
   }

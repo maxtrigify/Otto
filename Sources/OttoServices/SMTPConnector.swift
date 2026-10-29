@@ -122,8 +122,12 @@ public actor SMTPConnector {
     }
   }
 
-  /// Sends one plain-text message. Callers must have obtained Otto's confirmation first.
-  public func send(to: String, subject: String, body: String) async throws {
+  /// Sends one plain-text message. Callers must have obtained Otto's confirmation first. With
+  /// `inReplyTo`, the message is threaded as a reply to that Message-ID.
+  public func send(
+    to: String, subject: String, body: String, inReplyTo: String? = nil,
+    references: String? = nil
+  ) async throws {
     guard let configuration else { throw SMTPError.notConfigured }
     guard let password = try await secrets.value(for: passwordKey) else {
       throw SMTPError.notConfigured
@@ -131,7 +135,8 @@ public actor SMTPConnector {
     guard Self.isBareAddress(to) else { throw SMTPError.invalidField("Recipient") }
     let message = try Self.message(
       from: configuration.fromAddress, to: to, subject: subject, body: body,
-      date: .now, messageID: "<\(UUID().uuidString)@\(Self.domain(of: configuration.fromAddress))>")
+      date: .now, messageID: "<\(UUID().uuidString)@\(Self.domain(of: configuration.fromAddress))>",
+      inReplyTo: inReplyTo, references: references)
     try await Self.deliver(
       message: message, recipient: to, configuration: configuration, password: password)
   }
@@ -141,7 +146,8 @@ public actor SMTPConnector {
   /// Builds an RFC 5322 plain-text message. Recipient and header values are rejected when they
   /// contain CR or LF so a caller cannot inject extra headers or recipients.
   static func message(
-    from: String, to: String, subject: String, body: String, date: Date, messageID: String
+    from: String, to: String, subject: String, body: String, date: Date, messageID: String,
+    inReplyTo: String? = nil, references: String? = nil
   ) throws -> String {
     for (name, value) in [("From", from), ("To", to), ("Subject", subject)] {
       guard !value.isEmpty, !value.contains(where: \.isNewline) else {
@@ -156,12 +162,20 @@ public actor SMTPConnector {
       body
       .replacingOccurrences(of: "\r\n", with: "\n")
       .replacingOccurrences(of: "\n", with: "\r\n")
-    let headers = [
+    var headers = [
       "From: \(from)",
       "To: \(to)",
       "Subject: \(encodedSubject)",
       "Date: \(rfc2822(date))",
       "Message-ID: \(messageID)",
+    ]
+    if let inReplyTo {
+      guard MailHeaders.isMessageID(inReplyTo) else { throw SMTPError.invalidField("In-Reply-To") }
+      headers.append("In-Reply-To: \(inReplyTo)")
+      headers.append(
+        "References: \(MailHeaders.references(appending: inReplyTo, to: references))")
+    }
+    headers += [
       "MIME-Version: 1.0",
       "Content-Type: text/plain; charset=UTF-8",
       "Content-Transfer-Encoding: 8bit",

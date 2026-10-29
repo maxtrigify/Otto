@@ -137,7 +137,14 @@ def distill(raw: bytes, uid: int, blocked: set[str], allowed: set[str]) -> dict 
         when = parsedate_to_datetime(str(date)).isoformat() if date else None
     except (TypeError, ValueError):
         when = None
-    return {"uid": uid, "from": sender, "subject": subject, "date": when, "body": body}
+    record = {"uid": uid, "from": sender, "subject": subject, "date": when, "body": body}
+    # Threading headers let Otto send the reply in the original conversation.
+    for key, header in (("message_id", "Message-ID"), ("reply_to", "Reply-To"),
+                        ("references", "References")):
+        value = " ".join(str(msg.get(header, "")).split())
+        if value:
+            record[key] = value
+    return record
 
 
 def new_uids(search_reply: list[bytes], last_uid: int) -> list[int]:
