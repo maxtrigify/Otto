@@ -224,11 +224,16 @@ struct OttoApp: App {
       .frame(width: 1116, height: 790)
       // Settings is its own window, so it follows the active theme rather than macOS.
       .preferredColorScheme(settingsColorScheme)
+      .environment(\.ottoPalette, OttoPalette(theme: settingsTheme))
     }
   }
 
+  private var settingsTheme: OttoThemeDefinition {
+    OttoThemeCatalog.theme(id: store.activeCanvas.themeID)
+  }
+
   private var settingsColorScheme: ColorScheme {
-    OttoThemeCatalog.theme(id: store.activeCanvas.themeID).isLightAppearance ? .light : .dark
+    settingsTheme.isLightAppearance ? .light : .dark
   }
 
   private var selectedSettingsPage: Binding<OttoSettingsPage> {
