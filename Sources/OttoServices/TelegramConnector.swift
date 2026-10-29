@@ -208,7 +208,6 @@ public final class TelegramConnector: ObservableObject {
   @Published public private(set) var pendingGroupID: Int64?
   @Published public private(set) var pendingGroupSenderID: Int64?
   @Published public private(set) var groupPairingCode: String?
-  @Published public private(set) var selectedBotID: UUID?
 
   private weak var services: ApplicationServices?
   private let secrets: any SecretStore
@@ -218,6 +217,7 @@ public final class TelegramConnector: ObservableObject {
   private var pollTask: Task<Void, Never>?
   private var offset: Int64
   private var pendingSenderID: Int64?
+  private var activeBotByChatID: [Int64: UUID] = [:]
   private var pairingExpiry: Date?
   private var groupPairingExpiry: Date?
   private let credentialKey: String
@@ -240,7 +240,13 @@ public final class TelegramConnector: ObservableObject {
     self.approvedGroupID = (defaults.object(forKey: "\(prefix).group") as? NSNumber)?.int64Value
     self.approvedGroupSenderID =
       (defaults.object(forKey: "\(prefix).group.sender") as? NSNumber)?.int64Value
-    self.selectedBotID = defaults.string(forKey: "\(prefix).bot").flatMap(UUID.init(uuidString:))
+    if let legacy = defaults.string(forKey: "\(prefix).bot").flatMap(UUID.init(uuidString:)) {
+      // Before multi-select, the Mac owner chose one Otto bot. Carry that choice over once.
+      if services.connectorAccess.bots(for: .telegram).isEmpty {
+        try? services.connectorAccess.setAllowed(true, profileID: legacy, for: .telegram)
+      }
+      defaults.removeObject(forKey: "\(prefix).bot")
+    }
   }
 
   public var bots: [AgentProfile] {
@@ -249,16 +255,29 @@ public final class TelegramConnector: ObservableObject {
     }
   }
 
-  /// The Mac owner selects the sole bot exposed to Telegram. Chat commands
-  /// cannot change this binding or access another Otto bot.
-  public func selectBot(_ id: UUID?) {
-    guard id == nil || bots.contains(where: { $0.id == id }) else { return }
-    selectedBotID = id
-    if let id {
-      defaults.set(id.uuidString, forKey: "\(prefix).bot")
-    } else {
-      defaults.removeObject(forKey: "\(prefix).bot")
+  private var noBotsMessage: String {
+    "No Otto bot is allowed on Telegram. Allow one on the Mac in Connectors → Telegram."
+  }
+
+  /// Otto bots this Telegram connection may reach. The Mac owner grants them in
+  /// Connectors → Telegram; chat messages can only pick among these.
+  public var allowedBots: [AgentProfile] {
+    guard let access = services?.connectorAccess else { return [] }
+    return bots.filter { access.canUse(.telegram, profileID: $0.id) }
+  }
+
+  /// The bot a chat is talking to. Chosen with /use; defaults to the first allowed bot.
+  private func activeBot(for chat: Int64) -> AgentProfile? {
+    let allowed = allowedBots
+    if let id = activeBotByChatID[chat], let bot = allowed.first(where: { $0.id == id }) {
+      return bot
     }
+    return allowed.first
+  }
+
+  private func allowedBot(matching handle: String) -> AgentProfile? {
+    let wanted = handle.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")).lowercased()
+    return allowedBots.first { $0.handle.lowercased() == wanted }
   }
 
   public func connect(token: String) async {
@@ -322,7 +341,7 @@ public final class TelegramConnector: ObservableObject {
       pendingGroupID = nil
       pendingGroupSenderID = nil
       groupPairingCode = nil
-      selectedBotID = nil
+      activeBotByChatID = [:]
       pendingChatID = nil
       pendingSenderID = nil
       pairingCode = nil
@@ -455,20 +474,35 @@ public final class TelegramConnector: ObservableObject {
     switch command {
     case .help:
       try? await client.send(
-        "Otto commands:\n/bots — show the Otto bot selected on the Mac\nSend normal text to that bot. Only the Mac owner can change the bot. Tool approvals remain in Otto on the Mac.",
+        "Otto commands:\n/bots — list the Otto bots you can reach\n/use @handle — talk to that bot in this chat\n/bot @handle message — ask one bot once\nPlain text goes to this chat's bot. The Mac owner decides which bots are allowed. Tool approvals stay in Otto on the Mac.",
         to: chat)
     case .bots:
-      let selected = selectedBotID.flatMap { id in bots.first(where: { $0.id == id }) }
-      try? await client.send(
-        selected.map { "Connected Otto bot: @\($0.handle) — \($0.name)" }
-          ?? "No Otto bot selected. Select one on the Mac in Connectors → Telegram.", to: chat)
-    case .use, .send:
-      try? await client.send(
-        "Bot selection is locked on the Mac. Open Otto → Connectors → Telegram to choose the bot.",
-        to: chat)
+      let allowed = allowedBots
+      guard !allowed.isEmpty else {
+        try? await client.send(noBotsMessage, to: chat)
+        return
+      }
+      let current = activeBot(for: chat)?.id
+      let lines = allowed.map { bot in
+        "\(bot.id == current ? "•" : " ") @\(bot.handle) — \(bot.name)"
+      }
+      try? await client.send("Otto bots you can reach:\n" + lines.joined(separator: "\n"), to: chat)
+    case .use(let handle):
+      guard let bot = allowedBot(matching: handle) else {
+        try? await client.send("No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
+        return
+      }
+      activeBotByChatID[chat] = bot.id
+      try? await client.send("This chat now talks to @\(bot.handle).", to: chat)
+    case .send(let handle, let text):
+      guard let bot = allowedBot(matching: handle) else {
+        try? await client.send("No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
+        return
+      }
+      await sendPrompt(text, to: bot, client: client, chat: chat)
     case .message(let prompt):
-      guard let id = selectedBotID, let bot = bots.first(where: { $0.id == id }) else {
-        try? await client.send("Select an Otto bot in Mac → Connectors → Telegram.", to: chat)
+      guard let bot = activeBot(for: chat) else {
+        try? await client.send(noBotsMessage, to: chat)
         return
       }
       await sendPrompt(prompt, to: bot, client: client, chat: chat)

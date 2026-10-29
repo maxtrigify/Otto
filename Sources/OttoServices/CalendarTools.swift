@@ -164,14 +164,14 @@ extension ApplicationServices {
   private func calendarAvailable(
     _ context: ToolContext, scope: String, writes: Bool = false
   ) async -> Bool {
-    guard let provider = await sharedAppsProvider(context, writes: writes) else { return false }
+    guard let provider = await sharedAppsProvider(context, writes: writes, connector: .calendar) else { return false }
     return appConnections.available(provider: provider, scope: scope)
   }
 
   private func calendarAccount(
     _ accountID: UUID?, context: ToolContext, scope: String, writes: Bool = false
   ) async throws -> GmailConnection {
-    guard await sharedAppsProvider(context, writes: writes) != nil else {
+    guard await sharedAppsProvider(context, writes: writes, connector: .calendar) != nil else {
       throw AppConnectionError.unavailable
     }
     return try appConnections.resolve(accountID, scope: scope)

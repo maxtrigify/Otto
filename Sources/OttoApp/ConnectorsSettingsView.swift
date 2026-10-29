@@ -1,67 +1,206 @@
+import OttoModels
 import OttoServices
 import SwiftUI
 
-/// Keep every phone and messaging integration under a single Settings page.
-/// Reuse the existing Mobile and Photon views so their saved state and
-/// permission flows remain unchanged.
+/// Every connector Otto can use, shown as tiles. Each tile opens that connector's setup and the
+/// list of Otto bots allowed to use it.
 struct ConnectorsSettingsView: View {
   let services: ApplicationServices
-  @State private var selected: ConnectorDestination = .telegram
+  @ObservedObject private var access: ConnectorAccessStore
+  @State private var selected: ConnectorKind?
 
-  private enum ConnectorDestination: String, CaseIterable, Identifiable {
-    case telegram, messaging, email, mobile
-    var id: Self { self }
-    var label: String {
-      switch self {
-      case .telegram: "Telegram"
-      case .messaging: "iMessage"
-      case .email: "Email"
-      case .mobile: "Mobile"
-      }
-    }
+  init(services: ApplicationServices) {
+    self.services = services
+    _access = ObservedObject(wrappedValue: services.connectorAccess)
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 14) {
-        Label(selected.label, systemImage: "point.3.connected.trianglepath.dotted")
-          .font(.headline)
-        Spacer()
-        Picker("Connector", selection: $selected) {
-          ForEach(ConnectorDestination.allCases) { destination in
-            Text(destination.label).tag(destination)
+    Group {
+      if let kind = selected {
+        ConnectorDetail(kind: kind, services: services, access: access, onBack: { selected = nil })
+      } else {
+        grid
+      }
+    }
+    .frame(minWidth: 780, minHeight: 710)
+  }
+
+  private var grid: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 18) {
+        Text("Connectors").font(.title2.weight(.semibold))
+        Text("Connect the services Otto uses. Each one lists the Otto bots allowed to use it.")
+          .font(.caption).foregroundStyle(.secondary)
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 14)], spacing: 14) {
+          ForEach(ConnectorKind.allCases) { kind in
+            Button {
+              selected = kind
+            } label: {
+              ConnectorTile(kind: kind, botCount: access.bots(for: kind).count)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("connector-tile-\(kind.rawValue)")
           }
         }
-        .pickerStyle(.segmented)
-        .frame(width: 390)
-        .accessibilityIdentifier("connector-destinations")
+      }
+      .padding(28)
+    }
+  }
+}
+
+private extension ConnectorKind {
+  var symbol: String {
+    switch self {
+    case .telegram: "paperplane.fill"
+    case .iMessage: "message.fill"
+    case .mobile: "iphone"
+    case .gmail: "envelope.fill"
+    case .calendar: "calendar"
+    case .email: "tray.and.arrow.up.fill"
+    }
+  }
+}
+
+private struct ConnectorTile: View {
+  let kind: ConnectorKind
+  let botCount: Int
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Image(systemName: kind.symbol)
+        .font(.title2)
+        .frame(width: 44, height: 44)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+      Text(kind.title).font(.headline)
+      Text(botCount == 0 ? "No bots allowed" : "\(botCount) bot\(botCount == 1 ? "" : "s") allowed")
+        .font(.caption).foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(14)
+    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary))
+  }
+}
+
+private struct ConnectorDetail: View {
+  let kind: ConnectorKind
+  let services: ApplicationServices
+  @ObservedObject var access: ConnectorAccessStore
+  let onBack: () -> Void
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Button(action: onBack) {
+          Label("Connectors", systemImage: "chevron.left")
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("connector-back")
+        Spacer()
+        Text(kind.title).font(.headline)
+        Spacer()
       }
       .padding(.horizontal, 28)
       .padding(.vertical, 14)
-      Text(
-        "One place for Otto's messaging and mobile connections. Other integrations, such as WhatsApp, can be added here in the future."
-      )
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 28)
-      .padding(.bottom, 10)
       Divider()
-      Group {
-        switch selected {
-        case .telegram:
-          TelegramConnectionSettings(telegram: services.telegram)
-        case .messaging:
-          MessagingSettingsView(messaging: services.messaging)
-        case .email:
-          SMTPConnectionSettings(smtp: services.smtp)
-        case .mobile:
-          MobileSettingsView(services: services)
+      setup
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      Divider()
+      BotAccessSection(kind: kind, services: services, access: access)
+        .frame(height: 250)
+    }
+  }
+
+  @ViewBuilder private var setup: some View {
+    switch kind {
+    case .telegram:
+      TelegramConnectionSettings(telegram: services.telegram)
+    case .iMessage:
+      MessagingSettingsView(messaging: services.messaging)
+    case .mobile:
+      MobileSettingsView(services: services)
+    case .gmail:
+      AppConnectionsView(connections: services.appConnections, onClose: onBack)
+    case .calendar:
+      CalendarConnectionSettings(connections: services.appConnections)
+    case .email:
+      SMTPConnectionSettings(smtp: services.smtp)
+    }
+  }
+}
+
+/// Multi-select list of Otto bots allowed to use one connector. Nothing is allowed by default.
+private struct BotAccessSection: View {
+  let kind: ConnectorKind
+  let services: ApplicationServices
+  @ObservedObject var access: ConnectorAccessStore
+  @State private var error: String?
+
+  var body: some View {
+    let bots = services.botRoster().map(\.profile).sorted {
+      $0.name.localizedStandardCompare($1.name) == .orderedAscending
+    }
+    VStack(alignment: .leading, spacing: 8) {
+      Text("OTTO BOTS THAT CAN USE \(kind.title.uppercased())")
+        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+      if bots.isEmpty {
+        Text("Create a bot in Chat → Bots first.").foregroundStyle(.secondary)
+      } else {
+        List(bots) { bot in
+          Toggle(isOn: binding(for: bot)) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(bot.name)
+              Text("@\(bot.handle)").font(.caption).foregroundStyle(.secondary)
+            }
+          }
+          .accessibilityIdentifier("access-\(kind.rawValue)-\(bot.handle)")
         }
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      if let error {
+        Text(error).font(.caption).foregroundStyle(.red)
+      }
+      Text("A bot only reaches \(kind.title) when it is ticked here.")
+        .font(.caption).foregroundStyle(.secondary)
     }
-    .frame(minWidth: 780, minHeight: 710)
+    .padding(28)
+  }
+
+  private func binding(for bot: AgentProfile) -> Binding<Bool> {
+    Binding(
+      get: { access.canUse(kind, profileID: bot.id) },
+      set: { allowed in
+        do {
+          try access.setAllowed(allowed, profileID: bot.id, for: kind)
+          error = nil
+        } catch {
+          self.error = error.localizedDescription
+        }
+      })
+  }
+}
+
+/// Google Calendar uses the Google account connected for Gmail, with calendar access added.
+private struct CalendarConnectionSettings: View {
+  @ObservedObject var connections: AppConnectionsStore
+
+  var body: some View {
+    Form {
+      Section("Google Calendar") {
+        Text(
+          "Calendar uses your Google account. Grant calendar access so allowed bots can list events and create them on your primary calendar."
+        )
+        .font(.caption).foregroundStyle(.secondary)
+        if let error = connections.error {
+          Text(error).font(.caption).foregroundStyle(.red)
+        }
+        Button(connections.accounts.isEmpty ? "Connect Google Calendar" : "Grant calendar access") {
+          Task { await connections.connect(allowCalendar: true) }
+        }
+        .disabled(connections.isConnecting)
+        .accessibilityIdentifier("calendar-connect")
+      }
+    }
+    .formStyle(.grouped)
   }
 }
 
@@ -78,7 +217,7 @@ private struct TelegramConnectionSettings: View {
         Label(telegram.status, systemImage: "paperplane.circle")
           .accessibilityIdentifier("telegram-connector-status")
         Text(
-          "Telegram can message one Otto bot you choose below. Private chats and approved groups are supported. Group access is limited to the Telegram member who pairs it."
+          "Telegram can reach the Otto bots you allow below. Private chats and approved groups are supported. Group access is limited to the Telegram member who pairs it."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -167,28 +306,11 @@ private struct TelegramConnectionSettings: View {
             .font(.caption).foregroundStyle(.secondary)
           }
         }
-        Section("Connected Otto bot") {
-          if telegram.bots.isEmpty {
-            Text("Create a saved bot in Otto → Chat → Bots first.")
-              .foregroundStyle(.secondary)
-          } else {
-            Picker(
-              "Allow Telegram to talk to",
-              selection: Binding<UUID?>(
-                get: { telegram.selectedBotID },
-                set: { telegram.selectBot($0) })
-            ) {
-              Text("No bot selected (messages disabled)").tag(UUID?.none)
-              ForEach(telegram.bots) { bot in
-                Text("\(bot.name) (@\(bot.handle))").tag(Optional(bot.id))
-              }
-            }
-            .accessibilityIdentifier("telegram-otto-bot-picker")
-            Text(
-              "Only the chosen bot is accessible from Telegram. Telegram /use and /bot commands cannot switch bots. Send /bots to check the selected bot, then send a message."
-            )
-            .font(.caption).foregroundStyle(.secondary)
-          }
+        Section("Bots") {
+          Text(
+            "Choose which Otto bots Telegram can reach in the bot access list below. Chats switch between them with /use."
+          )
+          .font(.caption).foregroundStyle(.secondary)
           Text(
             "Telegram is not an approval channel. Permission prompts and sensitive actions must be reviewed in Otto on the Mac."
           )

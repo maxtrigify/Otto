@@ -118,13 +118,15 @@ struct AppConnectionsTests {
         let id = try #require(
           store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))).affectedNodeIDs
             .first)
-        store.dispatch(
-          .setAgentDefinition(
-            id: id,
-            definition: AgentDefinition(
-              provider: provider,
-              workingDirectory: root.path, launchCommand: "fixture",
-              permissionMode: "workspaceWrite")))
+        // Gmail reaches only bots the Mac owner allowed for it.
+        let profileID = UUID()
+        try services.connectorAccess.setAllowed(true, profileID: profileID, for: .gmail)
+        var definition = AgentDefinition(
+          provider: provider,
+          workingDirectory: root.path, launchCommand: "fixture",
+          permissionMode: "workspaceWrite")
+        definition.profileID = profileID
+        store.dispatch(.setAgentDefinition(id: id, definition: definition))
         _ = try await supervisor.spawn(
           provider: provider,
           specification: ProcessLaunchSpec(
@@ -343,9 +345,12 @@ struct AppConnectionsTests {
     try await services.registerAppConnectionTools()
     let id = try #require(
       store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))).affectedNodeIDs.first)
-    let definition = AgentDefinition(
+    var definition = AgentDefinition(
       provider: .codex, workingDirectory: root.path,
       launchCommand: "fixture", permissionMode: "workspaceWrite")
+    let profileID = UUID()
+    definition.profileID = profileID
+    try services.connectorAccess.setAllowed(true, profileID: profileID, for: .gmail)
     store.dispatch(.setAgentDefinition(id: id, definition: definition))
     _ = try await supervisor.spawn(
       provider: .codex,

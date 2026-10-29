@@ -357,7 +357,7 @@ struct SpatialWorkflowTests {
       themeList.map(\.id) == [
         "field-notes", "aurora", "highfell", "silverbough", "mistfall", "duneveil",
         "halcyon", "ringfall", "shorelight", "farfield", "afterglow", "nightspire", "graphite",
-        "velvet", "nightscreen", "glasswing", "nightglass",
+        "velvet", "nightscreen", "glasswing", "nightglass", "daylight",
       ])
     let geometryBeforeTheme = await store.activeCanvas.nodes.map(\.frame)
     _ = try await registry.call(

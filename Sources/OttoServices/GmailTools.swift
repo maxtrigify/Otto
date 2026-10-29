@@ -109,14 +109,14 @@ extension ApplicationServices {
   func registerAppConnectionTools() async throws {
     try await registry.register(
       AppAccountsTool { [weak self] context in
-        guard let self, await self.sharedAppsProvider(context) != nil else {
+        guard let self, await self.sharedAppsProvider(context, connector: .gmail) != nil else {
           throw AppConnectionError.unavailable
         }
         return await self.connectedAppAccounts()
       },
       availability: { [weak self] context in
         guard let self else { return false }
-        return await self.sharedAppsProvider(context) != nil
+        return await self.sharedAppsProvider(context, connector: .gmail) != nil
       })
     try await registerGmail(GmailSearch.self)
     try await registerGmail(GmailRead.self)
@@ -131,14 +131,16 @@ extension ApplicationServices {
         return try await self.performGmail(input, context: context, operation: operation)
       },
       availability: { [weak self] context in
-        guard let self, let provider = await self.sharedAppsProvider(context, writes: O.writes)
+        guard let self,
+          let provider = await self.sharedAppsProvider(
+            context, writes: O.writes, connector: .gmail)
         else { return false }
         return await self.appConnections.available(provider: provider, scope: O.scope)
       })
   }
-  func sharedAppsProvider(_ context: ToolContext, writes: Bool = false) async
-    -> AgentProvider?
-  {
+  func sharedAppsProvider(
+    _ context: ToolContext, writes: Bool = false, connector: ConnectorKind? = nil
+  ) async -> AgentProvider? {
     // Identity is authenticated by the control grant; never route by a model-supplied provider.
     guard context.source == .agent, let nodeID = context.sourceNodeID,
       let snapshot = try? await supervisor.snapshot(agentID: nodeID),
@@ -150,6 +152,12 @@ extension ApplicationServices {
     else { return nil }
     if writes, node.agentDefinition?.permissionMode == AgentPermissionMode.readOnly.rawValue {
       return nil
+    }
+    // The Mac owner decides per connector which Otto bots may use it.
+    if let connector {
+      guard let profileID = node.agentDefinition?.profileID,
+        connectorAccess.canUse(connector, profileID: profileID)
+      else { return nil }
     }
     return snapshot.provider
   }
@@ -171,7 +179,7 @@ extension ApplicationServices {
     _ input: GmailToolInput, context: ToolContext,
     operation: O.Type
   ) async throws -> JSONValue {
-    guard await sharedAppsProvider(context, writes: O.writes) != nil else {
+    guard await sharedAppsProvider(context, writes: O.writes, connector: .gmail) != nil else {
       throw AppConnectionError.unavailable
     }
     let account = try appConnections.resolve(input.accountID, scope: O.scope)
