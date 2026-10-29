@@ -1,13 +1,69 @@
 import AppKit
+import OttoApplicationTools
 import OttoBrowser
 import OttoCore
 import OttoModels
+import OttoRuntime
+import OttoTools
 import Testing
 
 @testable import OttoApp
 
 @Suite("Hidden browser", .serialized)
 struct HiddenBrowserTests {
+  @Test("Send-labelled browser controls follow the agent approval mode", arguments: [false, true])
+  @MainActor func browserClickApprovalMode(bypass: Bool) async throws {
+    _ = NSApplication.shared
+    let store = CanvasStore()
+    let runtime = BrowserRuntime()
+    let receipt = store.dispatch(.createNode(kind: .browser, at: WorldPoint(x: 0, y: 0)))
+    let id = try #require(receipt.affectedNodeIDs.first)
+    let html = "<button onclick=\"this.textContent='Clicked'\">Send Messages</button>"
+    let session = BrowserSession(
+      url: "data:text/html;base64," + Data(html.utf8).base64EncodedString())
+    store.dispatch(.setBrowserSession(id: id, session: session))
+    await runtime.synchronize(nodeID: id, session: session)
+    await BrowserRendererPool.configure(store: store, runtime: runtime)
+    defer {
+      store.dispatch(.closeNode(id))
+      BrowserRendererPool.prune(snapshot: store.snapshot)
+    }
+    let supervisor = AgentSupervisor()
+    let agentID = try await supervisor.spawn(
+      provider: .claudeCode,
+      specification: ProcessLaunchSpec(
+        executable: "/bin/sh", arguments: ["-c", "sleep 20"],
+        workingDirectory: FileManager.default.temporaryDirectory.path),
+      permissionMode: bypass ? .unrestricted : .workspaceWrite)
+    var context = ToolContext(
+      actorID: "otto-agent-\(agentID.uuidString)", scopes: [.agentRead, .canvasRead, .canvasWrite],
+      source: .agent, sourceNodeID: agentID, sourceCanvasID: store.snapshot.activeCanvasID)
+    let page = try await runtime.inspectPage(nodeID: id)
+    let button = try #require(page.elements.first(where: { $0.name == "Send Messages" }))
+    let input = BrowserElementInput(
+      nodeID: id, pageRevision: page.pageRevision, elementID: button.id)
+    let click = BrowserClickTool(store: store, runtime: runtime)
+    await #expect(throws: ToolRegistryError.confirmationRequired("browser.click")) {
+      try await click.call(input, context: context)
+    }
+    let approval = try await AgentRequestPermissionTool(
+      supervisor: supervisor, browserConfirmationTimeout: .milliseconds(50)
+    ).call(AgentPermissionPromptInput(toolName: "browser.click"), context: context)
+    #expect(approval.behavior == (bypass ? "allow" : "deny"))
+    if approval.behavior == "allow" {
+      context.confirmed = true
+      _ = try await click.call(input, context: context)
+    }
+    var changed = try await runtime.inspectPage(nodeID: id)
+    for _ in 0..<40 where bypass && !changed.elements.contains(where: { $0.name == "Clicked" }) {
+      try await Task.sleep(for: .milliseconds(100))
+      changed = try await runtime.inspectPage(nodeID: id)
+    }
+    #expect(changed.elements.contains(where: { $0.name == "Clicked" }) == bypass)
+    #expect(await !supervisor.hasPendingPermission(agentID: agentID))
+    try await supervisor.stop(agentID: agentID)
+  }
+
   @Test @MainActor func preservesSpecializedWebRenderer() async throws {
     let store = CanvasStore()
     let runtime = BrowserRuntime()

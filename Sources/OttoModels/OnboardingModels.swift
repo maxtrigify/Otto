@@ -217,23 +217,25 @@ public struct GettingStartedState: Sendable, Equatable {
   public var hasGivenTask: Bool
   public var hasUsedVoiceCommand: Bool
   public var hasMorningBrief: Bool
+  public var hasJoinedCommunity: Bool
   public var hasMetOttoOnScreen: Bool
 
   public init(
     hasPreferredName: Bool, hasBot: Bool, hasGivenTask: Bool, hasUsedVoiceCommand: Bool,
-    hasMorningBrief: Bool, hasMetOttoOnScreen: Bool = false
+    hasMorningBrief: Bool, hasJoinedCommunity: Bool = false, hasMetOttoOnScreen: Bool = false
   ) {
     self.hasPreferredName = hasPreferredName
     self.hasBot = hasBot
     self.hasGivenTask = hasGivenTask
     self.hasUsedVoiceCommand = hasUsedVoiceCommand
     self.hasMorningBrief = hasMorningBrief
+    self.hasJoinedCommunity = hasJoinedCommunity
     self.hasMetOttoOnScreen = hasMetOttoOnScreen
   }
 }
 
 public enum GettingStartedItemID: String, Sendable, CaseIterable {
-  case aboutYou, hireAgent, firstTask, voiceCommand, morningBrief, ottoOnScreen
+  case aboutYou, hireAgent, firstTask, voiceCommand, morningBrief, joinCommunity, ottoOnScreen
 }
 
 public struct GettingStartedItem: Identifiable, Sendable, Equatable {
@@ -260,6 +262,10 @@ public enum GettingStartedProgress {
       GettingStartedItem(
         id: .morningBrief, title: "Set up your morning brief",
         detail: "Your day, ready when you open Otto", isComplete: state.hasMorningBrief),
+      GettingStartedItem(
+        id: .joinCommunity, title: "Join the Otto community",
+        detail: "Ask questions and see what others build, on Discord",
+        isComplete: state.hasJoinedCommunity),
       GettingStartedItem(
         id: .ottoOnScreen, title: "Put Otto on your screen",
         detail: "He stays over every app and says when work is done",

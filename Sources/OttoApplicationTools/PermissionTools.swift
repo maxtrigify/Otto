@@ -97,7 +97,8 @@ public struct AgentRequestPermissionTool: OttoTool {
         toolName: input.toolName,
         detail: Self.detail(toolName: input.toolName, input: input.input),
         timeout: input.toolName == "browser.click" ? browserConfirmationTimeout : nil,
-        // Registered Otto tools use dotted names; these are independent app confirmations.
+        // Dotted Otto tools are app confirmations; the supervisor also applies tool bypass
+        // to browser.click, while account access and other app confirmations stay explicit.
         isProviderPermission: !input.toolName.contains(".")
       )
       if approved {

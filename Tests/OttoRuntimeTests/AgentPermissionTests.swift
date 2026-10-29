@@ -5,6 +5,76 @@ import Testing
 
 @Suite("One-shot permission approvals")
 struct AgentPermissionTests {
+  @Test("Browser approvals follow live bypass and revocation")
+  func liveBrowserBypass() async throws {
+    let supervisor = AgentSupervisor()
+    let id = try await spawnLongRunningOneShot(supervisor: supervisor)
+    let browser = Task {
+      try await supervisor.requestPermission(agentID: id, toolName: "browser.click")
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.setProviderPermissionBypass(agentID: id, enabled: true)
+    #expect(try await browser.value)
+    #expect(await !supervisor.hasPendingPermission(agentID: id))
+    let account = Task {
+      try await supervisor.requestPermission(agentID: id, toolName: "browser.account")
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.setProviderPermissionBypass(agentID: id, enabled: true)
+    #expect(try await supervisor.requestPermission(agentID: id, toolName: "browser.click"))
+    #expect(await supervisor.hasPendingPermission(agentID: id))
+    #expect(
+      try await supervisor.snapshot(agentID: id).attentionReason?.contains("browser.account")
+        == true)
+    try await supervisor.resolvePermission(agentID: id, approved: false)
+    #expect(try await account.value == false)
+    #expect(try await supervisor.requestPermission(agentID: id, toolName: "browser.click"))
+
+    try await supervisor.setProviderPermissionBypass(agentID: id, enabled: false)
+    let revoked = Task {
+      try await supervisor.requestPermission(agentID: id, toolName: "browser.click")
+    }
+    try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+    try await supervisor.resolvePermission(agentID: id, approved: false)
+    #expect(try await revoked.value == false)
+    try await supervisor.stop(agentID: id)
+  }
+
+  @Test(
+    "Launch and resume inherit browser bypass only for unrestricted sessions",
+    arguments: ["oneShot", "interactive", "resume"],
+    [AgentPermissionMode.readOnly, .workspaceWrite, .unrestricted]
+  )
+  func browserBypassAtLaunch(launch: String, mode: AgentPermissionMode) async throws {
+    let supervisor = AgentSupervisor()
+    let request = AgentLaunchRequest(
+      workspacePath: FileManager.default.temporaryDirectory.path,
+      prompt: launch == "interactive" ? nil : "fixture", permissionMode: mode)
+    let id: UUID
+    switch launch {
+    case "interactive":
+      id = try await supervisor.spawnInteractive(
+        adapter: PermissionFixtureAdapter(), request: request)
+    case "resume":
+      id = try await supervisor.resumeOneShot(
+        adapter: PermissionFixtureAdapter(), request: request, sessionID: "fixture", id: UUID())
+    default:
+      id = try await supervisor.spawnOneShot(adapter: PermissionFixtureAdapter(), request: request)
+    }
+    if mode == .unrestricted {
+      #expect(try await supervisor.requestPermission(agentID: id, toolName: "browser.click"))
+      #expect(await !supervisor.hasPendingPermission(agentID: id))
+    } else {
+      let click = Task {
+        try await supervisor.requestPermission(agentID: id, toolName: "browser.click")
+      }
+      try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
+      try await supervisor.resolvePermission(agentID: id, approved: false)
+      #expect(try await click.value == false)
+    }
+    try await supervisor.stop(agentID: id)
+  }
+
   @Test(
     "Always allow applies to the current run and can be revoked without bypassing app confirmations"
   )
@@ -470,5 +540,18 @@ struct AgentPermissionTests {
       try await Task.sleep(for: .milliseconds(10))
     }
     Issue.record("Timed out waiting for permission state condition")
+  }
+}
+
+private struct PermissionFixtureAdapter: AgentAdapter {
+  let provider = AgentProvider.claudeCode
+  func detectInstallation() async -> InstallationStatus {
+    .installed(path: "/bin/sh", version: "fixture")
+  }
+  func availableModels() async -> [AgentModel] { [] }
+  func buildLaunchSpec(_ request: AgentLaunchRequest) async throws -> ProcessLaunchSpec {
+    ProcessLaunchSpec(
+      executable: "/bin/sh", arguments: ["-c", "sleep 20"],
+      workingDirectory: request.workspacePath)
   }
 }

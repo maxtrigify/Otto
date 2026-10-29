@@ -389,6 +389,11 @@ struct WorkspaceView: View {
         keywords: "feedback bug report idea suggestion problem help github",
         perform: { uiState.showsFeedback = true }),
       PaletteQuickAction(
+        id: "help.community", title: "Join the Otto community",
+        subtitle: "Questions, updates and what others build, on Discord",
+        symbol: "person.3", keywords: "community discord help chat support questions",
+        perform: { OttoCommunityLinks.openDiscord() }),
+      PaletteQuickAction(
         id: "go.files", title: "Files & notes", subtitle: "Notes and media",
         symbol: "doc.text", keywords: "files notes documents media",
         perform: { openChatDestination(.files) }),

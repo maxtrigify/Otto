@@ -407,7 +407,41 @@ struct FirstRunWelcomeView: View {
       }
       .padding(.top, 8)
       ottoOnScreenOffer.padding(.top, 18)
+      communityOffer.padding(.top, 10)
     }
+  }
+
+  /// The Discord is where release news, questions and other people's setups live. Offered
+  /// once here; it stays on Home's checklist and in the Chat sidebar afterwards.
+  private var communityOffer: some View {
+    HStack(alignment: .center, spacing: 14) {
+      DiscordGlyph(size: 22, color: palette.paper)
+        .frame(width: 44, height: 44)
+        .background(
+          Color(red: 88 / 255, green: 101 / 255, blue: 242 / 255),
+          in: RoundedRectangle(cornerRadius: 12))
+      VStack(alignment: .leading, spacing: 3) {
+        Text("Join the Otto community").font(.ottoDisplay(15).weight(.semibold))
+        Text(
+          "Release news, a place to ask questions, and what other people are building with Otto."
+        )
+        .font(.ottoDisplay(12))
+        .foregroundStyle(palette.muted)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 8)
+      Button("Open Discord") { OttoCommunityLinks.openDiscord() }
+        .buttonStyle(.plain)
+        .font(.ottoDisplay(12).weight(.semibold))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .foregroundStyle(palette.ink)
+        .background(palette.paper, in: Capsule())
+        .accessibilityIdentifier("onboarding.join-community")
+    }
+    .padding(14)
+    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16))
+    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(palette.paper.opacity(0.08)))
   }
 
   /// Otto on screen is opt-in: offered once here, and later from Settings or Getting started.

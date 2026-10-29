@@ -866,6 +866,16 @@ struct ChatWorkspaceView: View {
       .buttonStyle(.ottoChrome(cornerRadius: 6))
       .help("Send feedback")
       .accessibilityLabel("Send feedback")
+      Button {
+        OttoCommunityLinks.openDiscord()
+      } label: {
+        DiscordGlyph(size: 12, color: palette.muted)
+          .frame(width: 26, height: 26)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.ottoChrome(cornerRadius: 6))
+      .help("Join the Otto community on Discord")
+      .accessibilityLabel("Join the Otto community on Discord")
       Spacer(minLength: 4)
       HStack(spacing: 5) {
         Circle()

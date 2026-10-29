@@ -99,6 +99,23 @@ struct FirstRunWelcomeTests {
     #expect(items[2].title == "Give Scout its first task")
   }
 
+  @Test("Joining the community is a checklist item that ticks once the Discord has been opened")
+  func communityItem() {
+    var state = GettingStartedState(
+      hasPreferredName: true, hasBot: true, hasGivenTask: true, hasUsedVoiceCommand: true,
+      hasMorningBrief: true)
+    #expect(
+      GettingStartedProgress.items(state, botName: nil).contains {
+        $0.id == .joinCommunity && !$0.isComplete
+      })
+    state.hasJoinedCommunity = true
+    #expect(
+      GettingStartedProgress.items(state, botName: nil).contains {
+        $0.id == .joinCommunity && $0.isComplete
+      })
+    #expect(OttoCommunity.discordInviteURL.host == "discord.gg")
+  }
+
   @Test("The tour opens with an offer, covers each part of Otto, and ends on the checklist")
   func tour() {
     let steps = HomeTourCatalog.steps

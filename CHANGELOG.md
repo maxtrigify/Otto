@@ -4,10 +4,11 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
-## Unreleased
+## 0.2.12 — 2026-10-29
 
 ### New
 
+- **Join the Otto community on Discord.** There's a Discord button beside Send feedback in the Chat sidebar, a "Join the Otto community" card in the welcome flow, a Getting started item on Home that ticks once you've opened it, and a command palette entry. Release news, questions and what other people are building live there: https://discord.gg/qZKACfT7Hc
 - **Rename a session.** Right-click a session in the Sessions sidebar (or use the pencil that appears when you hover it) and give it a name that says what it's about, such as the business or project you're working on in that chat. The bot, its history and your other sessions stay as they are, and the name survives a restart. Contributed by onlinegill (issue #17).
 - **Settings has a sidebar, and a Connectors page.** Every Settings page is now reachable from a list on the left; with the old row of tabs, the ones that didn't fit (Cloud and Mobile) couldn't be opened. Messaging (iMessage via Photon) and Mobile pairing now live together under Settings → Connectors, beside a new Telegram connector. Contributed by onlinegill.
 - **Talk to one of your Otto bots from Telegram.** In Settings → Connectors → Telegram, paste a bot token from BotFather (it goes in your Mac's Keychain), pair your own Telegram chat with a one-time code that you approve on the Mac, and choose the one saved Otto bot Telegram may message. Messages from that chat go to the bot and its reply comes back; approvals and permission prompts stay in Otto on the Mac, and nothing sent from Telegram can grant them. A group can be approved too, limited to the member who paired it. Contributed by onlinegill.
@@ -16,6 +17,7 @@ lead with what they can now do, not how it was implemented.
 
 ### Fixes
 
+- **Unrestricted agents no longer wait for browser click approvals.** With an agent in Unrestricted (bypass) mode, clicking in the Otto browser still queued an approval card that nobody needed to answer. Bypass now covers browser clicks as well as the provider's own tool permissions, from the first run and when you change the mode mid-session; turning bypass off brings the approvals back. Account access in the browser still asks every time.
 - **Otto no longer counts a second running copy as a crash.** Opening Otto while it was already running, or a helper starting a session while the app was up, was recorded in diagnostics as an abnormal exit. The session marker now names its process, and only a marker left by a process that has gone counts as a crash. Reported with the fix shape by mattabate (issue #23).
 - **Builds with Xcode 26.5.** One expression in the welcome view took the Swift 6.3.2 compiler too long to type-check. Contributed by pat-dubois.
 

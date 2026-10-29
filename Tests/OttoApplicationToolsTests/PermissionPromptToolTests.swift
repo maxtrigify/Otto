@@ -60,6 +60,40 @@ private struct ExpiringBrowserActionTool: OttoTool {
 
 @Suite("In-chat permission prompt tool")
 struct PermissionPromptToolTests {
+  @Test("Browser clicks replay once without an approval card in bypass mode")
+  func bridgeBypassClicksOnce() async throws {
+    let supervisor = AgentSupervisor()
+    let registry = ToolRegistry()
+    let counter = BrowserActionCounter()
+    try await registry.register(AgentRequestPermissionTool(supervisor: supervisor))
+    try await registry.register(ExpiringBrowserActionTool(counter: counter))
+    let agentID = try await spawnLongRunningOneShot(supervisor: supervisor)
+    try await supervisor.setProviderPermissionBypass(agentID: agentID, enabled: true)
+    let authenticator = ControlAuthenticator()
+    let token = await authenticator.issue(
+      actorID: "otto-agent-\(agentID.uuidString)", scopes: [.agentRead],
+      source: .agent, sourceNodeID: agentID)
+    let directory = URL(fileURLWithPath: "/tmp/otto-bypass-\(UUID().uuidString.prefix(10))")
+    let server = try ControlServer(
+      socketPath: directory.appending(path: "control.sock").path,
+      registry: registry, authenticator: authenticator)
+    defer {
+      server.stop()
+      try? FileManager.default.removeItem(at: directory)
+    }
+    let bridge = MCPBridge(client: ControlClient(socketPath: server.socketPath, token: token))
+    let response = try await onDedicatedThread {
+      try bridge.handle(
+        MCPRequest(
+          id: .number(1), method: "tools/call",
+          params: .object(["name": .string("browser.click"), "arguments": .object([:])])))
+    }
+    #expect(response.result?["isError"] != .bool(true))
+    #expect(await counter.calls == 1)
+    #expect(await !supervisor.hasPendingPermission(agentID: agentID))
+    try await supervisor.stop(agentID: agentID)
+  }
+
   @Test(
     "The MCP bridge never replays an expired or cancelled browser click", arguments: [false, true])
   func bridgeExpiryDoesNotClick(cancel: Bool) async throws {

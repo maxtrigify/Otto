@@ -172,7 +172,7 @@ public actor AgentSupervisor {
     let id: UUID
     let reason: String
     let nonce: String
-    let isProviderPermission: Bool
+    let isBypassEligible: Bool
     let requestedAt: Date
     let continuation: CheckedContinuation<Bool, any Error>
     let timeoutTask: Task<Void, Never>?
@@ -243,7 +243,8 @@ public actor AgentSupervisor {
     initialState: AgentLifecycleState = .starting,
     successfulExitState: AgentLifecycleState = .stopped,
     executionMode: AgentExecutionMode = .oneShotProvider,
-    scheduledWorker: Bool = false
+    scheduledWorker: Bool = false,
+    permissionMode: AgentPermissionMode = .workspaceWrite
   ) throws -> UUID {
     let previousTranscript = agents[id]?.snapshot.transcript ?? []
     if let previous = agents[id], previous.snapshot.completedAt != nil {
@@ -276,6 +277,7 @@ public actor AgentSupervisor {
       promptScanBuffer: "",
       activeInteractivePrompt: nil,
       confirmedWorkspaceTrust: false,
+      bypassProviderPermissions: permissionMode == .unrestricted,
       scheduledWorker: scheduledWorker,
       workingDirectory: specification.workingDirectory,
       harvestedTurnCount: 0,
@@ -463,7 +465,8 @@ public actor AgentSupervisor {
         id: id,
         parser: .forProvider(adapter.provider),
         executionMode: .oneShotProvider,
-        scheduledWorker: true
+        scheduledWorker: true,
+        permissionMode: request.permissionMode
       )
     } catch {
       await resourceScheduler.release(id)
@@ -500,7 +503,8 @@ public actor AgentSupervisor {
       parser: .forProvider(adapter.provider),
       initialState: .idle,
       successfulExitState: .stopped,
-      executionMode: .interactiveProvider
+      executionMode: .interactiveProvider,
+      permissionMode: request.permissionMode
     )
     // Interactive TUIs may never emit a session-start event. Keep the exact ID used to
     // reopen the harness so disk recovery cannot adopt another node's recent session.
@@ -534,7 +538,8 @@ public actor AgentSupervisor {
       specification: merged(specification, with: controlEnv),
       id: id,
       parser: .forProvider(adapter.provider),
-      executionMode: .oneShotProvider
+      executionMode: .oneShotProvider,
+      permissionMode: request.permissionMode
     )
     recordBootstrapHash(prepared.hash, agentID: spawnedID)
     recordLaunchPrompt(request.prompt, agentID: spawnedID)
@@ -905,7 +910,10 @@ public actor AgentSupervisor {
     guard let agent = agents[agentID], agent.snapshot.exitCode == nil else {
       throw RuntimeError.agentNotFound(agentID)
     }
-    if isProviderPermission && agent.bypassProviderPermissions { return true }
+    // Browser clicks are part of the user-selected tool bypass. Account access and other
+    // explicit app confirmations remain independent of that setting.
+    let isBypassEligible = isProviderPermission || toolName == "browser.click"
+    if isBypassEligible && agent.bypassProviderPermissions { return true }
     let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
     let reason = sanitizedAttentionReason(
       trimmedDetail.isEmpty ? "Wants to use \(toolName)" : "\(toolName): \(trimmedDetail)"
@@ -925,7 +933,7 @@ public actor AgentSupervisor {
           id: requestID,
           reason: reason,
           nonce: UUID().uuidString.lowercased(),
-          isProviderPermission: isProviderPermission,
+          isBypassEligible: isBypassEligible,
           requestedAt: .now,
           continuation: continuation,
           timeoutTask: timeoutTask
@@ -942,8 +950,8 @@ public actor AgentSupervisor {
     }
   }
 
-  /// Applies a user-selected provider policy to this run only. Separate Otto confirmations
-  /// (account access, consequential browser actions) continue to require an explicit answer.
+  /// Applies a user-selected tool policy to this run, including browser-click confirmations.
+  /// Account access and other explicit app confirmations still require an answer.
   public func setProviderPermissionBypass(agentID: UUID, enabled: Bool) throws {
     guard var agent = agents[agentID], agent.snapshot.exitCode == nil else {
       throw RuntimeError.agentNotFound(agentID)
@@ -951,9 +959,9 @@ public actor AgentSupervisor {
     agent.bypassProviderPermissions = enabled
     let approved =
       enabled
-      ? (pendingPermissions[agentID] ?? []).filter(\.isProviderPermission) : []
+      ? (pendingPermissions[agentID] ?? []).filter(\.isBypassEligible) : []
     if !approved.isEmpty {
-      let remaining = (pendingPermissions[agentID] ?? []).filter { !$0.isProviderPermission }
+      let remaining = (pendingPermissions[agentID] ?? []).filter { !$0.isBypassEligible }
       pendingPermissions[agentID] = remaining.isEmpty ? nil : remaining
       for pending in approved {
         pending.timeoutTask?.cancel()

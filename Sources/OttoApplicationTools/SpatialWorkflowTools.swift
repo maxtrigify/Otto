@@ -455,7 +455,7 @@ public struct BrowserClickTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "browser.click",
     description:
-      "Clicks an element returned by browser.inspect in a browser or GTM Grid node. Routine actions run directly; consequential external actions require confirmation.",
+      "Clicks an element returned by browser.inspect in a browser or GTM Grid node. Routine actions run directly; consequential external actions require confirmation unless the agent session is in bypass mode.",
     inputSchema: interactiveWebElementSchema(),
     outputSchema: .object(["type": .string("object")]),
     requiredScopes: [.canvasRead, .canvasWrite],
