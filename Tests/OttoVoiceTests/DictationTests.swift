@@ -99,6 +99,29 @@ struct DictationTests {
     collectTask.cancel()
   }
 
+  @Test("A batch engine's transcript, produced while stopping, is still delivered")
+  func batchTranscriptDeliveredOnStop() async throws {
+    let fixture = try await DictationFixture()
+    let agentID = try await fixture.spawnMockAgent()
+    let session = DictationSession(
+      transcriber: ScriptedTranscriber(
+        authorized: true, script: ["Summarise the open issues"], transcribesOnStop: true),
+      router: DictationRouter(registry: fixture.registry, context: fixture.context)
+    )
+    let collector = UpdateCollector()
+    let collectTask = Task {
+      for await update in session.updates { await collector.record(update) }
+    }
+    await session.start()
+    await session.stopAndDeliver(to: agentID)
+    try await waitUntil {
+      await collector.snapshots.contains { $0.state == .idle && $0.detail.contains("Prompted") }
+    }
+    let snapshot = try await fixture.supervisor.snapshot(agentID: agentID)
+    #expect(snapshot.lastPrompt == "Summarise the open issues")
+    collectTask.cancel()
+  }
+
   @Test("Denied speech authorization surfaces remediation instead of starting")
   func deniedAuthorization() async throws {
     let fixture = try await DictationFixture()
@@ -274,6 +297,7 @@ private final class ScriptedTranscriber: SpeechTranscriber, @unchecked Sendable 
   let inputDiagnostics: AsyncStream<LocalSpeechInputDiagnostic>
   private let authorized: Bool
   private let script: [String]
+  private let transcribesOnStop: Bool
   private let diagnostic: LocalSpeechInputDiagnostic?
   private let lock = NSLock()
   private var continuation: AsyncThrowingStream<String, Error>.Continuation?
@@ -287,10 +311,12 @@ private final class ScriptedTranscriber: SpeechTranscriber, @unchecked Sendable 
   init(
     authorized: Bool,
     script: [String],
+    transcribesOnStop: Bool = false,
     diagnostic: LocalSpeechInputDiagnostic? = nil
   ) {
     self.authorized = authorized
     self.script = script
+    self.transcribesOnStop = transcribesOnStop
     self.diagnostic = diagnostic
     var continuation: AsyncStream<LocalSpeechInputDiagnostic>.Continuation!
     inputDiagnostics = AsyncStream(bufferingPolicy: .bufferingNewest(1)) {
@@ -306,13 +332,14 @@ private final class ScriptedTranscriber: SpeechTranscriber, @unchecked Sendable 
     if let diagnostic { diagnosticContinuation.yield(diagnostic) }
     return AsyncThrowingStream { continuation in
       lock.withLock { self.continuation = continuation }
-      for line in script { continuation.yield(line) }
+      if !transcribesOnStop { for line in script { continuation.yield(line) } }
     }
   }
 
   func stopTranscribing() async {
     lock.withLock {
       stops += 1
+      if transcribesOnStop { for line in script { continuation?.yield(line) } }
       continuation?.finish()
       continuation = nil
     }

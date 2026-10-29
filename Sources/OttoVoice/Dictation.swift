@@ -158,6 +158,9 @@ public actor DictationSession {
   private var listenTask: Task<Void, Never>?
   private var diagnosticsTask: Task<Void, Never>?
   private var isListening = false
+  /// Set while stopping: batch engines (Whistle, Parakeet) only produce text once capture ends.
+  private var isFinishing = false
+  private var finishError: String?
   private var latestInputDiagnostic: LocalSpeechInputDiagnostic?
 
   public init(transcriber: any SpeechTranscriber, router: DictationRouter) {
@@ -209,13 +212,18 @@ public actor DictationSession {
   public func stopAndDeliver(to nodeID: UUID?) async {
     guard isListening else { return }
     isListening = false
+    isFinishing = true
+    finishError = nil
     await transcriber.stopTranscribing()
-    listenTask?.cancel()
+    await finishTranscription(listenTask)
+    isFinishing = false
     listenTask = nil
     diagnosticsTask?.cancel()
     diagnosticsTask = nil
     guard let final = PromptSubmission.verbatimText(from: transcript) else {
-      updateContinuation.yield(DictationUpdate(state: .idle, detail: "Heard nothing"))
+      updateContinuation.yield(
+        finishError.map { DictationUpdate(state: .failed, detail: $0) }
+          ?? DictationUpdate(state: .idle, detail: "Heard nothing"))
       return
     }
     guard let nodeID else {
@@ -256,8 +264,9 @@ public actor DictationSession {
   }
 
   private func record(_ text: String) {
-    guard isListening else { return }
+    guard isListening || isFinishing else { return }
     transcript = text
+    guard isListening else { return }
     updateContinuation.yield(
       DictationUpdate(
         state: .listening,
@@ -287,6 +296,7 @@ public actor DictationSession {
   }
 
   private func captureFailed(_ message: String) {
+    if isFinishing { finishError = message }
     guard isListening else { return }
     isListening = false
     updateContinuation.yield(
