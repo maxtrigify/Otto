@@ -72,6 +72,11 @@ struct OttoApp: App {
       }
     }
     migration.writeLog(.init(lines: workspaceLines, migratedFromMuse: false))
+    // A restore chosen in Settings is applied now, before any store reads the files it replaces.
+    if !isIsolatedPreview {
+      OttoBackup.applyPendingRestore(
+        defaults: .standard, locations: .live, appVersion: appVersionString())
+    }
     let database: SQLiteWorkspaceStore? = {
       if isIsolatedPreview && locations == nil { return nil }
       guard let path = locations?.databasePath else { return try? SQLiteWorkspaceStore.live() }
@@ -259,6 +264,8 @@ struct OttoApp: App {
       ConnectorsSettingsView(services: services)
     case .cloud:
       BoatCloudView(cloud: services.boatCloud)
+    case .backup:
+      BackupSettingsView(workspacePath: services.defaultWorkspacePath)
     }
   }
 
@@ -297,7 +304,7 @@ struct OttoApp: App {
 
 enum OttoSettingsPage: String, CaseIterable, Identifiable {
   case voice, shortcuts, appearance, notifications, ottoOnScreen, agents, models, accounts,
-    summarizer, websites, connectors, cloud
+    summarizer, websites, connectors, cloud, backup
 
   static let storageKey = "otto.settings.selectedPage"
 
@@ -317,6 +324,7 @@ enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .websites: "Websites"
     case .connectors: "Connectors"
     case .cloud: "Cloud"
+    case .backup: "Backup"
     }
   }
 
@@ -334,8 +342,13 @@ enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .websites: "lock.shield"
     case .connectors: "point.3.connected.trianglepath.dotted"
     case .cloud: "cloud"
+    case .backup: "externaldrive"
     }
   }
+}
+
+func appVersionString() -> String {
+  Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
 }
 
 private func observabilityDirectory() -> URL {
