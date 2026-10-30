@@ -23,7 +23,8 @@ final class ProcessFileLock {
     #if os(Windows)
       let wide = Array(path.utf16) + [0]
       let opened = CreateFileW(
-        wide, GENERIC_READ | GENERIC_WRITE, 0, nil, DWORD(OPEN_ALWAYS),
+        // GENERIC_READ | GENERIC_WRITE; the macros import as signed Int32 values.
+        wide, DWORD(0xC000_0000), 0, nil, DWORD(OPEN_ALWAYS),
         DWORD(FILE_ATTRIBUTE_NORMAL), nil)
       guard let opened, opened != INVALID_HANDLE_VALUE else {
         throw GetLastError() == DWORD(ERROR_SHARING_VIOLATION) ? Failure.busy : Failure.unavailable
