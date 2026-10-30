@@ -76,13 +76,16 @@ public struct AgentRequestPermissionTool: OttoTool {
 
   private let supervisor: AgentSupervisor
   private let browserConfirmationTimeout: Duration
+  private let emailOriginal: EmailApprovalSummary.OriginalLookup?
 
   public init(
     supervisor: AgentSupervisor,
-    browserConfirmationTimeout: Duration = AgentPermissionPrompt.browserConfirmationTimeout
+    browserConfirmationTimeout: Duration = AgentPermissionPrompt.browserConfirmationTimeout,
+    emailOriginal: EmailApprovalSummary.OriginalLookup? = nil
   ) {
     self.supervisor = supervisor
     self.browserConfirmationTimeout = browserConfirmationTimeout
+    self.emailOriginal = emailOriginal
   }
 
   public func call(_ input: AgentPermissionPromptInput, context: ToolContext) async throws
@@ -91,15 +94,31 @@ public struct AgentRequestPermissionTool: OttoTool {
     guard let agentID = context.sourceNodeID ?? Self.nodeID(fromActorID: context.actorID) else {
       return .deny(message: "Otto could not identify the agent requesting permission")
     }
+    var detail = Self.detail(toolName: input.toolName, input: input.input)
+    if EmailApprovalSummary.tools.contains(input.toolName) {
+      // The card shows the whole message, so one too long to show is refused, not cut short.
+      guard case .object(let object)? = input.input else {
+        return .deny(message: "Otto could not read the email to approve")
+      }
+      if let refusal = EmailApprovalSummary.refusal(input: object) {
+        return .deny(message: refusal)
+      }
+      let original = await emailOriginal?(input.toolName, object, context)
+      detail =
+        EmailApprovalSummary.text(toolName: input.toolName, input: object, original: original)
+        ?? detail
+    }
     do {
       let approved = try await supervisor.requestPermission(
         agentID: agentID,
         toolName: input.toolName,
-        detail: Self.detail(toolName: input.toolName, input: input.input),
+        detail: detail,
         timeout: input.toolName == "browser.click" ? browserConfirmationTimeout : nil,
         // Dotted Otto tools are app confirmations; the supervisor also applies tool bypass
         // to browser.click, while account access and other app confirmations stay explicit.
-        isProviderPermission: !input.toolName.contains(".")
+        isProviderPermission: !input.toolName.contains("."),
+        detailLimit: EmailApprovalSummary.tools.contains(input.toolName)
+          ? EmailApprovalSummary.limit : 240
       )
       if approved {
         return .allow(updatedInput: input.input ?? .object([:]))
@@ -124,11 +143,96 @@ public struct AgentRequestPermissionTool: OttoTool {
 
   private static func detail(toolName: String, input: JSONValue?) -> String {
     guard case .object(let object)? = input else { return "" }
+    if let email = EmailApprovalSummary.text(toolName: toolName, input: object) { return email }
     var bridged: [String: Any] = [:]
     for (key, value) in object {
       if case .string(let string) = value { bridged[key] = string }
     }
     return ClaudeOutputParser.toolDetail(name: toolName, input: bridged)
+  }
+}
+
+/// What the approval card shows before an email goes out: the recipient, the subject and the
+/// whole body, so the person approves exactly the message that is sent. A message too long to
+/// show in full is refused rather than shown in part.
+public enum EmailApprovalSummary {
+  public static let tools: Set<String> = ["gmail.send", "gmail.reply", "smtp.send"]
+  /// The longest body the card shows; longer ones are refused.
+  public static let bodyLimit = 20_000
+  /// Recipient and subject are short in any mail Otto sends; longer ones are refused too.
+  static let headerLimit = 1_000
+  /// The whole card: the headers, notes about the thread and recipient, and the body.
+  public static let limit = bodyLimit + 4 * headerLimit
+
+  /// Who the message being answered came from, as Otto read it from the mail itself.
+  public struct Original: Equatable, Sendable {
+    public var from: String
+    public var replyTo: String?
+
+    public init(from: String, replyTo: String? = nil) {
+      self.from = from
+      self.replyTo = replyTo
+    }
+  }
+
+  /// Finds the message a reply answers: Gmail's original for gmail.reply, the triaged mail for
+  /// smtp.send with inReplyTo. Nil when there is none or it cannot be read.
+  public typealias OriginalLookup =
+    @Sendable (String, [String: JSONValue], ToolContext) async -> Original?
+
+  /// Why an email cannot be approved as asked, or nil when the card can show all of it.
+  public static func refusal(input: [String: JSONValue]) -> String? {
+    let body = input["body"]?.stringValue ?? ""
+    if body.count > bodyLimit {
+      return
+        "This email is \(body.count) characters long; Otto shows the whole message for approval and allows up to \(bodyLimit). Send a shorter message."
+    }
+    // The card drops terminal control sequences, so a body holding them would read differently
+    // from what is sent.
+    if body.unicodeScalars.contains(where: {
+      ($0.value < 32 && $0 != "\n" && $0 != "\r" && $0 != "\t") || $0.value == 127
+    }) {
+      return "This email contains control characters Otto cannot show for approval. Remove them."
+    }
+    for field in ["to", "subject"] where (input[field]?.stringValue?.count ?? 0) > headerLimit {
+      return "This email's \(field) is too long to approve."
+    }
+    return nil
+  }
+
+  public static func text(
+    toolName: String, input: [String: JSONValue], original: Original? = nil
+  ) -> String? {
+    guard tools.contains(toolName) else { return nil }
+    let to = input["to"]?.stringValue ?? "(no recipient)"
+    let subject = input["subject"]?.stringValue ?? "(no subject)"
+    let body = (input["body"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    var lines = ["Send email to \(to)", "Subject: \(subject)"]
+    if toolName == "gmail.reply" || input["inReplyTo"]?.stringValue != nil {
+      lines.append("Reply in the original thread")
+    }
+    if let original, address(to) != address(original.from) {
+      // The original's headers are the sender's to write; keep a long one from crowding the body.
+      let sender = String(address(original.from).prefix(200))
+      lines.append(
+        original.replyTo.map { address($0) == address(to) } == true
+          ? "Not the original sender: \(sender) asked for replies to go to \(address(to))"
+          : "Not the original sender: the message came from \(sender)")
+    }
+    lines.append("")
+    lines.append(body)
+    return lines.joined(separator: "\n")
+  }
+
+  /// The bare, lower-cased address from a header such as `Alice <Alice@example.com>`.
+  static func address(_ header: String) -> String {
+    let trimmed: Substring
+    if let start = header.lastIndex(of: "<"), let end = header.lastIndex(of: ">"), start < end {
+      trimmed = header[header.index(after: start)..<end]
+    } else {
+      trimmed = Substring(header)
+    }
+    return trimmed.trimmingCharacters(in: .whitespaces).lowercased()
   }
 }
 

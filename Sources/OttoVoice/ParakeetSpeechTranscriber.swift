@@ -169,11 +169,7 @@ public struct ParakeetOfflineRunner: Sendable {
       throw ParakeetRuntimeError.invalidInstallation(error)
     }
     let model = configuration.modelDirectory
-    let process = Process()
-    let output = Pipe()
-    let error = Pipe()
-    process.executableURL = configuration.executableURL
-    process.arguments =
+    let arguments =
       [
         "--tokens=\(model.appending(path: "tokens.txt").path)",
         "--encoder=\(model.appending(path: "encoder.int8.onnx").path)",
@@ -185,25 +181,14 @@ public struct ParakeetOfflineRunner: Sendable {
       ] + configuration.recognitionArguments + audioURLs.map(\.path)
     var environment = ProcessInfo.processInfo.environment
     environment["DYLD_LIBRARY_PATH"] = configuration.libraryDirectory.path
-    process.environment = environment
-    process.standardOutput = output
-    process.standardError = error
-
-    try process.run()
-    let outputTask = Task.detached { output.fileHandleForReading.readDataToEndOfFile() }
-    let errorTask = Task.detached { error.fileHandleForReading.readDataToEndOfFile() }
-    await withCheckedContinuation { continuation in
-      process.terminationHandler = { _ in continuation.resume() }
-    }
-    let outputData = await outputTask.value
-    let errorData = await errorTask.value
-    guard process.terminationStatus == 0 else {
-      let detail = String(decoding: errorData.suffix(2_000), as: UTF8.self)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      throw ParakeetRuntimeError.failed(process.terminationStatus, detail)
+    let result = try await LocalProcess.run(
+      configuration.executableURL, arguments, environment: environment,
+      timeout: LocalProcess.transcriptionTimeout(for: audioURLs))
+    guard result.status == 0 else {
+      throw ParakeetRuntimeError.failed(result.status, result.errorText)
     }
 
-    let outputText = String(decoding: outputData, as: UTF8.self)
+    let outputText = String(decoding: result.output, as: UTF8.self)
     let results = outputText.split(separator: "\n", omittingEmptySubsequences: true).compactMap {
       try? JSONDecoder().decode(ParakeetTranscription.self, from: Data($0.utf8))
     }

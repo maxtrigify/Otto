@@ -62,6 +62,7 @@
           TeamApprovalPreview(services: services, store: store)
         } else {
           MessagingSettingsView(messaging: services.messaging)
+            .frame(width: 620, height: 650)
         }
       }
     }

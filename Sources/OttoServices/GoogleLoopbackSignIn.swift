@@ -65,6 +65,28 @@ final class GoogleLoopbackSignIn {
       Task { @MainActor in self.cancel() }
     }
     redirectURI = "http://127.0.0.1:\(port)/oauth2callback"
+    let url = Self.authorizationURL(
+      clientID: clientID, redirectURI: redirectURI, scopes: scopes, state: state,
+      challenge: Self.challenge(verifier))
+    return try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { continuation in
+        guard !completed else {
+          continuation.resume(throwing: AppConnectionError.cancelled)
+          return
+        }
+        response = continuation
+        if !NSWorkspace.shared.open(url) { cancel() }
+      }
+    } onCancel: {
+      Task { @MainActor in self.cancel() }
+    }
+  }
+
+  /// `include_granted_scopes` makes the new grant cover the scopes the account already gave
+  /// Otto, so granting calendar access later does not drop Gmail sending, and vice versa.
+  nonisolated static func authorizationURL(
+    clientID: String, redirectURI: String, scopes: Set<String>, state: String, challenge: String
+  ) -> URL {
     var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
     components.queryItems = [
       URLQueryItem(name: "client_id", value: clientID),
@@ -73,22 +95,12 @@ final class GoogleLoopbackSignIn {
       URLQueryItem(name: "scope", value: scopes.sorted().joined(separator: " ")),
       URLQueryItem(name: "state", value: state),
       URLQueryItem(name: "code_challenge_method", value: "S256"),
-      URLQueryItem(name: "code_challenge", value: Self.challenge(verifier)),
+      URLQueryItem(name: "code_challenge", value: challenge),
       URLQueryItem(name: "access_type", value: "offline"),
+      URLQueryItem(name: "include_granted_scopes", value: "true"),
       URLQueryItem(name: "prompt", value: "consent select_account"),
     ]
-    return try await withTaskCancellationHandler {
-      try await withCheckedThrowingContinuation { continuation in
-        guard !completed else {
-          continuation.resume(throwing: AppConnectionError.cancelled)
-          return
-        }
-        response = continuation
-        if !NSWorkspace.shared.open(components.url!) { cancel() }
-      }
-    } onCancel: {
-      Task { @MainActor in self.cancel() }
-    }
+    return components.url!
   }
 
   func cancel() { finish(.failure(AppConnectionError.cancelled)) }

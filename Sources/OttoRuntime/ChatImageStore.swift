@@ -10,9 +10,14 @@ import OttoModels
 /// Copy explicitly embedded local images before saving a reply, so temporary tool output survives.
 /// Remote URLs remain remote; code examples are never imported.
 enum ChatImageStore {
-  static func preservingImages(in text: String, workingDirectory: String) -> String {
+  /// Relative references resolve against `workingDirectory`; copies go under `storageRoot`
+  /// (Otto's workspace) when given, so a session in a project folder never writes into it.
+  static func preservingImages(
+    in text: String, workingDirectory: String, storageRoot: String? = nil
+  ) -> String {
     let root = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-    let storage = root.appendingPathComponent(".otto/chat-attachments/replies", isDirectory: true)
+    let storage = URL(fileURLWithPath: storageRoot ?? workingDirectory, isDirectory: true)
+      .appendingPathComponent(".otto/chat-attachments/replies", isDirectory: true)
     var fence: String?
     return text.components(separatedBy: "\n").map { line in
       let trimmed = line.trimmingCharacters(in: .whitespaces)

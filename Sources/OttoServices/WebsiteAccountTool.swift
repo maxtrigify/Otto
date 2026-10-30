@@ -3,6 +3,12 @@ import OttoTools
 
 /// No credential parameter and no arbitrary script execution. Identity comes from host routing.
 struct WebsiteAccountTool: OttoTool {
+  /// The approvals this tool asks for. Both grant or use a signed-in website account, so they
+  /// are answered in Otto on the Mac only, never from a phone.
+  static let connectApproval = "Connect website"
+  static let clickApproval = "Website account click"
+  static let approvals: Set<String> = [connectApproval, clickApproval]
+
   static let definition = ToolDefinition(
     name: "browser.account",
     description:
@@ -60,7 +66,7 @@ extension ApplicationServices {
         let name =
           agentProfiles.activeProfiles.first(where: { $0.id == profileID })?.name ?? "This bot"
         let approved = try await supervisor.requestPermission(
-          agentID: nodeID, toolName: "Connect website",
+          agentID: nodeID, toolName: WebsiteAccountTool.connectApproval,
           detail:
             "Allow \(name) to use \(origin) on this and future requests? Only this bot receives access. Sign-in opens privately; passwords never belong in chat. You can revoke access in Websites settings."
         )
@@ -77,7 +83,7 @@ extension ApplicationServices {
       let detail = try await websiteAccounts.clickApproval(
         input, botID: profileID, runID: snapshot.runID ?? nodeID)
       let approved = try await supervisor.requestPermission(
-        agentID: nodeID, toolName: "Website account click", detail: detail)
+        agentID: nodeID, toolName: WebsiteAccountTool.clickApproval, detail: detail)
       guard approved else { throw WebsiteAccountError.denied }
     }
     let result = try await websiteAccounts.perform(

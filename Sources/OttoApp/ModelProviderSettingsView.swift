@@ -10,6 +10,10 @@ struct ModelProviderSettingsView: View {
   @State private var localURL = LocalModelConfiguration.exampleURL
   @State private var localModel = ""
   @State private var hasLocalSettings = false
+  /// Models the local server listed, or the ones saved earlier, and which of them are offered.
+  @State private var localChoices: [String] = []
+  @State private var chosenLocalModels: Set<String> = []
+  @State private var isFetchingLocalModels = false
   @State private var message: String?
   @State private var isError = false
   private let secrets: any SecretStore
@@ -45,11 +49,25 @@ struct ModelProviderSettingsView: View {
             .textFieldStyle(.roundedBorder)
             .textContentType(.URL)
             .accessibilityIdentifier("local-model-url")
-          TextField("Model ID (e.g. qwen3:8b)", text: $localModel)
-            .textFieldStyle(.roundedBorder)
-            .accessibilityIdentifier("local-model-id")
-          Button("Save local endpoint and model") { saveLocal() }
-            .disabled(localURL.isEmpty || localModel.isEmpty)
+          HStack {
+            TextField("Model ID (e.g. qwen3:8b)", text: $localModel)
+              .textFieldStyle(.roundedBorder)
+              .accessibilityIdentifier("local-model-id")
+            Button(isFetchingLocalModels ? "Fetching…" : "Fetch models") {
+              Task { await fetchLocalModels() }
+            }
+            .disabled(localURL.isEmpty || isFetchingLocalModels)
+            .help("List the models this server offers, such as every model in a LiteLLM proxy")
+          }
+          if !localChoices.isEmpty {
+            localModelChoices
+          }
+          Button(
+            chosenLocalModels.count > 1
+              ? "Save endpoint and \(chosenLocalModels.count) models"
+              : "Save local endpoint and model"
+          ) { saveLocal() }
+          .disabled(localURL.isEmpty || (localModel.isEmpty && chosenLocalModels.isEmpty))
           Text(
             "Connect to Ollama, LM Studio, llama.cpp or vLLM on this Mac or a private LAN. A key is optional. HTTP is allowed for private hosts, but keys sent over LAN HTTP are not encrypted; use HTTPS when possible. The server must support OpenAI Chat Completions."
           )
@@ -109,7 +127,7 @@ struct ModelProviderSettingsView: View {
               Text(candidate.displayName)
               Text(
                 candidate == .local
-                  ? (LocalModelConfiguration.load()?.modelID
+                  ? (LocalModelConfiguration.load()?.modelIDs.joined(separator: ", ")
                     ?? "Configure an endpoint and model above")
                   : models.map(\.displayName).joined(separator: ", ")
               )
@@ -122,6 +140,96 @@ struct ModelProviderSettingsView: View {
     }
     .formStyle(.grouped)
     .task { await refresh() }
+  }
+
+  private var localModelChoices: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text("Offer these models in Otto Harness")
+          .font(.caption.weight(.semibold))
+        Spacer()
+        Button("All") { chosenLocalModels = Set(localChoices) }
+          .buttonStyle(.link)
+        Button("None") { chosenLocalModels = [] }
+          .buttonStyle(.link)
+      }
+      ScrollView {
+        VStack(alignment: .leading, spacing: 4) {
+          ForEach(localChoices, id: \.self) { model in
+            Toggle(
+              model,
+              isOn: Binding(
+                get: { chosenLocalModels.contains(model) },
+                set: { isOn in
+                  if isOn {
+                    chosenLocalModels.insert(model)
+                  } else {
+                    chosenLocalModels.remove(model)
+                  }
+                })
+            )
+            .toggleStyle(.checkbox)
+            .font(.callout)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxHeight: 180)
+      Text(
+        "The Model ID above is the default for new bots; every ticked model appears in the model menu."
+      )
+      .font(.caption)
+      .foregroundStyle(.secondary)
+    }
+  }
+
+  /// Asks the server for its model list with the address in the field, before it is saved, and
+  /// with the key typed below, or the stored one only when the address is the saved server's.
+  private func fetchLocalModels() async {
+    isFetchingLocalModels = true
+    defer { isFetchingLocalModels = false }
+    do {
+      let probe = try LocalModelConfiguration(baseURL: localURL, modelID: "probe")
+      let typed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+      let key: String
+      if !typed.isEmpty {
+        key = typed
+      } else if let saved = LocalModelConfiguration.load(),
+        Self.sameServer(saved.baseURL, probe.baseURL)
+      {
+        key = try await secrets.value(for: OttoHarnessProvider.local.credentialKey) ?? ""
+      } else {
+        // The stored key belongs to the saved server; never hand it to a newly typed address.
+        key = ""
+      }
+      guard
+        let models = await OpenAIDirectAdapter.discoverDirectModels(
+          provider: .local, apiKey: key, local: probe)
+      else {
+        message =
+          "Couldn't list models at \(probe.modelsURL.absoluteString). Check the address, and save the server's API key below if it needs one."
+        isError = true
+        return
+      }
+      let listed = models.map { OttoHarnessModelSelection.resolve($0.id).modelID }
+      localChoices = Array(Set(listed).union(chosenLocalModels)).sorted {
+        $0.localizedStandardCompare($1) == .orderedAscending
+      }
+      if localModel.isEmpty, let first = listed.first { localModel = first }
+      if chosenLocalModels.isEmpty, !localModel.isEmpty { chosenLocalModels = [localModel] }
+      message =
+        "Found \(listed.count) model\(listed.count == 1 ? "" : "s"). Tick the ones to offer, then save."
+      isError = false
+    } catch {
+      message = error.localizedDescription
+      isError = true
+    }
+  }
+
+  private static func sameServer(_ first: URL, _ second: URL) -> Bool {
+    func port(_ url: URL) -> Int? { url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80) }
+    return first.scheme?.lowercased() == second.scheme?.lowercased()
+      && first.host?.lowercased() == second.host?.lowercased() && port(first) == port(second)
   }
 
   private func save() async {
@@ -140,14 +248,26 @@ struct ModelProviderSettingsView: View {
 
   private func saveLocal() {
     do {
-      let configuration = try LocalModelConfiguration(baseURL: localURL, modelID: localModel)
+      let chosen = localChoices.filter(chosenLocalModels.contains)
+      let primary = localModel.trimmingCharacters(in: .whitespacesAndNewlines)
+      let configuration = try LocalModelConfiguration(
+        baseURL: localURL, modelID: primary.isEmpty ? chosen.first ?? "" : primary,
+        additionalModelIDs: chosen)
       configuration.save()
       localURL = configuration.baseURL.absoluteString
       localModel = configuration.modelID
+      chosenLocalModels = Set(configuration.modelIDs)
+      localChoices = Array(Set(localChoices).union(configuration.modelIDs)).sorted {
+        $0.localizedStandardCompare($1) == .orderedAscending
+      }
       hasLocalSettings = true
       ProviderModelCatalogStore.shared.invalidate()
       onLocalSaved?()
-      message = "Local model saved. It is now available under Otto Harness → Model."
+      let count = configuration.modelIDs.count
+      message =
+        count == 1
+        ? "Local model saved. It is now available under Otto Harness → Model."
+        : "\(count) local models saved. They are now available under Otto Harness → Model."
       isError = false
     } catch {
       message = error.localizedDescription
@@ -174,6 +294,10 @@ struct ModelProviderSettingsView: View {
         localURL = local.baseURL.absoluteString
         localModel = local.modelID
         hasLocalSettings = true
+        if localChoices.isEmpty {
+          localChoices = local.modelIDs
+          chosenLocalModels = Set(local.modelIDs)
+        }
       }
       var result: Set<OttoHarnessProvider> = []
       for candidate in OttoHarnessProvider.allCases {

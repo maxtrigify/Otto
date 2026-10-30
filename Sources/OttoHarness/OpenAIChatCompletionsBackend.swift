@@ -43,7 +43,16 @@ public struct OpenAIChatCompletionsBackend: HarnessModelBackend {
       let message =
         ((object?["error"] as? [String: Any])?["message"] as? String)
         ?? String(decoding: data.prefix(2_000), as: UTF8.self)
-      throw HarnessError.providerRequestFailed("\(providerDisplayName) request failed: \(message)")
+      // A session keeps the model it was started with, which a local server may since have
+      // dropped or renamed; say how to switch rather than leave only the server's wording.
+      let hint =
+        providerID == "local"
+          && [400, 401, 403, 404].contains((response as? HTTPURLResponse)?.statusCode ?? 0)
+          && message.lowercased().contains("model")
+        ? " Pick another model from the model menu under the message box, or fetch the server's models in Settings → Models."
+        : ""
+      throw HarnessError.providerRequestFailed(
+        "\(providerDisplayName) request failed: \(message)\(hint)")
     }
     return try parseResponse(data, priorMessages: messages)
   }
@@ -70,7 +79,7 @@ public struct OpenAIChatCompletionsBackend: HarnessModelBackend {
           ])
         })
     }
-    return try JSONEncoder().encode(JSONValue.object(body))
+    return try HarnessJSON.stableEncoder.encode(JSONValue.object(body))
   }
 
   func parseResponse(_ data: Data, priorMessages: [JSONValue]) throws -> HarnessBackendResponse {
@@ -98,7 +107,8 @@ public struct OpenAIChatCompletionsBackend: HarnessModelBackend {
     return HarnessBackendResponse(
       providerContinuation: .object(["messages": .array(continuationMessages)]),
       text: content,
-      toolCalls: calls)
+      toolCalls: calls,
+      usage: HarnessTokenUsage.parse(object["usage"]))
   }
 
   private func requestMessages(for request: HarnessBackendRequest) throws -> [JSONValue] {

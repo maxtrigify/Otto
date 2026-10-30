@@ -79,17 +79,68 @@ struct LocalVoiceEndToEndTests {
     #expect(store.activeCanvas.selectedNodeID == store.activeCanvas.nodes[1].id)
     task.cancel()
   }
+
+  @Test("A batch engine's transcript, produced while stopping, still runs the command")
+  @MainActor
+  func batchTranscriptRunsOnStop() async throws {
+    let canvas = OttoCanvas(
+      name: "Offline",
+      nodes: [
+        OttoNode(
+          kind: .markdown,
+          displayName: "Two",
+          subtitle: "MARKDOWN",
+          frame: WorldRect(x: 20, y: 20, width: 320, height: 240),
+          zIndex: 0,
+          content: .markdown(relativePath: nil, text: "Two")
+        )
+      ]
+    )
+    let store = CanvasStore(
+      snapshot: WorkspaceSnapshot(canvases: [canvas], activeCanvasID: canvas.id))
+    let registry = ToolRegistry()
+    try await ApplicationToolBootstrap.register(
+      in: registry, store: store, supervisor: AgentSupervisor())
+    let router = LocalVoiceCommandRouter(
+      registry: registry,
+      context: ToolContext(
+        actorID: "offline-local-voice", scopes: Set(ToolScope.allCases), source: .voice)
+    )
+    await router.updateContext(
+      VoiceContext(canvas: store.activeCanvas, workspace: "/tmp/offline-local-voice"))
+    let session = LocalCommandSession(
+      transcriber: OfflineTranscriptProbe(transcript: "Focus Two", transcribesOnStop: true),
+      router: router)
+    let collector = LocalUpdateCollector()
+    let task = Task {
+      for await update in session.updates { await collector.record(update) }
+    }
+
+    await session.start()
+    await session.stopAndExecute()
+    try await waitUntil {
+      await collector.values.contains {
+        $0.outcome == .completed(toolName: "node.focus", confirmation: "Focused Two")
+      }
+    }
+    #expect(await registry.auditLog().map(\.toolName) == ["node.focus"])
+    task.cancel()
+  }
 }
 
 private final class OfflineTranscriptProbe: SpeechTranscriber, @unchecked Sendable {
   let inputDiagnostics: AsyncStream<LocalSpeechInputDiagnostic>
   private let transcript: String
+  private let transcribesOnStop: Bool
   private let diagnosticsContinuation: AsyncStream<LocalSpeechInputDiagnostic>.Continuation
   private let lock = NSLock()
   private var continuation: AsyncThrowingStream<String, Error>.Continuation?
 
-  init(transcript: String) {
+  /// `transcribesOnStop` behaves like Whistle and Parakeet, which only produce text once
+  /// capture ends.
+  init(transcript: String, transcribesOnStop: Bool = false) {
     self.transcript = transcript
+    self.transcribesOnStop = transcribesOnStop
     var continuation: AsyncStream<LocalSpeechInputDiagnostic>.Continuation!
     inputDiagnostics = AsyncStream(bufferingPolicy: .bufferingNewest(1)) {
       continuation = $0
@@ -109,12 +160,13 @@ private final class OfflineTranscriptProbe: SpeechTranscriber, @unchecked Sendab
       ))
     return AsyncThrowingStream { continuation in
       lock.withLock { self.continuation = continuation }
-      continuation.yield(transcript)
+      if !transcribesOnStop { continuation.yield(transcript) }
     }
   }
 
   func stopTranscribing() async {
     lock.withLock {
+      if transcribesOnStop { continuation?.yield(transcript) }
       continuation?.finish()
       continuation = nil
     }

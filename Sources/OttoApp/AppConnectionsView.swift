@@ -6,6 +6,9 @@ struct AppConnectionsView: View {
   @Environment(\.ottoPalette) private var palette
   @ObservedObject var connections: AppConnectionsStore
   var onClose: (() -> Void)? = nil
+  /// Embedded in Connectors: the page supplies the title and back button, and the panel fills
+  /// the space it is given instead of sizing itself like the Marketplace sheet.
+  var embedded = false
   @State private var search = ""
   @State private var allowSending = false
   @State private var showingSetup = false
@@ -19,7 +22,9 @@ struct AppConnectionsView: View {
     VStack(alignment: .leading, spacing: 22) {
       HStack {
         VStack(alignment: .leading, spacing: 5) {
-          Text("Connect apps").font(.ottoDisplay(25).weight(.semibold))
+          if !embedded {
+            Text("Connect apps").font(.ottoDisplay(25).weight(.semibold))
+          }
           Text("Connect once. Use across your Otto agents.")
             .font(.ottoDisplay(13)).foregroundStyle(palette.muted)
         }
@@ -82,7 +87,12 @@ struct AppConnectionsView: View {
       )
       .font(.ottoDisplay(11)).foregroundStyle(palette.muted)
     }
-    .padding(26).frame(width: 660, height: 560)
+    .padding(embedded ? 20 : 26)
+    .frame(width: embedded ? nil : 660, height: embedded ? nil : 560)
+    .frame(
+      maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil,
+      alignment: .top
+    )
     .foregroundStyle(palette.paper).background(palette.surface)
     .sheet(isPresented: $showingSetup) { setupSheet }
     .confirmationDialog(

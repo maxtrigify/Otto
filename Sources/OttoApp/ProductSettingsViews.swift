@@ -163,7 +163,8 @@ struct MobileSettingsView: View {
       }
     }
     .padding(24)
-    .frame(width: 680, height: 650)
+    // Connectors hosts this page; a fixed size would overflow it and hide the back button.
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .task {
       if services.mobilePairingPayload == nil, services.mobileHostEndpoint != nil {
         await refreshOffer()
@@ -445,6 +446,8 @@ struct AgentDefaultsSettingsView: View {
     AgentPermissionMode.workspaceWrite.rawValue
   @AppStorage(OttoPreferenceKey.openCodePermissionMode) private var openCodePermission =
     AgentPermissionMode.workspaceWrite.rawValue
+  @AppStorage(OttoPreferenceKey.piPermissionMode) private var piPermission =
+    AgentPermissionMode.workspaceWrite.rawValue
   @AppStorage(OttoPreferenceKey.grokPermissionMode) private var grokPermission =
     AgentPermissionMode.workspaceWrite.rawValue
   @AppStorage(OttoPreferenceKey.shellPermissionMode) private var shellPermission =
@@ -565,11 +568,13 @@ struct AgentDefaultsSettingsView: View {
       }
       Section("Default permissions") {
         permissionPicker("Claude Code", selection: $claudePermission)
-        permissionPicker("Codex", selection: $codexPermission)
+        // Otto Harness (API and local models) launches with Codex's setting.
+        permissionPicker("Codex · Otto Harness", selection: $codexPermission)
         permissionPicker("Hermes", selection: $hermesPermission)
         permissionPicker("Cursor", selection: $cursorPermission)
         permissionPicker("Kimi", selection: $kimiPermission)
         permissionPicker("OpenCode", selection: $openCodePermission)
+        permissionPicker("Pi", selection: $piPermission)
         permissionPicker("Grok", selection: $grokPermission)
         permissionPicker("Shell", selection: $shellPermission)
         Text(
@@ -578,6 +583,7 @@ struct AgentDefaultsSettingsView: View {
             + "Hermes supports approval prompts and bypass mode but not a strict read-only sandbox. "
             + "Kimi has no OS sandbox and its chat runs always auto-approve tool calls, so "
             + "read only there applies to its terminal, which opens in plan mode. "
+            + "Pi has no approval prompts: read only limits it to inspection tools. "
             + "Ask to approve pauses for risky actions so you approve them in chat. "
             + "Bypass permissions never asks."
         )

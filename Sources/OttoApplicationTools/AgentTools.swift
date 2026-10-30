@@ -707,7 +707,7 @@ public struct AgentSetModelTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "agent.set_model",
     description:
-      "Switches which model and reasoning effort an agent uses from its next run onward. Otto Harness accepts provider-prefixed ids such as openai/gpt-5.6, anthropic/claude-sonnet-5, xai/grok-4.6, and moonshot/kimi-k2.5. Claude Code, Codex, Cursor, Grok, Kimi, OpenCode, and Pi accept ids from their live model catalogs (Pi ids are provider/model). Pass model \"default\" to return to the provider default. Hermes and shell sessions do not expose model switching here.",
+      "Switches which model and reasoning effort an agent uses from its next run onward. Otto Harness accepts provider-prefixed ids such as openai/gpt-5.6, anthropic/claude-sonnet-5, xai/grok-4.6, moonshot/kimi-k2.5, deepseek/deepseek-chat, mistral/mistral-large-latest, groq/<model>, gemini/<model>, openrouter/<vendor>/<model>, and local/<model>. Claude Code, Codex, Cursor, Grok, Kimi, OpenCode, and Pi accept ids from their live model catalogs (Pi ids are provider/model). Pass model \"default\" to return to the provider default. Hermes and shell sessions do not expose model switching here.",
     inputSchema: .objectSchema(
       properties: [
         "agentID": .stringSchema(description: "Stable agent node UUID"),

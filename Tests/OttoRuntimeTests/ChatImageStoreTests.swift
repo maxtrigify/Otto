@@ -36,6 +36,23 @@ struct ChatImageStoreTests {
     #expect(try Data(contentsOf: files[0]) == bytes)
   }
 
+  @Test func storesCopiesInOttoWorkspaceNotTheProjectFolder() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let project = root.appendingPathComponent("repo")
+    let otto = root.appendingPathComponent("otto")
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bytes = Data(
+      base64Encoded:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII="
+    )!
+    try bytes.write(to: project.appendingPathComponent("shot.png"))
+    let saved = ChatImageStore.preservingImages(
+      in: "![Shot](shot.png)", workingDirectory: project.path, storageRoot: otto.path)
+    #expect(saved.contains(otto.appendingPathComponent(".otto/chat-attachments/replies").path))
+    #expect(!FileManager.default.fileExists(atPath: project.appendingPathComponent(".otto").path))
+  }
+
   @Test func leavesRemoteMissingAndCodeReferencesAlone() {
     let text =
       "![Remote](https://example.com/a.png)\n![Missing](/nonexistent/image.png)\n```md\n![Example](/tmp/example.png)\n```"

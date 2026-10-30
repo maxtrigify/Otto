@@ -53,6 +53,25 @@ struct LocalModelConfigurationTests {
     }
   }
 
+  @Test("Several models fetched from a proxy persist, primary first and without duplicates")
+  func severalModels() throws {
+    let name = "OttoLocalModelTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let config = try LocalModelConfiguration(
+      baseURL: "http://gillai:4000/v1", modelID: "qwen3.8-flash",
+      additionalModelIDs: ["gpt-oss-20b", "qwen3.8-flash", " llama-4 "])
+    #expect(config.modelIDs == ["qwen3.8-flash", "gpt-oss-20b", "llama-4"])
+    config.save(defaults: defaults)
+    let loaded = try #require(LocalModelConfiguration.load(defaults: defaults))
+    #expect(loaded.modelID == "qwen3.8-flash")
+    #expect(loaded.modelIDs == config.modelIDs)
+    #expect(throws: LocalModelConfigurationError.self) {
+      _ = try LocalModelConfiguration(
+        baseURL: "http://gillai:4000/v1", modelID: "a", additionalModelIDs: ["bad\nid"])
+    }
+  }
+
   @Test("Config persists without putting an API key in preferences")
   func preferenceRoundTrip() throws {
     let name = "OttoLocalModelTests-\(UUID().uuidString)"

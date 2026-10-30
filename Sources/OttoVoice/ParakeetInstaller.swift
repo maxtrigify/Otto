@@ -161,21 +161,11 @@ public actor ParakeetInstaller {
   }
 
   private func extract(_ archive: URL, into directory: URL) async throws {
-    let process = Process()
-    let error = Pipe()
-    process.executableURL = URL(filePath: "/usr/bin/tar")
-    process.arguments = ["-xjf", archive.path, "-C", directory.path]
-    process.standardError = error
-    try process.run()
-    let errorTask = Task.detached { error.fileHandleForReading.readDataToEndOfFile() }
-    await withCheckedContinuation { continuation in
-      process.terminationHandler = { _ in continuation.resume() }
-    }
-    let errorData = await errorTask.value
-    guard process.terminationStatus == 0 else {
-      throw ParakeetInstallerError.archive(
-        String(decoding: errorData.suffix(2_000), as: UTF8.self)
-      )
+    let result = try await LocalProcess.run(
+      URL(filePath: "/usr/bin/tar"), ["-xjf", archive.path, "-C", directory.path],
+      timeout: .seconds(15 * 60))
+    guard result.status == 0 else {
+      throw ParakeetInstallerError.archive(result.errorText)
     }
   }
 }

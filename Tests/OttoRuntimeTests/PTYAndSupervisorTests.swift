@@ -802,6 +802,36 @@ struct AgentSupervisorTests {
     #expect(snapshot.transcript.last?.text == "Structured final result")
   }
 
+  @Test("A turn that adds no reply leaves the previous reply's time and tokens alone")
+  func turnStatsStayOnTheirOwnTurn() async throws {
+    let supervisor = AgentSupervisor()
+    let id = UUID()
+    func run(result: String, inputTokens: Int) async throws {
+      let line =
+        #"{"type":"result","subtype":"success","result":"\#(result)","duration_ms":1000,"#
+        + #""usage":{"input_tokens":\#(inputTokens),"output_tokens":5}}"#
+      _ = try await supervisor.spawn(
+        provider: .claudeCode,
+        specification: ProcessLaunchSpec(
+          executable: "/bin/sh", arguments: ["-c", "printf '%s\\n' '\(line)'"],
+          workingDirectory: FileManager.default.currentDirectoryPath),
+        id: id, parser: .claude(ClaudeOutputParser()))
+      try await waitForState(.done, id: id, supervisor: supervisor)
+    }
+    try await run(result: "First reply", inputTokens: 100)
+    let first = try await supervisor.snapshot(agentID: id).transcript
+    #expect(first.last?.text == "First reply")
+    #expect(first.last?.turnStats?.inputTokens == 100)
+
+    try await supervisor.appendLocalTranscript(
+      agentID: id, role: .user, kind: .text, text: "Second question")
+    try await run(result: "", inputTokens: 900)
+    let transcript = try await supervisor.snapshot(agentID: id).transcript
+    let reply = try #require(transcript.last { $0.role == .assistant && $0.kind == .text })
+    #expect(reply.text == "First reply")
+    #expect(reply.turnStats?.inputTokens == 100)
+  }
+
   @Test("Hermes clarify surfaces a pending choice and resolveChoice answers via stdin")
   func hermesClarifyChoiceRoundTrip() async throws {
     let supervisor = AgentSupervisor()

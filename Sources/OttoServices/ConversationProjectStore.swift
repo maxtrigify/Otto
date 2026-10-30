@@ -142,6 +142,23 @@ public final class ConversationProjectStore: ObservableObject {
     try persist(next)
   }
 
+  /// The folder a new `provider` session in `projectID` starts in: the project's first source
+  /// folder that still exists. Starting there lets the repository's own agent setup apply
+  /// (CLAUDE.md and .claude/ for Claude Code, AGENTS.md for Codex). Nil keeps the workspace,
+  /// which every other provider always uses (see `AgentProvider.startsInProjectFolder`).
+  public func workingFolder(
+    projectID: UUID?, provider: AgentProvider, fileManager: FileManager = .default
+  ) -> String? {
+    guard provider.startsInProjectFolder, let projectID,
+      let project = projects.first(where: { $0.id == projectID })
+    else { return nil }
+    return project.sourceFolders.first { path in
+      var isDirectory: ObjCBool = false
+      return fileManager.fileExists(atPath: path, isDirectory: &isDirectory)
+        && isDirectory.boolValue
+    }
+  }
+
   /// The project a session or bot channel is currently assigned to, if any.
   public func project(channelID: UUID) -> ConversationProject? {
     guard let id = state.selections[channelID] else { return nil }

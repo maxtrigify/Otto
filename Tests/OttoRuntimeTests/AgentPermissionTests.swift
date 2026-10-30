@@ -140,6 +140,8 @@ struct AgentPermissionTests {
     let first = Task { try await supervisor.requestPermission(agentID: id, toolName: "Write") }
     try await waitForPermissionState(.waitingPermission, id: id, supervisor: supervisor)
     let pending = try #require(await supervisor.pendingPermission(agentID: id))
+    // Remote surfaces decide by the asking tool, not by its display text.
+    #expect(pending.toolName == "Write")
     let second = Task {
       try await supervisor.requestPermission(
         agentID: id, toolName: "browser.click", timeout: .milliseconds(50))
@@ -188,6 +190,103 @@ struct AgentPermissionTests {
     #expect(spec.arguments.contains("--mcp-config"))
     // The prompt stays the final positional argument, after every flag.
     #expect(spec.arguments.last == "List the repository files.")
+  }
+
+  @Test("Claude pre-approves only the Otto tools Otto confirms itself, never the whole server")
+  func claudeAllowsOnlySelfConfirmingOttoTools() async throws {
+    let adapter = ClaudeCodeAdapter(executablePath: "/bin/echo")
+    let spec = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        prompt: "Send the report.",
+        permissionMode: .workspaceWrite,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp",
+        ottoSelfConfirmingTools: ["smtp.send", "calendar.create_event"]
+      ))
+    let index = try #require(spec.arguments.firstIndex(of: "--allowedTools"))
+    #expect(spec.arguments[index + 1] == "mcp__otto__smtp_send,mcp__otto__calendar_create_event")
+    // A server-wide grant would let terminal.run, agent.spawn, ... skip every prompt.
+    #expect(!spec.arguments.contains("mcp__otto"))
+    #expect(!spec.arguments[index + 1].contains("terminal_run"))
+    // The next argument is a flag, so the variadic list ends before the prompt.
+    #expect(spec.arguments[index + 2].hasPrefix("--"))
+    #expect(spec.arguments.last == "Send the report.")
+
+    let readOnly = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        permissionMode: .readOnly,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp",
+        ottoSelfConfirmingTools: ["smtp.send"]
+      ))
+    #expect(!readOnly.arguments.contains("--allowedTools"))
+
+    let noList = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        prompt: "Run the tests.",
+        permissionMode: .workspaceWrite,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp"
+      ))
+    #expect(!noList.arguments.contains("--allowedTools"))
+  }
+
+  @Test("Claude in a project folder can read chat images staged in Otto's workspace")
+  func claudeAddsOttoAttachmentsDirectory() async throws {
+    let otto = FileManager.default.temporaryDirectory.appending(path: "otto-\(UUID())")
+    let attachments = otto.appending(path: ".otto/chat-attachments")
+    try FileManager.default.createDirectory(at: attachments, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: otto) }
+    let adapter = ClaudeCodeAdapter(executablePath: "/bin/echo")
+    let spec = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        prompt: "Look at the screenshot.",
+        ottoWorkspacePath: otto.path
+      ))
+    let index = try #require(spec.arguments.firstIndex(of: "--add-dir"))
+    #expect(spec.arguments[index + 1] == attachments.path)
+    #expect(spec.arguments[index + 2].hasPrefix("--"))
+    #expect(spec.arguments.last == "Look at the screenshot.")
+
+    let inWorkspace = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: otto.path, prompt: "Look at the screenshot.", ottoWorkspacePath: otto.path
+      ))
+    #expect(!inWorkspace.arguments.contains("--add-dir"))
+  }
+
+  @Test("Codex pre-approves only self-confirming Otto tools, and nothing when read-only")
+  func codexApprovesOnlySelfConfirmingOttoTools() async throws {
+    let adapter = CodexAdapter(executablePath: "/bin/echo")
+    let spec = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        prompt: "Send the report.",
+        permissionMode: .workspaceWrite,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp",
+        ottoSelfConfirmingTools: ["smtp.send", "gmail.send"]
+      ))
+    #expect(
+      spec.arguments.contains(
+        "mcp_servers.otto.tools={\"smtp.send\"={approval_mode=\"approve\"},"
+          + "\"gmail.send\"={approval_mode=\"approve\"}}"))
+    #expect(!spec.arguments.contains { $0.contains("default_tools_approval_mode") })
+    // terminal.run and every other tool without an Otto card keep Codex's own approval policy.
+    #expect(
+      !spec.arguments.contains {
+        $0.hasPrefix("mcp_servers.otto.tools") && $0.contains("terminal.run")
+      })
+
+    let readOnly = try await adapter.buildLaunchSpec(
+      AgentLaunchRequest(
+        workspacePath: FileManager.default.currentDirectoryPath,
+        prompt: "Look around.",
+        permissionMode: .readOnly,
+        ottoMCPExecutable: "/usr/local/bin/otto-mcp",
+        ottoSelfConfirmingTools: ["smtp.send"]
+      ))
+    #expect(!readOnly.arguments.contains { $0.contains("approval_mode") })
   }
 
   @Test("The permission prompt flag requires the otto MCP bridge")

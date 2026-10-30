@@ -41,6 +41,9 @@ struct AgentConversationBody: View {
   var onInspectResponse: () -> Void = {}
   /// Chat owns link destinations in its trailing work panel; canvas keeps its native inspector.
   var onOpenLink: ((URL) -> OpenURLAction.Result)? = nil
+  /// Otto's own workspace. Image attachments for providers that may run in a project's source
+  /// folder are staged here instead, so Otto never writes into the user's repository.
+  var ottoWorkspacePath: String? = nil
   /// Promotes this node into the canvas' full-width stage before showing an artifact inspector.
   let enterStage: () -> Void
   /// Selects the owning canvas node. Child buttons consume the card's outer tap gesture, so
@@ -74,6 +77,10 @@ struct AgentConversationBody: View {
   /// Terminals this conversation started that are waiting on the person.
   var waitingTerminals: [ChatTerminalNotice] = []
   var openTerminal: (UUID) -> Void = { _ in }
+  /// Speech from the voice button that was not a command, added to the composer to review.
+  var voiceInsertion: ChatVoiceInsertion? = nil
+  /// Called once an insertion has been handled, so a later re-selection cannot paste it again.
+  var consumeVoiceInsertion: (UUID) -> Void = { _ in }
 
   @State private var input = ""
   @State private var selectedRunID: UUID?
@@ -307,6 +314,13 @@ struct AgentConversationBody: View {
       }
       .onChange(of: input) { _, text in
         ComposerDrafts.save(text, for: ComposerDrafts.agentKey(node.id))
+      }
+      .onChange(of: voiceInsertion) { _, insertion in
+        guard let insertion else { return }
+        consumeVoiceInsertion(insertion.id)
+        guard acceptsComposerInput else { return }
+        input = input.isEmpty ? insertion.text : input + " " + insertion.text
+        composerFocused = true
       }
       .onChange(of: draftAttachments) { _, attachments in
         ComposerDrafts.saveAttachments(attachments, for: ComposerDrafts.agentKey(node.id))
@@ -1176,6 +1190,13 @@ struct AgentConversationBody: View {
           }
           assistantBody(entry)
           HStack(spacing: 9 * scale) {
+            // The turn's time and tokens appear on hover with the actions, in the same row.
+            if let stats = entry.turnStats {
+              Text(TurnStatsText.summary(stats))
+                .monospacedDigit()
+                .help(TurnStatsText.detail(stats))
+                .accessibilityLabel(TurnStatsText.detail(stats))
+            }
             Button {
               NSPasteboard.general.clearContents()
               NSPasteboard.general.setString(entry.text, forType: .string)
@@ -1627,9 +1648,12 @@ struct AgentConversationBody: View {
           Text(attentionTitle)
             .font(.ottoLabel(max(6, 7 * scale), weight: .black))
             .foregroundStyle(palette.amber)
+          // A permission request can carry a whole email; it scrolls rather than pushing
+          // Approve out of view, and all of it stays readable.
           Text(attention)
             .font(.ottoDisplay(max(8.5, 10.5 * scale)))
             .foregroundStyle(palette.paper)
+            .cappedScroll(maxHeight: 320 * scale)
         }
       }
       if isAwaitingSignIn {
@@ -2474,8 +2498,10 @@ struct AgentConversationBody: View {
   /// file/image tools can open them; the prompt then references the paths. This works across
   /// Claude Code, Codex, and Hermes without provider-specific upload plumbing.
   private var chatAttachmentsDirectory: String {
+    let definition = node.agentDefinition
     let workspace =
-      node.agentDefinition?.workingDirectory ?? FileManager.default.currentDirectoryPath
+      (definition?.provider.startsInProjectFolder == true ? ottoWorkspacePath : nil)
+      ?? definition?.workingDirectory ?? FileManager.default.currentDirectoryPath
     return (workspace as NSString).appendingPathComponent(".otto/chat-attachments")
   }
 

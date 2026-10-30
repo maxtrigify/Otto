@@ -591,6 +591,9 @@ public actor LocalCommandSession {
   private var listenTask: Task<Void, Never>?
   private var diagnosticsTask: Task<Void, Never>?
   private var isListening = false
+  /// Set while stopping: batch engines (Whistle, Parakeet) only produce text once capture ends.
+  private var isFinishing = false
+  private var finishError: String?
   private var latestInputDiagnostic: LocalSpeechInputDiagnostic?
 
   public init(transcriber: any SpeechTranscriber, router: LocalVoiceCommandRouter) {
@@ -638,12 +641,19 @@ public actor LocalCommandSession {
   public func stopAndExecute() async {
     guard isListening else { return }
     isListening = false
+    isFinishing = true
+    finishError = nil
     await transcriber.stopTranscribing()
-    listenTask?.cancel()
+    await finishTranscription(listenTask)
+    isFinishing = false
     listenTask = nil
     diagnosticsTask?.cancel()
     diagnosticsTask = nil
     let final = transcript
+    if final.isEmpty, let finishError {
+      continuation.yield(LocalCommandUpdate(state: .failed, detail: finishError))
+      return
+    }
     continuation.yield(
       LocalCommandUpdate(
         state: .delivering,
@@ -693,8 +703,9 @@ public actor LocalCommandSession {
   }
 
   private func record(_ text: String) {
-    guard isListening else { return }
+    guard isListening || isFinishing else { return }
     transcript = text
+    guard isListening else { return }
     continuation.yield(
       LocalCommandUpdate(
         state: .listening,
@@ -724,9 +735,24 @@ public actor LocalCommandSession {
   }
 
   private func failed(_ message: String) {
+    if isFinishing { finishError = message }
     guard isListening else { return }
     isListening = false
     continuation.yield(LocalCommandUpdate(state: .failed, detail: message))
+  }
+}
+
+/// Waits for a listening task to take the transcriber's last result, which batch engines yield
+/// while stopping, then cancels it. Streaming engines that never finish are cut off after
+/// `timeout`.
+func finishTranscription(_ task: Task<Void, Never>?, timeout: Duration = .seconds(1)) async {
+  guard let task else { return }
+  await withTaskGroup(of: Void.self) { group in
+    group.addTask { await task.value }
+    group.addTask { try? await Task.sleep(for: timeout) }
+    await group.next()
+    task.cancel()
+    group.cancelAll()
   }
 }
 

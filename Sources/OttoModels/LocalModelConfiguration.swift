@@ -5,12 +5,17 @@ import Foundation
 public struct LocalModelConfiguration: Sendable, Equatable {
   public static let baseURLKey = "otto.harness.local.base-url"
   public static let modelIDKey = "otto.harness.local.model-id"
+  /// Every model the person picked from the server, primary first.
+  public static let modelIDsKey = "otto.harness.local.model-ids"
+  public static let maxModels = 50
   public static let exampleURL = "http://127.0.0.1:11434/v1"
 
   public let baseURL: URL
   public let modelID: String
+  /// The models offered in every Otto Harness picker: `modelID` first, then the others.
+  public let modelIDs: [String]
 
-  public init(baseURL input: String, modelID: String) throws {
+  public init(baseURL input: String, modelID: String, additionalModelIDs: [String] = []) throws {
     let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
     // People commonly paste a local server's IP:port without the scheme.
     // Default to HTTP only for an address that subsequently passes our
@@ -26,10 +31,15 @@ public struct LocalModelConfiguration: Sendable, Equatable {
       scheme == "https" || (scheme == "http" && Self.isPrivateHost(host))
     else { throw LocalModelConfigurationError.invalidURL }
 
-    let identifier = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !identifier.isEmpty, identifier.count <= 200,
-      !identifier.contains("\n"), !identifier.contains("\r")
-    else { throw LocalModelConfigurationError.invalidModel }
+    let identifier = try Self.validatedModelID(modelID)
+    var identifiers = [identifier]
+    for candidate in additionalModelIDs {
+      let extra = try Self.validatedModelID(candidate)
+      if !identifiers.contains(extra) { identifiers.append(extra) }
+    }
+    guard identifiers.count <= Self.maxModels else {
+      throw LocalModelConfigurationError.invalidModel
+    }
 
     // The setting is an API base, never a user-provided full method URL.
     let path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -43,6 +53,15 @@ public struct LocalModelConfiguration: Sendable, Equatable {
     guard let parsed = normalized.url else { throw LocalModelConfigurationError.invalidURL }
     self.baseURL = parsed
     self.modelID = identifier
+    self.modelIDs = identifiers
+  }
+
+  private static func validatedModelID(_ value: String) throws -> String {
+    let identifier = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !identifier.isEmpty, identifier.count <= 200,
+      !identifier.contains("\n"), !identifier.contains("\r")
+    else { throw LocalModelConfigurationError.invalidModel }
+    return identifier
   }
 
   public var apiBaseURL: URL {
@@ -56,12 +75,15 @@ public struct LocalModelConfiguration: Sendable, Equatable {
     guard let address = defaults.string(forKey: baseURLKey),
       let model = defaults.string(forKey: modelIDKey)
     else { return nil }
-    return try? LocalModelConfiguration(baseURL: address, modelID: model)
+    let others = (defaults.stringArray(forKey: modelIDsKey) ?? []).filter { $0 != model }
+    return try? LocalModelConfiguration(
+      baseURL: address, modelID: model, additionalModelIDs: others)
   }
 
   public func save(defaults: UserDefaults = .standard) {
     defaults.set(baseURL.absoluteString, forKey: Self.baseURLKey)
     defaults.set(modelID, forKey: Self.modelIDKey)
+    defaults.set(modelIDs, forKey: Self.modelIDsKey)
   }
 
   private static func isPrivateHost(_ host: String) -> Bool {

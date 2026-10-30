@@ -79,7 +79,7 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
   }
 
   public func listBots() async throws -> MobileRosterOutput {
-    let activeProfiles = services.agentProfiles.activeProfiles
+    let activeProfiles = services.agentProfiles.activeProfiles.filter { mobileMayUse($0.id) }
     let bots: [OttoModels.MobileBotSummary] = activeProfiles.map { profile in
       let channel = services.botChannels.canonicalChannel(for: profile.id)
       return OttoModels.MobileBotSummary(
@@ -107,7 +107,8 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
   }
 
   public func startThread(_ input: ThreadStartInput) async throws -> ThreadStartOutput {
-    guard let profile = services.agentProfiles.profile(id: input.botProfileID), !profile.isArchived
+    guard let profile = services.agentProfiles.profile(id: input.botProfileID), !profile.isArchived,
+      mobileMayUse(profile.id)
     else {
       throw OttoHostError.botNotFound(input.botProfileID)
     }
@@ -448,6 +449,11 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
     )
   }
 
+  /// Mobile reaches only the bots the Mac owner allowed for the Mobile connector.
+  private func mobileMayUse(_ profileID: UUID) -> Bool {
+    services.connectorAccess.canUse(.mobile, profileID: profileID)
+  }
+
   private func channel(threadID: UUID) -> BotChannel? {
     services.botChannels.channels.first {
       isVisible($0) && $0.conversationID == threadID
@@ -458,12 +464,14 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
     guard node.kind == .agent else { return false }
     guard let profileID = node.agentDefinition?.profileID else { return true }
     return services.agentProfiles.profile(id: profileID)?.isArchived == false
+      && mobileMayUse(profileID)
   }
 
   private func isVisible(_ channel: BotChannel) -> Bool {
     guard !channel.archived else { return false }
-    if channel.kind == .group { return true }
+    if channel.kind == .group { return channel.memberProfileIDs.allSatisfy(mobileMayUse) }
     guard services.agentProfiles.profile(id: channel.profileID)?.isArchived == false,
+      mobileMayUse(channel.profileID),
       let nodeID = channel.nodeID
     else { return false }
     return services.store.snapshot.canvases.lazy.flatMap(\.nodes).contains {

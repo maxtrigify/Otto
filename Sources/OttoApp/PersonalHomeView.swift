@@ -50,11 +50,17 @@ struct PersonalHomeView: View {
   /// The same single tint Chat lays over theme artwork.
   /// Cards and the composer keep the smoked-glass look on every theme: a dark plate with
   /// light text. Dark themes use their own colours; light themes borrow a dark palette.
+  /// Light themes without artwork (Daylight) keep their own light cards. Light themes with
+  /// artwork still borrow a dark plate so white card text stays legible over bright photos.
+  private var cardsFollowTheme: Bool {
+    OttoThemeCatalog.theme(id: store.activeCanvas.themeID).isPlainLight
+  }
   private var cardPalette: OttoPalette {
+    if cardsFollowTheme { return palette }
     let theme = OttoThemeCatalog.theme(id: store.activeCanvas.themeID)
     return theme.isLightAppearance ? OttoPalette(theme: OttoThemeCatalog.aurora) : palette
   }
-  private var cardColorScheme: ColorScheme { .dark }
+  private var cardColorScheme: ColorScheme { cardsFollowTheme ? .light : .dark }
   /// Bright photos get denser smoke behind white card text; dark ones stay airy.
   private var cardSmoke: Double {
     OttoThemeCatalog.theme(id: store.activeCanvas.themeID).isLightAppearance ? 0.46 : 0.26
@@ -220,6 +226,7 @@ struct PersonalHomeView: View {
       }
       .foregroundStyle(palette.paper.opacity(0.92))
       .environment(\.ottoGlassSmoke, cardSmoke)
+      .environment(\.ottoGlassLight, cardsFollowTheme)
     }
   }
 

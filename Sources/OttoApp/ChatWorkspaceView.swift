@@ -73,7 +73,8 @@ struct ChatWorkspaceView: View {
   @State private var notificationVisibilityID = UUID()
   @Binding var navigation: ChatSurfaceNavigationState
   let launchAgent: () -> Void
-  var quickLaunchAgent: (AgentProvider) async -> UUID? = { _ in nil }
+  /// Starts a session for a provider, in the given folder when it is not nil.
+  var quickLaunchAgent: (AgentProvider, String?) async -> UUID? = { _, _ in nil }
 
   @State private var showingProjectContext = false
   @State private var showingCreateProject = false
@@ -154,6 +155,7 @@ struct ChatWorkspaceView: View {
   @State private var teamError: String?
   @State private var teamNotice: String?
   @State private var pendingDeletion: DeletionTarget?
+  @State private var pendingClear: ClearChatTarget?
   @State private var editingBot: AgentProfile?
   @State private var editingTeam: BotChannel?
   @State private var activitySearchQuery = ""
@@ -242,6 +244,12 @@ struct ChatWorkspaceView: View {
     let profileID: UUID?
     let handle: String
     let title: String
+  }
+
+  struct ClearChatTarget: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let isBot: Bool
   }
 
   private struct DeletionTarget: Identifiable {
@@ -515,6 +523,7 @@ struct ChatWorkspaceView: View {
           : "This removes the bot profile and archives its canonical chat and private memory."
       )
     }
+    .modifier(ClearChatConfirmation(target: $pendingClear, services: services))
   }
 
   private var launchPoint: WorldPoint {
@@ -987,8 +996,12 @@ struct ChatWorkspaceView: View {
               showingSessionCreator = false
               sidebarList = .sessions
               let projectID = newSessionProjectID
+              // A project with a source folder runs Claude Code and Codex sessions there, so the
+              // repository's own agent setup (CLAUDE.md, .claude/, AGENTS.md) applies.
+              let folder = services.conversationProjects.workingFolder(
+                projectID: projectID, provider: provider)
               Task {
-                guard let agentID = await quickLaunchAgent(provider) else { return }
+                guard let agentID = await quickLaunchAgent(provider, folder) else { return }
                 do { try services.selectProject(channelID: agentID, projectID: projectID) } catch {
                   projectContextError = error.localizedDescription
                 }
@@ -997,7 +1010,7 @@ struct ChatWorkspaceView: View {
             } label: {
               HStack(spacing: 10) {
                 AgentProviderLogo(provider: provider, size: 15, color: palette.paper)
-                Text(provider.rawValue)
+                Text(SessionLaunchProviderCatalog.title(for: provider))
                   .font(.ottoDisplay(12).weight(.medium))
                 Spacer()
               }
@@ -1399,7 +1412,7 @@ struct ChatWorkspaceView: View {
     } else {
       switch target {
       case .provider(let provider):
-        guard let launched = await quickLaunchAgent(provider) else {
+        guard let launched = await quickLaunchAgent(provider, nil) else {
           throw NSError(
             domain: "Otto", code: 1,
             userInfo: [
@@ -1814,6 +1827,7 @@ struct ChatWorkspaceView: View {
             url, for: selectedAgent ?? node,
             workspaceRoot: node.agentDefinition?.workingDirectory ?? services.documents.rootPath)
         },
+        ottoWorkspacePath: services.defaultWorkspacePath,
         enterStage: {},
         focus: { store.dispatch(.focusNode(node.id)) },
         setPresentation: {
@@ -1884,7 +1898,9 @@ struct ChatWorkspaceView: View {
         mentionProfiles: mentionableProfiles,
         mentionAppearance: { services.botAppearance.appearance(for: $0) },
         waitingTerminals: waitingTerminalNotices(owner: node.id),
-        openTerminal: { services.revealTerminal($0) }
+        openTerminal: { services.revealTerminal($0) },
+        voiceInsertion: isSelected ? voice.chatVoiceInsertion : nil,
+        consumeVoiceInsertion: { voice.consumeChatVoiceInsertion($0) }
       )
       .id(node.id)
     }
@@ -2813,6 +2829,9 @@ struct ChatWorkspaceView: View {
     }
     .contextMenu {
       Button("Rename session…", systemImage: "pencil") { beginSessionRename(node) }
+      Button("Clear chat…", systemImage: "eraser") {
+        pendingClear = ClearChatTarget(id: node.id, name: node.displayName, isBot: false)
+      }
       Divider()
       Button("Close session", systemImage: "xmark", role: .destructive) {
         closeSession(node)
@@ -2984,6 +3003,11 @@ struct ChatWorkspaceView: View {
     .accessibilityLabel("Open chat with \(entry.profile.name)")
     .contextMenu {
       Button("Edit bot…") { editingBot = entry.profile }
+      if let nodeID = entry.nodeID {
+        Button("Clear chat…", systemImage: "eraser") {
+          pendingClear = ClearChatTarget(id: nodeID, name: entry.profile.name, isBot: true)
+        }
+      }
       Divider()
       Button("Delete bot…", role: .destructive) {
         pendingDeletion = DeletionTarget(
@@ -3671,12 +3695,12 @@ struct ChatWorkspaceView: View {
         Task { await voice.toggleVoice() }
       } label: {
         HStack(spacing: 10) {
-          Image(systemName: voice.isMicrophoneActive ? "waveform" : "mic.slash.fill")
+          Image(systemName: voiceShowsListening ? "waveform" : "mic.slash.fill")
             .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(voice.isMicrophoneActive ? palette.ink : palette.muted)
+            .foregroundStyle(voiceShowsListening ? palette.ink : palette.muted)
             .frame(width: 24, height: 24)
             .background(
-              voice.isMicrophoneActive ? palette.signal : palette.raised,
+              voiceShowsListening ? palette.signal : palette.raised,
               in: Circle()
             )
           VStack(alignment: .leading, spacing: 1) {
@@ -3684,7 +3708,7 @@ struct ChatWorkspaceView: View {
               .font(.ottoDisplay(12.5).weight(.medium))
             Text(voiceStatusLabel)
               .font(.ottoDisplay(10.5))
-              .foregroundStyle(voice.isMicrophoneActive ? palette.signal : palette.muted)
+              .foregroundStyle(voiceShowsListening ? palette.signal : palette.muted)
           }
           Spacer(minLength: 0)
         }
@@ -3697,17 +3721,18 @@ struct ChatWorkspaceView: View {
       .simultaneousGesture(
         DragGesture(minimumDistance: 0)
           .onChanged { _ in
-            guard usesPressAndHoldVoice, !voice.pushToTalkHeld else { return }
-            Task { await voice.beginPushToTalk() }
+            guard usesPressAndHoldVoice, !voice.isHoldingVoice else { return }
+            let toChat = selectedAgent != nil
+            Task { await voice.beginHeldVoice(fallingBackToChat: toChat) }
           }
           .onEnded { _ in
             guard usesPressAndHoldVoice else { return }
-            Task { await voice.endPushToTalk() }
+            Task { await voice.endHeldVoice() }
           }
       )
       .disabled(voice.isVoiceActionInFlight)
       .opacity(voice.isVoiceActionInFlight ? 0.68 : 1)
-      .help(voice.primaryVoiceActionLabel)
+      .help(voice.localVoiceResultDetail ?? voice.primaryVoiceActionLabel)
       .accessibilityLabel(voice.primaryVoiceActionLabel)
 
       voiceModeMenu
@@ -3769,8 +3794,13 @@ struct ChatWorkspaceView: View {
     voice.operatingMode == .pushToTalk || voice.operatingMode == .outputOnly
   }
 
+  /// Lit from the moment a hold starts, so pressing the control gives instant feedback.
+  private var voiceShowsListening: Bool { voice.isMicrophoneActive || voice.isHoldingVoice }
+
   private var voiceStatusLabel: String {
-    if voice.isMicrophoneActive {
+    if voice.localTranscribing { return "Transcribing…" }
+    if !voiceShowsListening, let result = voice.localVoiceResult { return result }
+    if voiceShowsListening {
       return "Listening · \(voice.operatingMode.displayName)"
     }
     return voice.operatingMode.displayName
@@ -5885,5 +5915,49 @@ private struct SessionRenameAlert: ViewModifier {
     } message: {
       Text("Name this conversation without changing the bot or its history.")
     }
+  }
+}
+
+/// Asks before clearing a chat, since its messages cannot be brought back, then clears it.
+private struct ClearChatConfirmation: ViewModifier {
+  @Binding var target: ChatWorkspaceView.ClearChatTarget?
+  let services: ApplicationServices
+  @State private var failure: String?
+
+  func body(content: Content) -> some View {
+    content
+      .alert(
+        target.map { "Clear the chat with \($0.name)?" } ?? "Clear chat?",
+        isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+        presenting: target
+      ) { target in
+        Button("Clear Chat", role: .destructive) {
+          self.target = nil
+          Task {
+            do {
+              try await services.clearChat(nodeID: target.id)
+            } catch {
+              failure = error.localizedDescription
+            }
+          }
+        }
+        Button("Cancel", role: .cancel) { self.target = nil }
+      } message: { target in
+        Text(
+          "All messages in this chat are deleted and the next message starts a new conversation. "
+            + (target.isBot
+              ? "\(target.name) won't remember this conversation, but anything saved to its memory or notes stays, along with files and settings. "
+              : "Files and settings stay. ")
+            + "You won't be able to revert the agent's last file changes from this chat. "
+            + "If it's working, it stops first. This can't be undone.")
+      }
+      .alert(
+        "Couldn't clear the chat",
+        isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
+      ) {
+        Button("OK", role: .cancel) { failure = nil }
+      } message: {
+        Text(failure ?? "")
+      }
   }
 }

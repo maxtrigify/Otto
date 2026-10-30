@@ -144,6 +144,13 @@ public enum AgentProvider: String, Codable, CaseIterable, Sendable {
   case openCode = "OpenCode"
   case pi = "Pi"
   case shell = "Shell"
+
+  /// Whether a new session may start in a project's own source folder rather than the Otto
+  /// workspace. Only providers that neither auto-trust their working directory nor write MCP
+  /// config into it qualify: Claude Code (reads CLAUDE.md and .claude/) and Codex (reads
+  /// AGENTS.md). Cursor and Pi launch pre-approved, and Kimi, Cursor, Pi and Grok write their
+  /// Otto MCP config into the folder they start in; Otto Harness reads no repository setup.
+  public var startsInProjectFolder: Bool { self == .claudeCode || self == .codex }
 }
 
 /// How a provider should structure work inside one Otto agent node. Otto remains the owner of

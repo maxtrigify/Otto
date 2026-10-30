@@ -215,8 +215,9 @@ struct OttoBuddyBubbleView: View {
         if let reply {
           answer(reply)
         } else if let detail = bubble.detail {
+          // An approval can carry a whole email; it scrolls instead of outgrowing the screen.
           Text(detail).font(.system(size: 12)).foregroundStyle(OttoBuddyInk.soft)
-            .fixedSize(horizontal: false, vertical: true)
+            .cappedScroll(maxHeight: 240)
         }
         buttons
         if let reply { replyBox(reply) }

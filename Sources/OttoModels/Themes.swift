@@ -210,7 +210,7 @@ public enum OttoThemeCatalog {
   public static let all: [OttoThemeDefinition] = [
     fieldNotes, aurora, highfell, silverbough, mistfall, duneveil,
     halcyon, ringfall, shorelight, farfield, afterglow, nightspire, graphite, velvet,
-    nightscreen, glasswing, nightglass,
+    nightscreen, glasswing, nightglass, daylight,
   ]
 
   /// Superseded theme IDs (name collisions with another product, plus identity renames when themes
@@ -510,6 +510,21 @@ public enum OttoThemeCatalog {
     amber: ThemeColor(red: 0.94, green: 0.68, blue: 0.30),
     red: ThemeColor(red: 0.95, green: 0.38, blue: 0.36),
     cyan: ThemeColor(red: 0.42, green: 0.80, blue: 0.86),
+    traceStyle: "mono", nodeOpacity: 0.97
+  )
+
+  /// Plain light — white paper, near-black ink, no artwork. The light counterpart to Graphite.
+  public static let daylight = OttoThemeDefinition(
+    id: "daylight", displayName: "Daylight", version: 1,
+    ink: ThemeColor(red: 0.955, green: 0.955, blue: 0.950),
+    surface: ThemeColor(red: 0.985, green: 0.985, blue: 0.980),
+    raised: ThemeColor(red: 1.0, green: 1.0, blue: 1.0),
+    paper: ThemeColor(red: 0.085, green: 0.090, blue: 0.095),
+    muted: ThemeColor(red: 0.36, green: 0.37, blue: 0.39),
+    signal: ThemeColor(red: 0.10, green: 0.36, blue: 0.78),
+    amber: ThemeColor(red: 0.55, green: 0.33, blue: 0.04),
+    red: ThemeColor(red: 0.70, green: 0.13, blue: 0.11),
+    cyan: ThemeColor(red: 0.04, green: 0.38, blue: 0.44),
     traceStyle: "mono", nodeOpacity: 0.97
   )
 }

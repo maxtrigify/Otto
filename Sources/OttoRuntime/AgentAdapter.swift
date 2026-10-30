@@ -23,16 +23,27 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
   case anthropic = "anthropic"
   case xAI = "xai"
   case moonshot = "moonshot"
+  case deepSeek = "deepseek"
+  case mistral = "mistral"
+  case groq = "groq"
+  case gemini = "gemini"
+  case openRouter = "openrouter"
   case local = "local"
 
   public var id: String { rawValue }
+
+  /// The OpenAI-compatible endpoint table entry, for vendors reached through chat completions.
+  public var compatibleVendor: OttoHarnessCompatibleVendor? {
+    OttoHarnessCompatibleVendor(rawValue: rawValue)
+  }
 
   public var displayName: String {
     switch self {
     case .openAI: "OpenAI"
     case .anthropic: "Anthropic"
     case .xAI: "xAI"
-    case .moonshot: "Moonshot"
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter:
+      compatibleVendor?.displayName ?? rawValue
     case .local: "Local (OpenAI compatible)"
     }
   }
@@ -42,7 +53,7 @@ public enum OttoHarnessProvider: String, Codable, CaseIterable, Identifiable, Se
     case .openAI: "openai.api-key"
     case .anthropic: "anthropic.api-key"
     case .xAI: "xai.api-key"
-    case .moonshot: "moonshot.api-key"
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter: "\(rawValue).api-key"
     case .local: "local.openai.api-key"
     }
   }
@@ -81,6 +92,11 @@ public struct OttoHarnessModelSelection: Equatable, Sendable {
     case .anthropic: "claude-sonnet-5"
     case .xAI: "grok-4.6"
     case .moonshot: "kimi-k2.5"
+    case .deepSeek: "deepseek-chat"
+    case .mistral: "mistral-large-latest"
+    case .groq: "llama-3.3-70b-versatile"
+    case .gemini: "gemini-flash-latest"
+    case .openRouter: "openrouter/auto"
     case .local: "local-model"
     }
   }
@@ -133,6 +149,12 @@ public enum AgentModelCatalog {
         AgentModel(id: "xai/grok-4.6", displayName: "xAI · Grok 4.6"),
         AgentModel(id: "xai/grok-4.5", displayName: "xAI · Grok 4.5"),
         AgentModel(id: "moonshot/kimi-k2.5", displayName: "Moonshot · Kimi K2.5"),
+        AgentModel(id: "deepseek/deepseek-chat", displayName: "DeepSeek · DeepSeek Chat"),
+        AgentModel(id: "deepseek/deepseek-reasoner", displayName: "DeepSeek · DeepSeek Reasoner"),
+        AgentModel(id: "mistral/mistral-large-latest", displayName: "Mistral · Mistral Large"),
+        AgentModel(id: "groq/llama-3.3-70b-versatile", displayName: "Groq · Llama 3.3 70B"),
+        AgentModel(id: "gemini/gemini-flash-latest", displayName: "Google Gemini · Flash"),
+        AgentModel(id: "openrouter/openrouter/auto", displayName: "OpenRouter · Auto"),
       ]
     case .cursor:
       // Cursor's real catalog is account-specific and read from `cursor-agent models`; this is
@@ -178,8 +200,7 @@ public enum AgentModelCatalog {
       case .openAI: ["none", "low", "medium", "high", "xhigh", "max"]
       case .anthropic: ["low", "medium", "high", "max"]
       case .xAI: ["low", "medium", "high", "xhigh"]
-      case .moonshot: []
-      case .local: []
+      case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter, .local: []
       }
     default: []
     }
@@ -239,6 +260,14 @@ public struct AgentLaunchRequest: Sendable, Equatable {
   /// adapter must pass these explicitly in the MCP server configuration — inheriting the parent
   /// process environment is not enough.
   public var controlEnvironment: [String: String]
+  /// Otto tool names (e.g. `smtp.send`) whose definitions require confirmation. Otto shows its
+  /// own permission card before any of these runs, so adapters may pre-approve exactly these at
+  /// the provider level to avoid a second prompt. Never the whole server: tools such as
+  /// `terminal.run` carry no Otto card and must stay behind the provider's own approval.
+  public var ottoSelfConfirmingTools: [String]
+  /// Otto's own workspace, where Otto stages chat attachments. Nil, or equal to `workspacePath`,
+  /// when the run starts there; otherwise the run starts in a project's source folder.
+  public var ottoWorkspacePath: String?
   /// The bot's current authored role and operating instructions. This travels separately from
   /// memory so adapters can place it in their strongest supported instruction channel on every
   /// turn, including resumed sessions.
@@ -261,6 +290,8 @@ public struct AgentLaunchRequest: Sendable, Equatable {
     resumeSessionID: String? = nil,
     ottoMCPExecutable: String? = nil,
     controlEnvironment: [String: String] = [:],
+    ottoSelfConfirmingTools: [String] = [],
+    ottoWorkspacePath: String? = nil,
     profileInstructions: String? = nil,
     memoryBootstrap: String? = nil
   ) {
@@ -273,6 +304,8 @@ public struct AgentLaunchRequest: Sendable, Equatable {
     self.resumeSessionID = resumeSessionID
     self.ottoMCPExecutable = ottoMCPExecutable
     self.controlEnvironment = controlEnvironment
+    self.ottoSelfConfirmingTools = ottoSelfConfirmingTools
+    self.ottoWorkspacePath = ottoWorkspacePath
     self.profileInstructions = profileInstructions
     self.memoryBootstrap = memoryBootstrap
   }
@@ -321,12 +354,23 @@ public struct AgentControlPlane: Sendable {
   public var socketPath: String
   public var mcpExecutable: String?
   public var workspaceID: UUID
+  /// Registry names of the tools Otto confirms with its own card; copied into every launch
+  /// request as `AgentLaunchRequest.ottoSelfConfirmingTools`.
+  public var selfConfirmingTools: [String]
+  /// Otto's own workspace. Otto keeps its per-run files (bootstrap copies, chat images) here even
+  /// when a session starts in a project's source folder, so it never writes into that folder.
+  public var workspacePath: String?
   private let tokenProvider: @Sendable (UUID, UUID?) async -> String
 
-  public init(socketPath: String, token: String, mcpExecutable: String?, workspaceID: UUID) {
+  public init(
+    socketPath: String, token: String, mcpExecutable: String?, workspaceID: UUID,
+    selfConfirmingTools: [String] = [], workspacePath: String? = nil
+  ) {
     self.socketPath = socketPath
     self.mcpExecutable = mcpExecutable
     self.workspaceID = workspaceID
+    self.selfConfirmingTools = selfConfirmingTools
+    self.workspacePath = workspacePath
     self.tokenProvider = { _, _ in token }
   }
 
@@ -334,11 +378,15 @@ public struct AgentControlPlane: Sendable {
     socketPath: String,
     mcpExecutable: String?,
     workspaceID: UUID,
+    selfConfirmingTools: [String] = [],
+    workspacePath: String? = nil,
     tokenProvider: @escaping @Sendable (UUID, UUID?) async -> String
   ) {
     self.socketPath = socketPath
     self.mcpExecutable = mcpExecutable
     self.workspaceID = workspaceID
+    self.selfConfirmingTools = selfConfirmingTools
+    self.workspacePath = workspacePath
     self.tokenProvider = tokenProvider
   }
 

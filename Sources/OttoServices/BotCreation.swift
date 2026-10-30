@@ -164,6 +164,7 @@ extension ApplicationServices {
       try? botNotes.removeForCreationRollback(profileID: profile.id)
       try? botChannels.removeForCreationRollback(profileID: profile.id)
       try? agentProfiles.delete(id: profile.id)
+      try? connectorAccess.removeProfile(profile.id)
       objectWillChange.send()
       throw error
     }

@@ -485,7 +485,9 @@ struct WorkspaceView: View {
         )
         showingHireBot = true
       },
-      quickLaunchAgent: quickLaunchAgentForChat
+      quickLaunchAgent: { provider, folder in
+        await quickLaunchAgentForChat(provider, workingDirectory: folder)
+      }
     )
     .environment(\.ottoWindowIsActive, scenePhase == .active && windowIsVisible)
     .ignoresSafeArea(.container, edges: .top)
@@ -527,8 +529,11 @@ struct WorkspaceView: View {
     }
   }
 
-  /// The Home/Chat switch looks the same on every screen and theme.
-  private var surfacePickerPalette: OttoPalette { OttoPalette(theme: OttoThemeCatalog.aurora) }
+  /// The Home/Chat switch uses the active theme's own colours on a light theme without artwork
+  /// (Daylight), and the same dark Aurora plate on every other screen and theme.
+  private var surfacePickerPalette: OttoPalette {
+    OttoPalette(theme: activeTheme.isPlainLight ? activeTheme : OttoThemeCatalog.aurora)
+  }
 
   private var workspaceSurfacePicker: some View {
     // Segmented tabs after Fluid Functionalism: the selected plate slides on the moderate
@@ -566,7 +571,8 @@ struct WorkspaceView: View {
     .padding(2)
     .frame(height: 26)
     .background(
-      Color.black.opacity(0.55),
+      activeTheme.isPlainLight
+        ? surfacePickerPalette.raised.opacity(0.9) : Color.black.opacity(0.55),
       in: RoundedRectangle(cornerRadius: 7, style: .continuous)
     )
     .accessibilityElement(children: .contain)
@@ -722,7 +728,9 @@ struct WorkspaceView: View {
     Task { _ = await quickLaunchAgentForChat(provider) }
   }
 
-  private func quickLaunchAgentForChat(_ provider: AgentProvider) async -> UUID? {
+  private func quickLaunchAgentForChat(
+    _ provider: AgentProvider, workingDirectory: String? = nil
+  ) async -> UUID? {
     let point = nextPlacementPoint()
     let key =
       switch provider {
@@ -742,6 +750,7 @@ struct WorkspaceView: View {
       ?? .workspaceWrite
     return try? await services.spawnAgent(
       provider: provider,
+      workingDirectory: provider.startsInProjectFolder ? workingDirectory : nil,
       at: point,
       permissionMode: mode
     ).agentID

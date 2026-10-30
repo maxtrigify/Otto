@@ -145,6 +145,7 @@ public final class MessagingService: ObservableObject {
         let lead = team.orchestratorProfileID,
         team.memberProfileIDs.contains(lead),
         services.agentProfiles.profile(id: lead)?.isArchived == false,
+        services.connectorAccess.canUse(.iMessage, profileID: lead),
         !accountID.isEmpty, !secret.isEmpty,
         sender.range(of: #"^\+[1-9][0-9]{6,14}$"#, options: .regularExpression) != nil,
         destination.range(of: #"^\+[1-9][0-9]{6,14}$"#, options: .regularExpression) != nil
@@ -272,7 +273,9 @@ public final class MessagingService: ObservableObject {
       team.memberProfileIDs.allSatisfy({
         services?.agentProfiles.profile(id: $0)?.isArchived == false
       }),
-      services?.agentProfiles.profile(id: binding.coordinatorID)?.isArchived == false
+      services?.agentProfiles.profile(id: binding.coordinatorID)?.isArchived == false,
+      // Revoking iMessage access for the coordinator stops the binding everywhere it is checked.
+      services?.connectorAccess.canUse(.iMessage, profileID: binding.coordinatorID) == true
     else { return false }
     return true
   }

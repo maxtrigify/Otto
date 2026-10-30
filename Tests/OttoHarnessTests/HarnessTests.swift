@@ -38,6 +38,64 @@ struct HarnessTests {
     #expect(resumed.messages.map(\.content) == ["Hello", "New session is working"])
   }
 
+  @Test("The same request always encodes to the same bytes, so servers can reuse the prompt")
+  func requestBodiesAreStable() throws {
+    func schema(_ reversed: Bool) -> JSONValue {
+      var object: [String: JSONValue] = [:]
+      let fields = (0..<24).map { "field\($0)" }
+      for key in reversed ? fields.reversed() : fields {
+        object[key] = .object(["type": .string("string"), "description": .string(key)])
+      }
+      return .object(["type": .string("object"), "properties": .object(object)])
+    }
+    func body(_ reversed: Bool) throws -> Data {
+      let tools = (0..<30).map {
+        HarnessTool(name: "tool_\($0)", description: "Tool \($0)", inputSchema: schema(reversed))
+      }
+      return try OpenAIChatCompletionsBackend(
+        apiKey: "", providerID: "local", providerDisplayName: "Local",
+        endpoint: URL(string: "http://127.0.0.1:1/v1/chat/completions")!
+      ).requestBody(
+        for: HarnessBackendRequest(
+          systemInstructions: "Be brief.", modelID: "m",
+          input: .conversation([HarnessMessage(role: .user, content: "Hi")]), tools: tools))
+    }
+    #expect(try body(false) == body(true))
+    #expect(try body(false) == body(false))
+  }
+
+  @Test("A turn's token use is summed over every model request, tool rounds included")
+  func turnUsageIsSummed() async throws {
+    let fixture = try Fixture()
+    defer { fixture.remove() }
+    let backend = ScriptedBackend(
+      providerID: "local",
+      responses: [
+        HarnessBackendResponse(
+          providerContinuation: .string("response-1"),
+          toolCalls: [HarnessToolCall(id: "call-1", name: "notes_read", arguments: .object([:]))],
+          usage: HarnessTokenUsage(inputTokens: 900, outputTokens: 40)),
+        HarnessBackendResponse(
+          text: "Done", usage: HarnessTokenUsage(inputTokens: 1_100, outputTokens: 60)),
+      ])
+    let result = try await HarnessRunner(sessionStore: HarnessSessionStore(rootURL: fixture.url))
+      .run(
+        HarnessTurnRequest(
+          providerID: "local", modelID: "m", systemInstructions: "", prompt: "Hi",
+          tools: [HarnessTool(name: "notes_read", description: "", inputSchema: .object([:]))]),
+        backend: backend, toolExecutor: RecordingToolExecutor(output: "ok"))
+    #expect(result.usage == HarnessTokenUsage(inputTokens: 2_000, outputTokens: 100))
+
+    #expect(
+      HarnessTokenUsage.parse(["prompt_tokens": 12, "completion_tokens": 5])
+        == HarnessTokenUsage(inputTokens: 12, outputTokens: 5))
+    #expect(
+      HarnessTokenUsage.parse([
+        "input_tokens": 10, "output_tokens": 3, "cache_read_input_tokens": 90,
+      ]) == HarnessTokenUsage(inputTokens: 100, outputTokens: 3))
+    #expect(HarnessTokenUsage.parse(nil) == nil)
+  }
+
   @Test("Corrupted session files remain visible as errors and are never overwritten")
   func corruptResumeFailsWithoutDataLoss() async throws {
     let fixture = try Fixture()

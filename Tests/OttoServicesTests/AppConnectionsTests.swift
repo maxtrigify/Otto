@@ -114,17 +114,21 @@ struct AppConnectionsTests {
     try await services.registerAppConnectionTools()
     var nodes: [UUID] = []
     do {
-      for provider in Array(SharedAppProviders.supported) + [.hermes] {
+      for provider in Array(SharedAppProviders.supported) + [.hermes, .openAI] {
         let id = try #require(
           store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))).affectedNodeIDs
             .first)
-        store.dispatch(
-          .setAgentDefinition(
-            id: id,
-            definition: AgentDefinition(
-              provider: provider,
-              workingDirectory: root.path, launchCommand: "fixture",
-              permissionMode: "workspaceWrite")))
+        // Gmail reaches only bots the Mac owner allowed for it.
+        let profileID = try services.saveAgentProfile(
+          AgentProfile(name: "Fixture \(UUID())", instructions: "Test", provider: provider)
+        ).id
+        try services.connectorAccess.setAllowed(true, profileID: profileID, for: .gmail)
+        var definition = AgentDefinition(
+          provider: provider,
+          workingDirectory: root.path, launchCommand: "fixture",
+          permissionMode: "workspaceWrite")
+        definition.profileID = profileID
+        store.dispatch(.setAgentDefinition(id: id, definition: definition))
         _ = try await supervisor.spawn(
           provider: provider,
           specification: ProcessLaunchSpec(
@@ -133,7 +137,7 @@ struct AppConnectionsTests {
         let context = ToolContext(
           actorID: "fixture", scopes: [.agentRead], source: .agent, sourceNodeID: id)
         let names = await services.registry.definitions(for: context).map(\.name)
-        if provider == .hermes {
+        if !SharedAppProviders.supported.contains(provider) {
           #expect(!names.contains("gmail.search"))
           await #expect(throws: ToolRegistryError.self) {
             try await services.registry.call(
@@ -343,9 +347,14 @@ struct AppConnectionsTests {
     try await services.registerAppConnectionTools()
     let id = try #require(
       store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0))).affectedNodeIDs.first)
-    let definition = AgentDefinition(
+    var definition = AgentDefinition(
       provider: .codex, workingDirectory: root.path,
       launchCommand: "fixture", permissionMode: "workspaceWrite")
+    let profileID = try services.saveAgentProfile(
+      AgentProfile(name: "Fixture", instructions: "Test", provider: .codex)
+    ).id
+    definition.profileID = profileID
+    try services.connectorAccess.setAllowed(true, profileID: profileID, for: .gmail)
     store.dispatch(.setAgentDefinition(id: id, definition: definition))
     _ = try await supervisor.spawn(
       provider: .codex,
@@ -423,6 +432,29 @@ struct AppConnectionsTests {
     let decoded = String(decoding: try #require(Data(base64URL: raw)), as: UTF8.self)
     #expect(decoded.contains("Content-Transfer-Encoding: base64"))
     #expect(decoded.contains("Subject: =?UTF-8?B?"))
+  }
+
+  @Test("Reconnecting for one Google feature keeps the scopes the account already granted")
+  func reconnectKeepsGrantedScopes() throws {
+    let calendar: Set<String> = [
+      AppConnectionsStore.calendarReadScope, AppConnectionsStore.calendarEventsScope,
+    ]
+    let send: Set<String> = [AppConnectionsStore.composeScope, AppConnectionsStore.sendScope]
+    // Gmail reconnect without calendar keeps calendar; granting calendar keeps sending.
+    let gmail = AppConnectionsStore.requestedScopes(
+      allowSending: true, allowCalendar: false,
+      keeping: calendar.union([AppConnectionsStore.readScope]))
+    #expect(gmail.isSuperset(of: calendar.union(send)))
+    let granting = AppConnectionsStore.requestedScopes(
+      allowSending: false, allowCalendar: true,
+      keeping: send.union([AppConnectionsStore.readScope, "openid"]))
+    #expect(granting == send.union(calendar).union([AppConnectionsStore.readScope]))
+
+    let url = GoogleLoopbackSignIn.authorizationURL(
+      clientID: "id.apps.googleusercontent.com", redirectURI: "http://127.0.0.1:1/oauth2callback",
+      scopes: granting, state: "state", challenge: "challenge")
+    let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+    #expect(items.contains(URLQueryItem(name: "include_granted_scopes", value: "true")))
   }
 
   @Test("Nested multipart messages return text and attachment metadata without marking read")

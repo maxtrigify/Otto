@@ -46,6 +46,8 @@ public struct AgentTranscriptEntry: Identifiable, Sendable, Equatable {
   /// Kind-specific companion value; for `.toolCall` this is the tool's display name.
   public var detail: String?
   public var createdAt: Date
+  /// On the last reply of a turn: how long the turn took and the tokens the provider reported.
+  public var turnStats: AgentTurnStats?
 
   public init(
     id: UUID = UUID(),
@@ -53,7 +55,8 @@ public struct AgentTranscriptEntry: Identifiable, Sendable, Equatable {
     kind: AgentTranscriptKind = .text,
     text: String,
     detail: String? = nil,
-    createdAt: Date = .now
+    createdAt: Date = .now,
+    turnStats: AgentTurnStats? = nil
   ) {
     self.id = id
     self.role = role
@@ -61,6 +64,21 @@ public struct AgentTranscriptEntry: Identifiable, Sendable, Equatable {
     self.text = text
     self.detail = detail
     self.createdAt = createdAt
+    self.turnStats = turnStats
+  }
+}
+
+/// Time and token use of one turn, shown under its reply. Tokens are nil when the provider does
+/// not report them; input counts include cached input.
+public struct AgentTurnStats: Codable, Sendable, Equatable {
+  public var durationSeconds: Double
+  public var inputTokens: Int?
+  public var outputTokens: Int?
+
+  public init(durationSeconds: Double, inputTokens: Int? = nil, outputTokens: Int? = nil) {
+    self.durationSeconds = durationSeconds
+    self.inputTokens = inputTokens
+    self.outputTokens = outputTokens
   }
 }
 

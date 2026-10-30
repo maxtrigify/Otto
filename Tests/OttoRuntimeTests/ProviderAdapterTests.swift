@@ -94,6 +94,38 @@ struct ProviderAdapterTests {
     }
   }
 
+  @Test("A bot with no model uses the local server when no OpenAI key is stored")
+  func ottoHarnessDefaultsToLocalWithoutOpenAIKey() async throws {
+    let stub = try stubProvider(named: "otto-openai-agent", version: "1.0.0")
+    defer { try? FileManager.default.removeItem(at: stub.deletingLastPathComponent()) }
+    let suite = "otto.tests.local-harness.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    try LocalModelConfiguration(baseURL: "http://gillai:4000/v1", modelID: "qwen3.8-flash-next")
+      .save(defaults: defaults)
+
+    let onlyLocal = OpenAIDirectAdapter(
+      executablePath: stub.path,
+      credentialProvider: { $0 == .local ? "local-key" : nil }, localDefaultsSuite: suite)
+    let spec = try await onlyLocal.buildLaunchSpec(
+      AgentLaunchRequest(workspacePath: "/tmp", prompt: "hi", model: nil))
+    #expect(spec.arguments[spec.arguments.firstIndex(of: "--backend")! + 1] == "local")
+    #expect(spec.arguments[spec.arguments.firstIndex(of: "--model")! + 1] == "qwen3.8-flash-next")
+    #expect(spec.environment["OTTO_MODEL_API_KEY"] == "local-key")
+    #expect(spec.environment["OTTO_MODEL_BASE_URL"] == "http://gillai:4000/v1")
+
+    // With an OpenAI key, or an explicit model, the choice is left alone.
+    let withOpenAI = OpenAIDirectAdapter(
+      executablePath: stub.path, credentialProvider: { _ in "key" }, localDefaultsSuite: suite)
+    let openAISpec = try await withOpenAI.buildLaunchSpec(
+      AgentLaunchRequest(workspacePath: "/tmp", prompt: "hi", model: nil))
+    #expect(openAISpec.arguments[openAISpec.arguments.firstIndex(of: "--backend")! + 1] == "openai")
+    await #expect(throws: RuntimeError.self) {
+      _ = try await onlyLocal.buildLaunchSpec(
+        AgentLaunchRequest(workspacePath: "/tmp", prompt: "hi", model: "openai/gpt-5.6"))
+    }
+  }
+
   @Test("Otto Harness resolves legacy OpenAI ids and provider-prefixed model ids")
   func ottoHarnessModelRouting() {
     #expect(
@@ -1404,6 +1436,8 @@ struct ProviderAdapterTests {
     #expect(
       codexSpec.arguments.contains("mcp_servers.otto.env.OTTO_CONTROL_TOKEN=\"scoped-token\"")
     )
+    // No blanket approval for the otto server: terminal.run and friends keep Codex's policy.
+    #expect(!codexSpec.arguments.contains { $0.contains("default_tools_approval_mode") })
 
     let claudeStub = try stubProvider(named: "claude")
     defer { try? FileManager.default.removeItem(at: claudeStub.deletingLastPathComponent()) }

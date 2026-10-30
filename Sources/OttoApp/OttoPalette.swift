@@ -217,9 +217,22 @@ extension EnvironmentValues {
   }
 }
 
+/// Light themes without artwork use a light plate instead of smoked glass.
+struct OttoGlassLightKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+  var ottoGlassLight: Bool {
+    get { self[OttoGlassLightKey.self] }
+    set { self[OttoGlassLightKey.self] = newValue }
+  }
+}
+
 private struct OttoGlassCard: ViewModifier {
   @Environment(\.ottoPalette) private var palette
   @Environment(\.ottoGlassSmoke) private var smoke
+  @Environment(\.ottoGlassLight) private var lightGlass
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   let cornerRadius: CGFloat
   let tint: Double?
@@ -230,6 +243,8 @@ private struct OttoGlassCard: ViewModifier {
       .background {
         if reduceTransparency {
           shape.fill(palette.surface)
+        } else if lightGlass {
+          shape.fill(palette.raised.opacity(0.96))
         } else {
           // Smoked glass: a dark frosted plate the photo shows through.
           ZStack {
@@ -294,4 +309,10 @@ extension View {
   func ottoElevated(cornerRadius: CGFloat, depth: OttoElevation = .card) -> some View {
     modifier(OttoElevatedSurface(cornerRadius: cornerRadius, depth: depth))
   }
+}
+
+extension OttoThemeDefinition {
+  /// A light theme without background artwork (Daylight). Only these restyle Otto's chrome in
+  /// their own light colours; artwork themes keep the dark plates their photos were tuned for.
+  var isPlainLight: Bool { isLightAppearance && backgroundAsset == nil }
 }

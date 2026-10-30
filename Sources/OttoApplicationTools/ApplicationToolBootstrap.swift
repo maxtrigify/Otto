@@ -36,7 +36,8 @@ public enum ApplicationToolBootstrap {
     operatingMemory: CompactMemoryStore? = nil,
     memoryInbox: CompactMemoryInbox? = nil,
     subagentResolver: BotSubagentResolver? = nil,
-    accountBoundary: AgentAccountBoundary? = nil
+    accountBoundary: AgentAccountBoundary? = nil,
+    emailOriginal: EmailApprovalSummary.OriginalLookup? = nil
   ) async throws {
     let worktreeManager = worktrees ?? GitWorktreeManager(repositoryPath: workspacePath)
     let orchestration = orchestration ?? .live(workspacePath: workspacePath)
@@ -90,7 +91,8 @@ public enum ApplicationToolBootstrap {
         worktreeSessions: worktreeSessions
       ))
     try await registry.register(AgentGetStatusTool(supervisor: supervisor))
-    try await registry.register(AgentRequestPermissionTool(supervisor: supervisor))
+    try await registry.register(
+      AgentRequestPermissionTool(supervisor: supervisor, emailOriginal: emailOriginal))
     try await registry.register(AgentAskUserTool(supervisor: supervisor))
     try await registry.register(AgentGetOutputTool(supervisor: supervisor))
     try await registry.register(AgentSetModelTool(store: store))

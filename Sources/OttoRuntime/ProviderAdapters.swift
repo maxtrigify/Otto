@@ -107,6 +107,14 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       // CLI versions.
       arguments += ["--effort", effort]
     }
+    // A session in a project's source folder reads its pasted images from Otto's workspace.
+    // The variadic flag sits before another flag so it cannot swallow the trailing prompt.
+    if let ottoWorkspace = request.ottoWorkspacePath, ottoWorkspace != request.workspacePath {
+      let attachments = (ottoWorkspace as NSString).appendingPathComponent(".otto/chat-attachments")
+      if FileManager.default.fileExists(atPath: attachments) {
+        arguments += ["--add-dir", attachments]
+      }
+    }
     switch request.permissionMode {
     case .readOnly:
       arguments += ["--permission-mode", "plan"]
@@ -119,6 +127,18 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       let mcpConfig = Self.mcpConfigJSON(
         command: mcpExecutable, environment: request.controlEnvironment)
     {
+      // Otto confirms its own consequential tools (smtp.send, gmail.send, ...) through its
+      // permission card, so Claude need not ask again for exactly those. Every other Otto tool
+      // (terminal.run, agent.spawn, ...) stays behind Claude's prompt. Read-only bots keep
+      // Claude's plan-mode prompts. The variadic flag sits before another flag so it cannot
+      // swallow the trailing positional prompt.
+      if request.permissionMode == .workspaceWrite, !request.ottoSelfConfirmingTools.isEmpty {
+        arguments += [
+          "--allowedTools",
+          request.ottoSelfConfirmingTools.map(OttoMCPRegistration.claudeToolName).joined(
+            separator: ","),
+        ]
+      }
       arguments += ["--mcp-config", mcpConfig]
       // One appended system prompt carries both the workspace guidance and, when the memory layer
       // is active, the run's bootstrap packet (charter, compact context, memory rules).
@@ -522,6 +542,17 @@ public struct CodexAdapter: AgentAdapter {
     // agent.ask_user and permission approvals block on a human answer, so the otto server's
     // tool timeout must be hour-scale rather than Codex's default of about a minute.
     arguments += ["--config", "mcp_servers.otto.tool_timeout_sec=3600"]
+    // Otto confirms its own consequential tools (smtp.send, gmail.send, ...) through the in-chat
+    // permission card. Without this, non-interactive Codex runs refuse those calls outright
+    // ("requires approval, but approval policy is never") before Otto can ask. Only those tools
+    // are pre-approved, keyed by their raw MCP name; every other Otto tool keeps Codex's own
+    // approval policy, and read-only runs pre-approve nothing.
+    if request.permissionMode != .readOnly, !request.ottoSelfConfirmingTools.isEmpty {
+      let entries = request.ottoSelfConfirmingTools.map { name in
+        "\"\(tomlEscaped(name))\"={approval_mode=\"approve\"}"
+      }
+      arguments += ["--config", "mcp_servers.otto.tools={\(entries.joined(separator: ","))}"]
+    }
     // Codex spawns MCP servers with a whitelisted environment, so the parent process's OTTO_*
     // variables never reach the bridge unless they are configured explicitly per server.
     for key in request.controlEnvironment.keys.sorted() {
@@ -572,14 +603,21 @@ public struct OpenAIDirectAdapter: AgentAdapter {
   public let provider = AgentProvider.openAI
   private let executablePath: String?
   private let credentialProvider: @Sendable (OttoHarnessProvider) async throws -> String?
+  /// The defaults suite the saved local server is read from; tests pass an isolated one.
+  private let localDefaultsSuite: String?
+  private var localDefaults: UserDefaults {
+    localDefaultsSuite.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+  }
 
   public init(
     executablePath: String? = nil,
     credentialProvider: @escaping @Sendable (OttoHarnessProvider) async throws -> String? =
-      OpenAIDirectAdapter.defaultCredential
+      OpenAIDirectAdapter.defaultCredential,
+    localDefaultsSuite: String? = nil
   ) {
     self.executablePath = executablePath
     self.credentialProvider = credentialProvider
+    self.localDefaultsSuite = localDefaultsSuite
   }
 
   /// Source-compatible convenience for callers and tests written for the original OpenAI-only
@@ -590,6 +628,7 @@ public struct OpenAIDirectAdapter: AgentAdapter {
   ) {
     self.executablePath = executablePath
     self.credentialProvider = { _ in try await apiKeyProvider() }
+    self.localDefaultsSuite = nil
   }
 
   /// Reads the provider credential from the default secret store. Platforms without the
@@ -624,17 +663,20 @@ public struct OpenAIDirectAdapter: AgentAdapter {
       for modelProvider in OttoHarnessProvider.allCases {
         group.addTask {
           if modelProvider == .local {
-            guard let configuration = LocalModelConfiguration.load() else { return [] }
+            guard let configuration = LocalModelConfiguration.load(defaults: localDefaults) else {
+              return []
+            }
             let storedKey = try? await credentialProvider(.local)
-            let configured = AgentModel(
-              id: OttoHarnessModelSelection.persistedID(
-                provider: .local, modelID: configuration.modelID),
-              displayName: "Local · \(configuration.modelID)")
+            let configured = configuration.modelIDs.map {
+              AgentModel(
+                id: OttoHarnessModelSelection.persistedID(provider: .local, modelID: $0),
+                displayName: "Local · \($0)")
+            }
             let discovered =
               await Self.discoverDirectModels(
                 provider: .local, apiKey: storedKey ?? "") ?? []
-            return discovered.contains(where: { $0.id == configured.id })
-              ? discovered : [configured] + discovered
+            return configured.filter { model in !discovered.contains { $0.id == model.id } }
+              + discovered
           }
           guard
             let key = try? await credentialProvider(modelProvider),
@@ -665,9 +707,11 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     }
   }
 
-  static func discoverDirectModels(
+  /// `local` lets Settings list a server's models before its address is saved.
+  public static func discoverDirectModels(
     provider: OttoHarnessProvider,
     apiKey: String,
+    local: LocalModelConfiguration? = nil,
     session: URLSession = .shared
   ) async -> [AgentModel]? {
     let endpoint: URL
@@ -675,9 +719,11 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .openAI: endpoint = URL(string: "https://api.openai.com/v1/models")!
     case .anthropic: endpoint = URL(string: "https://api.anthropic.com/v1/models?limit=100")!
     case .xAI: endpoint = URL(string: "https://api.x.ai/v1/models")!
-    case .moonshot: endpoint = URL(string: "https://api.moonshot.ai/v1/models")!
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter:
+      guard let vendor = provider.compatibleVendor else { return nil }
+      endpoint = vendor.modelsURL
     case .local:
-      guard let configuration = LocalModelConfiguration.load() else { return nil }
+      guard let configuration = local ?? LocalModelConfiguration.load() else { return nil }
       endpoint = configuration.modelsURL
     }
     var request = URLRequest(url: endpoint, timeoutInterval: 12)
@@ -701,8 +747,9 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     else { return [] }
     var seen = Set<String>()
     return rows.compactMap { row in
-      guard let id = row["id"] as? String, Self.isConversationalModel(id, provider: provider),
-        seen.insert(id).inserted
+      guard let listed = row["id"] as? String else { return nil }
+      let id = provider.compatibleVendor?.modelID(fromListedID: listed) ?? listed
+      guard Self.isConversationalModel(id, provider: provider), seen.insert(id).inserted
       else { return nil }
       let providerName = provider.displayName
       let suppliedName = row["display_name"] as? String
@@ -718,7 +765,8 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     case .openAI: id.hasPrefix("gpt-5")
     case .anthropic: id.hasPrefix("claude-")
     case .xAI: id.hasPrefix("grok-4")
-    case .moonshot: id.hasPrefix("kimi-")
+    case .moonshot, .deepSeek, .mistral, .groq, .gemini, .openRouter:
+      provider.compatibleVendor?.isConversationalModel(id) ?? false
     case .local: !id.isEmpty && id.count <= 200 && !id.contains("\n")
     }
   }
@@ -730,11 +778,20 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     guard request.executionStrategy.isSupported(by: .openAI) else {
       throw RuntimeError.launchFailed("Otto Harness bots do not support scripted workflows")
     }
-    let selection = OttoHarnessModelSelection.resolve(request.model)
+    var selection = OttoHarnessModelSelection.resolve(request.model)
     // An account's own backend key wins; otherwise fall back to the Mac-wide Models key.
     var apiKey = request.account?.harnessCredentials[selection.provider.credentialKey]
     if apiKey == nil { apiKey = try await credentialProvider(selection.provider) }
     apiKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+    // A bot with no model chosen defaults to OpenAI. On a Mac set up only for a local server,
+    // use that server's default model instead of failing for a missing OpenAI key.
+    if (request.model ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      apiKey?.isEmpty != false, let local = LocalModelConfiguration.load(defaults: localDefaults)
+    {
+      selection = OttoHarnessModelSelection(provider: .local, modelID: local.modelID)
+      apiKey = try await credentialProvider(.local)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     guard selection.provider == .local || (apiKey?.isEmpty == false) else {
       throw RuntimeError.launchFailed(
         "\(selection.provider.displayName) API key is missing. Add it in Otto Settings → Models, then retry."
@@ -742,7 +799,7 @@ public struct OpenAIDirectAdapter: AgentAdapter {
     }
     let localConfiguration: LocalModelConfiguration?
     if selection.provider == .local {
-      guard let configured = LocalModelConfiguration.load() else {
+      guard let configured = LocalModelConfiguration.load(defaults: localDefaults) else {
         throw RuntimeError.launchFailed(
           "Local server URL and model are missing. Configure them in Otto Settings → Models.")
       }
@@ -2124,6 +2181,17 @@ public enum OttoMCPRegistration {
     var cleaned = servers
     cleaned[legacyServerName] = nil
     return cleaned
+  }
+
+  /// `smtp.send` → `mcp__otto__smtp_send`: Claude Code namespaces MCP tools and replaces
+  /// characters outside `[A-Za-z0-9_-]` with underscores (the bridge maps them back).
+  public static func claudeToolName(_ name: String) -> String {
+    let sanitized = String(
+      name.map { character in
+        character.isLetter || character.isNumber || character == "_" || character == "-"
+          ? character : "_"
+      })
+    return "mcp__\(serverName)__\(sanitized)"
   }
 
   /// `mcp__otto__agent_ask_user` → `agent_ask_user`; also strips the legacy `mcp__muse__`.

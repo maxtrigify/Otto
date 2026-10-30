@@ -12,6 +12,7 @@ struct VoiceSettingsView: View {
   @State private var relayTargetName = "Chase"
   @State private var relayExpectedTranscript = "Tell Chase verbatim don't paraphrase me"
   @State private var relayExpectedPayload = "don't paraphrase me"
+  @State private var showingWhistleTerms = false
 
   var body: some View {
     Form {
@@ -179,6 +180,9 @@ struct VoiceSettingsView: View {
                 voice.parakeetWarmState == .ready ? .green : .secondary
               )
           }
+        }
+        if voice.localSpeechEngine == .whistle {
+          whistleStatus
         }
         Text(
           "Parakeet runs entirely on this Mac. Its model and runtime require roughly 700 MB of disk space and about 1 GB of memory while loaded."
@@ -425,6 +429,16 @@ struct VoiceSettingsView: View {
     .formStyle(.grouped)
     .padding()
     .frame(width: 600, height: 740)
+    .sheet(isPresented: $showingWhistleTerms) {
+      WhistleTermsSheet(
+        alreadyAccepted: voice.whistleTermsAccepted,
+        onAgree: {
+          voice.acceptWhistleTerms()
+          showingWhistleTerms = false
+          Task { await voice.installWhistle() }
+        },
+        onCancel: { showingWhistleTerms = false })
+    }
     .task {
       configurationEngine = voice.engine
       await voice.refreshCredentialStatus()
@@ -492,7 +506,88 @@ struct VoiceSettingsView: View {
     return "Selected, but an API key is required before Talk to Otto can connect."
   }
 
+  @ViewBuilder private var whistleStatus: some View {
+    HStack {
+      Label(
+        voice.whistleInstallationState.detail,
+        systemImage: voice.isWhistleInstalled
+          ? "checkmark.circle.fill" : "externaldrive.badge.exclamationmark"
+      )
+      .foregroundStyle(voice.isWhistleInstalled ? .green : .orange)
+      Spacer()
+      if voice.isWhistleInstalled {
+        Button("Remove", role: .destructive) { Task { await voice.removeWhistle() } }
+          .disabled(voice.whistleInstallationState.isBusy)
+      } else {
+        // Downloading always goes through the terms sheet first.
+        Button("Download Whistle…") { showingWhistleTerms = true }
+          .disabled(voice.whistleInstallationState.isBusy)
+      }
+    }
+    if case .failed(let message) = voice.whistleInstallationState {
+      Text(message).foregroundStyle(.red)
+    }
+    Text(
+      "Whistle by \(WhistleTerms.author), \(WhistleTerms.license). About \(WhistleTerms.downloadSize) on disk; audio stays on this Mac."
+    )
+    .font(.caption)
+    .foregroundStyle(.secondary)
+  }
+
   private var selectedEngineDetailColor: Color {
     voice.hasAPIKey || voice.selectedEngineIsRunning ? .secondary : .orange
+  }
+}
+
+/// Shown before Otto downloads Whistle: who made it, what is downloaded from where, and the
+/// license the person agrees to. Nothing downloads until they tick the agreement.
+private struct WhistleTermsSheet: View {
+  let alreadyAccepted: Bool
+  let onAgree: () -> Void
+  let onCancel: () -> Void
+  @State private var agreed = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Text("Download Whistle").font(.title2.weight(.semibold))
+      Text(
+        "Whistle is an open-source speech-to-text model made by \(WhistleTerms.author). Otto downloads two files from the authors' own Hugging Face repositories and checks each one against a pinned checksum:"
+      )
+      .fixedSize(horizontal: false, vertical: true)
+      VStack(alignment: .leading, spacing: 6) {
+        Label("Whistle model, 17 MB", systemImage: "waveform")
+        Label("needle engine for Apple silicon, 1.1 MB", systemImage: "cpu")
+      }
+      .font(.callout)
+      Text(
+        "Both are licensed by \(WhistleTerms.author) under the \(WhistleTerms.license). The license covers how you may use, change and share them, and gives them without warranty. Transcription runs on this Mac; Otto sends no audio anywhere."
+      )
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+      HStack(spacing: 16) {
+        Link("Read the license", destination: WhistleTerms.licenseURL)
+        Link("Model page", destination: WhistleTerms.modelPage)
+        Link("Engine page", destination: WhistleTerms.enginePage)
+      }
+      .font(.callout)
+      Toggle(
+        "I have read and agree to the \(WhistleTerms.license) terms set by \(WhistleTerms.author).",
+        isOn: $agreed
+      )
+      .toggleStyle(.checkbox)
+      .accessibilityIdentifier("whistle-terms-agree")
+      HStack {
+        Spacer()
+        Button("Cancel", role: .cancel, action: onCancel)
+        Button("Agree and download", action: onAgree)
+          .keyboardShortcut(.defaultAction)
+          .disabled(!agreed)
+          .accessibilityIdentifier("whistle-terms-download")
+      }
+    }
+    .padding(22)
+    .frame(width: 480)
+    .onAppear { agreed = alreadyAccepted }
   }
 }

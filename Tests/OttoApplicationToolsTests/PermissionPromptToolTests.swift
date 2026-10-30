@@ -193,6 +193,90 @@ struct PermissionPromptToolTests {
     try await supervisor.stop(agentID: agentID)
   }
 
+  @Test("An email approval shows the recipient, subject and the whole body")
+  func emailApprovalShowsMessage() async throws {
+    let supervisor = AgentSupervisor()
+    let registry = ToolRegistry()
+    try await registry.register(AgentRequestPermissionTool(supervisor: supervisor))
+    let agentID = try await spawnLongRunningOneShot(supervisor: supervisor)
+    let body = "Hi Amy,\n\n" + String(repeating: "The invoice is approved. ", count: 30) + "\nSam"
+
+    let call = Task {
+      try await registry.call(
+        name: AgentPermissionPrompt.toolName,
+        input: .object([
+          "tool_name": .string("smtp.send"),
+          "input": .object([
+            "to": .string("amy@example.com"), "subject": .string("Re: Invoice"),
+            "body": .string(body), "inReplyTo": .string("<m1@example.com>"),
+          ]),
+        ]),
+        context: agentContext(agentID: agentID)
+      )
+    }
+    try await waitForState(.waitingPermission, id: agentID, supervisor: supervisor)
+    let reason = try #require(try await supervisor.snapshot(agentID: agentID).attentionReason)
+    #expect(reason.hasPrefix("smtp.send: Send email to amy@example.com\nSubject: Re: Invoice\n"))
+    #expect(reason.contains("Reply in the original thread"))
+    #expect(reason.hasSuffix(body))
+    try await supervisor.resolvePermission(agentID: agentID, approved: false)
+    _ = try await call.value
+    try await supervisor.stop(agentID: agentID)
+  }
+
+  @Test("The approval card shows a long email in full, and one too long to show is refused")
+  func longEmailBody() async throws {
+    let body = String(repeating: "a", count: EmailApprovalSummary.bodyLimit)
+    let input: [String: JSONValue] = [
+      "to": .string("amy@example.com"), "subject": .string("Hi"), "body": .string(body),
+    ]
+    let text = try #require(EmailApprovalSummary.text(toolName: "gmail.send", input: input))
+    #expect(text.hasSuffix(body))
+    #expect(text.count + "gmail.send: ".count <= EmailApprovalSummary.limit)
+    #expect(!text.contains("Reply in the original thread"))
+    #expect(EmailApprovalSummary.text(toolName: "Bash", input: [:]) == nil)
+    #expect(EmailApprovalSummary.refusal(input: input) == nil)
+
+    var tooLong = input
+    tooLong["body"] = .string(body + "hidden")
+    #expect(EmailApprovalSummary.refusal(input: tooLong)?.contains("allows up to") == true)
+    var escaped = input
+    escaped["body"] = .string("Hi\u{1B}[8mhidden")
+    #expect(EmailApprovalSummary.refusal(input: escaped) != nil)
+
+    // The tool refuses before any card is shown.
+    let supervisor = AgentSupervisor()
+    let agentID = try await spawnLongRunningOneShot(supervisor: supervisor)
+    let output = try await AgentRequestPermissionTool(supervisor: supervisor).call(
+      AgentPermissionPromptInput(toolName: "smtp.send", input: .object(tooLong)),
+      context: agentContext(agentID: agentID))
+    #expect(output.behavior == "deny")
+    #expect(await !supervisor.hasPendingPermission(agentID: agentID))
+    try await supervisor.stop(agentID: agentID)
+  }
+
+  @Test("The approval card says when a reply goes somewhere other than the original sender")
+  func replyRecipientDiffersFromSender() {
+    let input: [String: JSONValue] = [
+      "to": .string("billing@evil.example"), "subject": .string("Re: Invoice"),
+      "body": .string("Paid"), "messageID": .string("abc"),
+    ]
+    let redirected = EmailApprovalSummary.text(
+      toolName: "gmail.reply", input: input,
+      original: .init(from: "Amy <amy@example.com>", replyTo: "Billing <Billing@evil.example>"))
+    #expect(
+      redirected?.contains(
+        "Not the original sender: amy@example.com asked for replies to go to billing@evil.example")
+        == true)
+    let other = EmailApprovalSummary.text(
+      toolName: "gmail.reply", input: input, original: .init(from: "amy@example.com"))
+    #expect(
+      other?.contains("Not the original sender: the message came from amy@example.com") == true)
+    let same = EmailApprovalSummary.text(
+      toolName: "gmail.reply", input: input, original: .init(from: "<BILLING@evil.example>"))
+    #expect(same?.contains("Not the original sender") == false)
+  }
+
   @Test("A denied request returns the deny contract with a user-facing message")
   func deniedRequestExplains() async throws {
     let supervisor = AgentSupervisor()

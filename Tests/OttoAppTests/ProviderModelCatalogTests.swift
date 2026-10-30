@@ -9,11 +9,13 @@ import Testing
 
 @Suite("Provider model picker catalog")
 struct ProviderModelCatalogTests {
-  @Test("One-off sessions expose harnesses without the owned API transport")
+  @Test("One-off sessions offer every agent runtime, Otto's harness under its own name")
   func oneOffSessionProviders() {
     #expect(SessionLaunchProviderCatalog.providers.contains(.codex))
-    #expect(!SessionLaunchProviderCatalog.providers.contains(.openAI))
+    #expect(SessionLaunchProviderCatalog.providers.contains(.openAI))
     #expect(!SessionLaunchProviderCatalog.providers.contains(.shell))
+    #expect(SessionLaunchProviderCatalog.title(for: .openAI) == "Otto Harness · API & local models")
+    #expect(SessionLaunchProviderCatalog.title(for: .codex) == "Codex")
   }
 
   @Test("Every account-aware provider is loaded through the shared catalog")
@@ -48,6 +50,18 @@ struct ProviderModelCatalogTests {
     #expect(
       ProviderModelCatalogStore.withConfiguredLocalModel(
         nil, provider: .codex, configuration: config) == nil)
+  }
+
+  @Test("Every saved local model appears in the picker, the default first")
+  @MainActor
+  func severalLocalModelsAreVisible() throws {
+    let config = try LocalModelConfiguration(
+      baseURL: "http://gillai:4000/v1", modelID: "qwen3.8-flash",
+      additionalModelIDs: ["gpt-oss-20b"])
+    let existing = [AgentModel(id: "openai/gpt-5.6", displayName: "GPT")]
+    let models = ProviderModelCatalogStore.withConfiguredLocalModel(
+      existing, provider: .openAI, configuration: config)
+    #expect(models?.map(\.id) == ["local/qwen3.8-flash", "local/gpt-oss-20b", "openai/gpt-5.6"])
   }
 }
 

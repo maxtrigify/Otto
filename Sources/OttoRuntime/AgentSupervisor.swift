@@ -7,19 +7,23 @@ public struct AgentPendingPermission: Equatable, Sendable {
   public var reason: String
   public var nonce: String
   public var requestedAt: Date
+  /// The tool or app confirmation asking, such as `Website account click`.
+  public var toolName: String
 
   public init(
     requestID: UUID,
     runID: UUID,
     reason: String,
     nonce: String,
-    requestedAt: Date
+    requestedAt: Date,
+    toolName: String = ""
   ) {
     self.requestID = requestID
     self.runID = runID
     self.reason = reason
     self.nonce = nonce
     self.requestedAt = requestedAt
+    self.toolName = toolName
   }
 }
 
@@ -170,6 +174,7 @@ public actor AgentSupervisor {
   /// carried the request until the user answers in the conversation surface.
   private struct PendingPermission {
     let id: UUID
+    let toolName: String
     let reason: String
     let nonce: String
     let isBypassEligible: Bool
@@ -345,7 +350,9 @@ public actor AgentSupervisor {
       return (request, nil)
     }
     request.memoryBootstrap = packet.text
-    let directory = (request.workspacePath as NSString)
+    // Inside Otto's workspace even when the run starts in a project's source folder: the packet
+    // carries memory and must not land in the user's repository.
+    let directory = ((request.ottoWorkspacePath ?? request.workspacePath) as NSString)
       .appendingPathComponent(".otto/bootstrap")
     let path = (directory as NSString).appendingPathComponent("\(nodeID.uuidString).md")
     do {
@@ -391,6 +398,12 @@ public actor AgentSupervisor {
     }
     if request.controlEnvironment.isEmpty {
       request.controlEnvironment = controlEnvironment
+    }
+    if request.ottoSelfConfirmingTools.isEmpty {
+      request.ottoSelfConfirmingTools = controlPlane?.selfConfirmingTools ?? []
+    }
+    if request.ottoWorkspacePath == nil {
+      request.ottoWorkspacePath = controlPlane?.workspacePath
     }
     return request
   }
@@ -905,7 +918,8 @@ public actor AgentSupervisor {
     toolName: String,
     detail: String = "",
     timeout: Duration? = nil,
-    isProviderPermission: Bool = false
+    isProviderPermission: Bool = false,
+    detailLimit: Int = 240
   ) async throws -> Bool {
     guard let agent = agents[agentID], agent.snapshot.exitCode == nil else {
       throw RuntimeError.agentNotFound(agentID)
@@ -916,7 +930,8 @@ public actor AgentSupervisor {
     if isBypassEligible && agent.bypassProviderPermissions { return true }
     let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
     let reason = sanitizedAttentionReason(
-      trimmedDetail.isEmpty ? "Wants to use \(toolName)" : "\(toolName): \(trimmedDetail)"
+      trimmedDetail.isEmpty ? "Wants to use \(toolName)" : "\(toolName): \(trimmedDetail)",
+      limit: detailLimit
     )
     return try await withCheckedThrowingContinuation { continuation in
       let requestID = UUID()
@@ -931,6 +946,7 @@ public actor AgentSupervisor {
       pendingPermissions[agentID, default: []].append(
         PendingPermission(
           id: requestID,
+          toolName: toolName,
           reason: reason,
           nonce: UUID().uuidString.lowercased(),
           isBypassEligible: isBypassEligible,
@@ -1083,7 +1099,8 @@ public actor AgentSupervisor {
       runID: agent.snapshot.runID ?? agent.runID,
       reason: pending.reason,
       nonce: pending.nonce,
-      requestedAt: pending.requestedAt
+      requestedAt: pending.requestedAt,
+      toolName: pending.toolName
     )
   }
 
@@ -1191,6 +1208,23 @@ public actor AgentSupervisor {
       pending.timeoutTask?.cancel()
       pending.continuation.resume(returning: false)
     }
+  }
+
+  /// Forgets a chat: its transcript, result and the provider session a next turn would resume,
+  /// so the next message starts a new conversation. The agent's process must have exited.
+  public func clearConversation(agentID: UUID) throws {
+    guard var agent = agents[agentID] else { throw RuntimeError.agentNotFound(agentID) }
+    guard agent.snapshot.exitCode != nil else {
+      throw RuntimeError.launchFailed("Stop the agent before clearing its chat")
+    }
+    agent.snapshot.transcript = []
+    agent.snapshot.result = nil
+    agent.snapshot.structuredResult = nil
+    agent.snapshot.providerSessionID = nil
+    agent.snapshot.attentionReason = nil
+    agent.snapshot.childRuns = []
+    agent.hiddenTurnTranscript = []
+    agents[agentID] = agent
   }
 
   public func snapshot(agentID: UUID) throws -> AgentRuntimeSnapshot {
@@ -1345,6 +1379,7 @@ public actor AgentSupervisor {
         // Messages were already projected as they completed; the summary only lands as a new
         // entry when the provider's final result differs from the last message (dedupe below).
         appendTranscript(.assistant, text: result.summaryCandidate, to: &agent)
+        attachTurnStats(result, to: &agent)
       case .assistantMessage(let text):
         appendTranscript(.assistant, text: text, to: &agent)
       case .reasoning(let text):
@@ -1603,10 +1638,31 @@ public actor AgentSupervisor {
     agent.harvestedTurnCount = harvest.turns.count
   }
 
-  private func sanitizedAttentionReason(_ reason: String) -> String {
+  private func sanitizedAttentionReason(_ reason: String, limit: Int = 240) -> String {
     let plain = TerminalOutputSearch.plainText(reason)
       .trimmingCharacters(in: .whitespacesAndNewlines)
-    return String(plain.prefix(240))
+    return String(plain.prefix(limit))
+  }
+
+  /// Puts the turn's time and tokens on its last reply. The turn runs from the person's message
+  /// to this result; the provider's own duration is used when it reports one.
+  private func attachTurnStats(_ result: AgentResult, to agent: inout ManagedAgent) {
+    guard !agent.hiddenTurnActive,
+      let replyIndex = agent.snapshot.transcript.lastIndex(where: {
+        $0.role == .assistant && $0.kind == .text
+      })
+    else { return }
+    let transcript = agent.snapshot.transcript
+    // A turn that added no reply must not stamp its stats on the previous turn's reply.
+    guard !transcript[(replyIndex + 1)...].contains(where: { $0.role == .user }) else { return }
+    let turnStart =
+      transcript[..<replyIndex].last(where: { $0.role == .user })?.createdAt
+      ?? agent.snapshot.startedAt
+    let measured = max(0, Date.now.timeIntervalSince(turnStart))
+    let reported = result.durationMilliseconds.map { Double($0) / 1_000 }
+    agent.snapshot.transcript[replyIndex].turnStats = AgentTurnStats(
+      durationSeconds: reported ?? measured,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens)
   }
 
   private func appendTranscript(
@@ -1627,7 +1683,9 @@ public actor AgentSupervisor {
     guard let projected else { return }
     let text =
       role == .assistant && kind == .text
-      ? ChatImageStore.preservingImages(in: projected, workingDirectory: agent.workingDirectory)
+      ? ChatImageStore.preservingImages(
+        in: projected, workingDirectory: agent.workingDirectory,
+        storageRoot: controlPlane?.workspacePath)
       : projected
     if role == .assistant, kind == .text,
       agent.snapshot.result?.trimmingCharacters(in: .whitespacesAndNewlines) == projected
@@ -1786,6 +1844,7 @@ public actor AgentSupervisor {
         agent.snapshot.structuredResult = result
         agent.snapshot.result = result.summaryCandidate
         appendTranscript(.assistant, text: result.summaryCandidate, to: &agent)
+        attachTurnStats(result, to: &agent)
       case .diagnostic(let message):
         appendTranscript(.activity, kind: .notice, text: message, to: &agent)
       case .childStarted(let child):

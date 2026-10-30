@@ -72,11 +72,38 @@ private struct ControlToolExecutor: HarnessToolExecutor {
     guard let actualName = actualNames[call.name] else {
       throw DirectRuntimeError.invalidArguments("Unknown Otto tool: \(call.name)")
     }
-    let result = try await client.callAsync(
-      actualName,
-      arguments: call.arguments,
-      requestID: call.id,
-      timeoutMilliseconds: 3_600_000)
+    let result: JSONValue
+    do {
+      result = try await client.callAsync(
+        actualName,
+        arguments: call.arguments,
+        requestID: call.id,
+        timeoutMilliseconds: 3_600_000)
+    } catch ControlProtocolError.remote(let failure)
+      where failure.code == "tool_error"
+      && failure.message == ToolRegistryError.confirmationRequired(actualName).localizedDescription
+    {
+      // Like Claude Code and Codex through the otto-mcp bridge: ask on Otto's approval card (and
+      // Telegram, when allowed), then run the exact same call only if the person approves.
+      let approval = try await client.callAsync(
+        AgentPermissionPrompt.toolName,
+        arguments: .object(["tool_name": .string(actualName), "input": call.arguments]),
+        timeoutMilliseconds: actualName == "browser.click"
+          ? AgentPermissionPrompt.browserResponseTimeoutMilliseconds
+          : AgentPermissionPrompt.responseTimeoutMilliseconds)
+      guard approval["behavior"]?.stringValue == "allow" else {
+        let reason = approval["message"]?.stringValue ?? "The user denied \(actualName) in Otto"
+        return "Not done: \(reason). Do not retry this action unless the user asks again."
+      }
+      // The approval can take minutes; a turn stopped meanwhile must not still run the action.
+      try Task.checkCancellation()
+      result = try await client.callAsync(
+        actualName,
+        arguments: call.arguments,
+        confirmed: true,
+        requestID: "\(call.id)-approved",
+        timeoutMilliseconds: 3_600_000)
+    }
     guard let data = try? JSONEncoder().encode(result) else { return "null" }
     return String(decoding: data, as: UTF8.self)
   }
@@ -116,13 +143,15 @@ private enum OttoOpenAIAgent {
 
     let client = controlClient()
     let definitions = (try? await client?.listToolsAsync()) ?? []
-    let callable = definitions.filter { !$0.isProviderInternal && !$0.requiresConfirmation }
+    // Tools that need confirmation are offered too; ControlToolExecutor asks the person first.
+    let callable = definitions.filter { !$0.isProviderInternal }
     let rawTools = callable.map {
       HarnessTool(name: $0.name, description: $0.description, inputSchema: $0.inputSchema)
     }
     let backend = try modelBackend(id: options.backend, apiKey: apiKey)
     let nameMap = HarnessToolNaming.safeNames(rawTools)
     let definitionByName = Dictionary(uniqueKeysWithValues: rawTools.map { ($0.name, $0) })
+    // Sorted so every turn offers the tools in the same order and the prompt start stays reusable.
     let tools = nameMap.compactMap { exposedName, actualName -> HarnessTool? in
       guard let definition = definitionByName[actualName] else { return nil }
       return HarnessTool(
@@ -130,6 +159,7 @@ private enum OttoOpenAIAgent {
         description: definition.description,
         inputSchema: definition.inputSchema)
     }
+    .sorted { $0.name < $1.name }
     let executor = client.map { ControlToolExecutor(client: $0, actualNames: nameMap) }
     let isOttoSession = options.resumeID.map(HarnessSession.isOttoID) == true
     // Only the retired OpenAI-only helper emitted raw Responses API ids. Such an id is opaque to
@@ -166,7 +196,13 @@ private enum OttoOpenAIAgent {
         }
       })
     emit(["type": "item.completed", "item": ["type": "agent_message", "text": result.text]])
-    emit(["type": "turn.completed"])
+    var completed: [String: Any] = ["type": "turn.completed"]
+    if let usage = result.usage {
+      completed["usage"] = [
+        "input_tokens": usage.inputTokens, "output_tokens": usage.outputTokens,
+      ]
+    }
+    emit(completed)
   }
 
   private static func modelBackend(id: String, apiKey: String) throws -> any HarnessModelBackend {
@@ -181,12 +217,6 @@ private enum OttoOpenAIAgent {
         providerID: "xai",
         providerDisplayName: "xAI",
         endpoint: URL(string: "https://api.x.ai/v1/responses")!)
-    case "moonshot":
-      return OpenAIChatCompletionsBackend(
-        apiKey: apiKey,
-        providerID: "moonshot",
-        providerDisplayName: "Moonshot",
-        endpoint: URL(string: "https://api.moonshot.ai/v1/chat/completions")!)
     case "local":
       guard let rawURL = OttoEnvironment.value("MODEL_BASE_URL") else {
         throw DirectRuntimeError.invalidArguments(
@@ -197,7 +227,13 @@ private enum OttoOpenAIAgent {
         apiKey: apiKey, providerID: "local", providerDisplayName: "Local model",
         endpoint: config.completionsURL)
     default:
-      throw DirectRuntimeError.invalidArguments("Unknown model backend: \(id)")
+      // Moonshot, DeepSeek, Mistral, Groq, Gemini and OpenRouter share one compatible API.
+      guard let vendor = OttoHarnessCompatibleVendor(rawValue: id) else {
+        throw DirectRuntimeError.invalidArguments("Unknown model backend: \(id)")
+      }
+      return OpenAIChatCompletionsBackend(
+        apiKey: apiKey, providerID: id, providerDisplayName: vendor.displayName,
+        endpoint: vendor.chatCompletionsURL)
     }
   }
 
@@ -205,9 +241,8 @@ private enum OttoOpenAIAgent {
     switch id {
     case "anthropic": "Anthropic"
     case "xai": "xAI"
-    case "moonshot": "Moonshot"
     case "local": "Local model"
-    default: "OpenAI"
+    default: OttoHarnessCompatibleVendor(rawValue: id)?.displayName ?? "OpenAI"
     }
   }
 
