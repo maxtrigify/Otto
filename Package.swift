@@ -187,7 +187,9 @@ let package = Package(
         "OttoDocuments",
         "OttoMedia", "OttoMemory", "OttoModels", "OttoObservability",
         "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote", "OttoSecurity", "OttoHooks",
-        "OttoHostRuntime", "OttoHostTransport", "OttoRPCContracts",
+        "OttoHostRuntime", "OttoRPCContracts",
+        // The phone host's HTTP server: SwiftNIO's file system module does not build on Windows.
+        .target(name: "OttoHostTransport", condition: .when(platforms: [.macOS, .iOS, .linux])),
         .product(name: "OpenCombine", package: "OpenCombine", condition: .when(platforms: nonApple)),
         .product(name: "Crypto", package: "swift-crypto"),
       ],

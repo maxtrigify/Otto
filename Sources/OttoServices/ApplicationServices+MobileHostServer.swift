@@ -1,3 +1,5 @@
+// The phone host serves HTTP through Hummingbird/SwiftNIO, which do not build on Windows.
+#if !os(Windows)
 import Foundation
 import Hummingbird
 import OttoCommercial
@@ -371,3 +373,13 @@ extension ApplicationServices {
     return value
   }
 }
+#else
+  import Foundation
+
+  extension ApplicationServices {
+    /// Windows builds have no phone host yet; Otto Desktop talks to otto-engine over stdio.
+    public func startMobileHostIfConfigured(
+      environment _: [String: String] = ProcessInfo.processInfo.environment
+    ) async {}
+  }
+#endif

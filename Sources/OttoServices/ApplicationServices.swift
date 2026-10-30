@@ -17,7 +17,9 @@ import OttoCore
 import OttoDocuments
 import OttoHooks
 import OttoHostRuntime
-import OttoHostTransport
+#if !os(Windows)
+  import OttoHostTransport
+#endif
 import OttoMedia
 import OttoMemory
 import OttoModels
@@ -264,7 +266,9 @@ public final class ApplicationServices: ObservableObject {
   var mobileManagedConnectorTask: Task<Void, Never>?
   var mobileManagedPairingClient: ManagedRemotePairingClient?
   var mobileEventBridge: OttoMobileEventBridge?
-  var mobilePairingAdapter: ApplicationServicesMobilePairingAdapter?
+  #if !os(Windows)
+    var mobilePairingAdapter: ApplicationServicesMobilePairingAdapter?
+  #endif
   private var orchestrationTask: Task<Void, Never>?
   private var titledPrompts: [UUID: String] = [:]
   /// Raw PTY and structured transcript events can arrive hundreds of times per second. Renderer-
@@ -1017,7 +1021,9 @@ public final class ApplicationServices: ObservableObject {
     mobileEventBridge?.stop()
     mobileEventBridge = nil
     mobileHostEndpoint = nil
-    mobilePairingAdapter = nil
+    #if !os(Windows)
+      mobilePairingAdapter = nil
+    #endif
     mobilePairingPayload = nil
     managedMobilePairingPayload = nil
     for task in agentLoopTasks.values { task.cancel() }

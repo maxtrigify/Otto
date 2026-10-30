@@ -1,3 +1,5 @@
+// Phone pairing runs on the Hummingbird host transport, which SwiftNIO cannot build on Windows.
+#if !os(Windows)
 import Foundation
 import OttoHostRuntime
 import OttoHostTransport
@@ -104,3 +106,4 @@ public actor ApplicationServicesMobilePairingAdapter: OttoHostPairingHandling {
     }
   }
 }
+#endif
