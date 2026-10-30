@@ -102,6 +102,12 @@
 
       var startup = STARTUPINFOEXW()
       startup.StartupInfo.cb = DWORD(MemoryLayout<STARTUPINFOEXW>.size)
+      // ottod's own stdio is the desktop app's protocol pipe. Without explicit null standard
+      // handles the child inherits those pipes and bypasses the pseudo console entirely.
+      startup.StartupInfo.dwFlags = DWORD(STARTF_USESTDHANDLES)
+      startup.StartupInfo.hStdInput = nil
+      startup.StartupInfo.hStdOutput = nil
+      startup.StartupInfo.hStdError = nil
       startup.lpAttributeList = attributeList
       var information = PROCESS_INFORMATION()
 

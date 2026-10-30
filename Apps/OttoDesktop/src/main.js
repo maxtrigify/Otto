@@ -133,6 +133,7 @@ function createWindow() {
     minHeight: 520,
     backgroundColor: '#101113',
     title: 'Otto',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {

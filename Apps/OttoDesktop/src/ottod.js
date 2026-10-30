@@ -106,6 +106,11 @@ class OttodClient extends EventEmitter {
         await delay(500);
         continue;
       }
+      if (!page || !Array.isArray(page.events)) {
+        this.emit('log', 'event poll returned no page');
+        await delay(IDLE_POLL_MS);
+        continue;
+      }
       for (const event of page.events) {
         this.cursor = Math.max(this.cursor, event.sequence);
         this.emit('event', event);

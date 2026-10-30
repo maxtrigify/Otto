@@ -27,7 +27,8 @@
       "src/**",
       "renderer/**",
       "node_modules/@xterm/**",
-      "package.json"
+      "package.json",
+      "build/icon.png"
     ],
     "extraResources": [
       {
@@ -42,11 +43,16 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "Otto-Setup-${version}-${arch}.${ext}"
+      "artifactName": "Otto-Setup-${version}-${arch}.${ext}",
+      "icon": "build/icon.png"
     },
     "linux": {
       "category": "Development",
-      "maintainer": "Otto <hello@openotto.io>"
+      "maintainer": "Otto <hello@openotto.io>",
+      "icon": "build/icon.png"
+    },
+    "directories": {
+      "buildResources": "build"
     }
   },
   "author": {
