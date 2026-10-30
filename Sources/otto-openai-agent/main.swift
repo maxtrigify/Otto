@@ -149,6 +149,7 @@ private enum OttoOpenAIAgent {
     let backend = try modelBackend(id: options.backend, apiKey: apiKey)
     let nameMap = HarnessToolNaming.safeNames(rawTools)
     let definitionByName = Dictionary(uniqueKeysWithValues: rawTools.map { ($0.name, $0) })
+    // Sorted so every turn offers the tools in the same order and the prompt start stays reusable.
     let tools = nameMap.compactMap { exposedName, actualName -> HarnessTool? in
       guard let definition = definitionByName[actualName] else { return nil }
       return HarnessTool(
@@ -156,6 +157,7 @@ private enum OttoOpenAIAgent {
         description: definition.description,
         inputSchema: definition.inputSchema)
     }
+    .sorted { $0.name < $1.name }
     let executor = client.map { ControlToolExecutor(client: $0, actualNames: nameMap) }
     let isOttoSession = options.resumeID.map(HarnessSession.isOttoID) == true
     // Only the retired OpenAI-only helper emitted raw Responses API ids. Such an id is opaque to

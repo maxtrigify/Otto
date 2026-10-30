@@ -79,7 +79,7 @@ public struct OpenAIChatCompletionsBackend: HarnessModelBackend {
           ])
         })
     }
-    return try JSONEncoder().encode(JSONValue.object(body))
+    return try HarnessJSON.stableEncoder.encode(JSONValue.object(body))
   }
 
   func parseResponse(_ data: Data, priorMessages: [JSONValue]) throws -> HarnessBackendResponse {

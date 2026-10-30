@@ -68,7 +68,7 @@ public struct AnthropicMessagesBackend: HarnessModelBackend {
       body["thinking"] = .object(["type": .string("adaptive")])
       body["output_config"] = .object(["effort": .string(effort)])
     }
-    return try JSONEncoder().encode(JSONValue.object(body))
+    return try HarnessJSON.stableEncoder.encode(JSONValue.object(body))
   }
 
   func parseResponse(_ data: Data, priorMessages: [JSONValue]) throws -> HarnessBackendResponse {

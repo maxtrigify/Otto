@@ -38,6 +38,32 @@ struct HarnessTests {
     #expect(resumed.messages.map(\.content) == ["Hello", "New session is working"])
   }
 
+  @Test("The same request always encodes to the same bytes, so servers can reuse the prompt")
+  func requestBodiesAreStable() throws {
+    func schema(_ reversed: Bool) -> JSONValue {
+      var object: [String: JSONValue] = [:]
+      let fields = (0..<24).map { "field\($0)" }
+      for key in reversed ? fields.reversed() : fields {
+        object[key] = .object(["type": .string("string"), "description": .string(key)])
+      }
+      return .object(["type": .string("object"), "properties": .object(object)])
+    }
+    func body(_ reversed: Bool) throws -> Data {
+      let tools = (0..<30).map {
+        HarnessTool(name: "tool_\($0)", description: "Tool \($0)", inputSchema: schema(reversed))
+      }
+      return try OpenAIChatCompletionsBackend(
+        apiKey: "", providerID: "local", providerDisplayName: "Local",
+        endpoint: URL(string: "http://127.0.0.1:1/v1/chat/completions")!
+      ).requestBody(
+        for: HarnessBackendRequest(
+          systemInstructions: "Be brief.", modelID: "m",
+          input: .conversation([HarnessMessage(role: .user, content: "Hi")]), tools: tools))
+    }
+    #expect(try body(false) == body(true))
+    #expect(try body(false) == body(false))
+  }
+
   @Test("Corrupted session files remain visible as errors and are never overwritten")
   func corruptResumeFailsWithoutDataLoss() async throws {
     let fixture = try Fixture()
