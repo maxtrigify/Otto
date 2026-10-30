@@ -14,6 +14,8 @@ extension ApplicationServices {
     environment: [String: String] = ProcessInfo.processInfo.environment
   ) async {
     guard mobileHostTask == nil, !isStartingMobileHost else { return }
+    // Headless engines (otto-engine) serve their own client and must not claim the phone port.
+    guard OttoEnvironment.value("MOBILE_HOST", in: environment) != "off" else { return }
     let attemptID = UUID()
     mobileHostAttemptID = attemptID
     isStartingMobileHost = true

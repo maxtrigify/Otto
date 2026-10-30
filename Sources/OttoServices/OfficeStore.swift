@@ -278,7 +278,17 @@ public final class OfficeStore: ObservableObject {
 
   /// Moves a file to the Trash, so it can be put back from Finder.
   public func trash(path: String) throws {
-    try fileManager.trashItem(at: url(for: path), resultingItemURL: nil)
+    #if canImport(AppKit)
+      try fileManager.trashItem(at: url(for: path), resultingItemURL: nil)
+    #else
+      // No system Trash API here: keep the file recoverable beside the documents.
+      let trash = workspaceURL.appending(path: ".trash", directoryHint: .isDirectory)
+      try fileManager.createDirectory(at: trash, withIntermediateDirectories: true)
+      let source = url(for: path)
+      try fileManager.moveItem(
+        at: source,
+        to: trash.appending(path: "\(Int(Date().timeIntervalSince1970))-\(source.lastPathComponent)"))
+    #endif
     var next = state
     next.suggestions.removeAll { $0.path == path }
     next.sessions[path] = nil
@@ -316,9 +326,17 @@ public final class OfficeStore: ObservableObject {
   }
 
   public func saveDocument(_ text: NSAttributedString, path: String) throws {
-    let data = try text.data(
-      from: NSRange(location: 0, length: text.length),
-      documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML])
+    #if canImport(AppKit)
+      let data = try text.data(
+        from: NSRange(location: 0, length: text.length),
+        documentAttributes: [.documentType: NSAttributedString.DocumentType.officeOpenXML])
+    #else
+      // Without AppKit's Word exporter, write the words as plain Word paragraphs.
+      let paragraphs = text.string.components(separatedBy: "\n").map {
+        DocxDocument.Paragraph(runs: [DocxDocument.Run(text: $0)])
+      }
+      let data = DocxWriter.data(DocxDocument(paragraphs: paragraphs))
+    #endif
     try data.write(to: url(for: path), options: .atomic)
   }
 
@@ -494,6 +512,17 @@ public final class OfficeStore: ObservableObject {
   static func readAttributed(_ url: URL) throws -> NSAttributedString {
     let data = try Data(contentsOf: url)
     if data.isEmpty { return NSAttributedString(string: "") }
+    #if !canImport(AppKit)
+      switch url.pathExtension.lowercased() {
+      case "txt", "md": return NSAttributedString(string: String(decoding: data, as: UTF8.self))
+      case "docx":
+        guard let paragraphs = DocxDocument.plainParagraphs(fromDocx: data) else {
+          throw OfficeError.unreadable(url.lastPathComponent)
+        }
+        return NSAttributedString(string: paragraphs.joined(separator: "\n"))
+      default: throw OfficeError.unreadable(url.lastPathComponent)
+      }
+    #else
     let type: NSAttributedString.DocumentType? =
       switch url.pathExtension.lowercased() {
       case "docx": .officeOpenXML
@@ -513,6 +542,7 @@ public final class OfficeStore: ObservableObject {
     } catch {
       throw OfficeError.unreadable(url.lastPathComponent)
     }
+    #endif
   }
 
   /// Applies a change to attributed text, keeping the surrounding formatting.
@@ -520,6 +550,21 @@ public final class OfficeStore: ObservableObject {
   public static func apply(_ change: DocSuggestion.Change, to text: NSMutableAttributedString)
     -> Bool
   {
+    #if !canImport(AppKit)
+      // Plain text edits; rich formatting needs AppKit's text system.
+      switch change {
+      case .replace(let find, let replace):
+        let range = (text.string as NSString).range(of: find)
+        guard range.location != NSNotFound else { return false }
+        text.replaceCharacters(in: range, with: replace)
+      case .append(let addition):
+        if text.length > 0 && !text.string.hasSuffix("\n") { text.append(NSAttributedString(string: "\n")) }
+        text.append(NSAttributedString(string: addition))
+      case .replaceAll(let replacement):
+        text.setAttributedString(NSAttributedString(string: replacement))
+      }
+      return true
+    #else
     switch change {
     case .replace(let find, let replace):
       let range = (text.string as NSString).range(of: find)
@@ -542,9 +587,11 @@ public final class OfficeStore: ObservableObject {
       text.setAttributedString(OfficeRichText.attributed(markdown: replacement))
       return true
     }
+    #endif
   }
 }
 
+#if canImport(AppKit)
 /// Turns the light Markdown agents write into Word-style formatting: headings, bullets, bold
 /// and italics in Helvetica Neue, which exports cleanly to .docx.
 public enum OfficeRichText {
@@ -718,3 +765,4 @@ extension OfficeRichText {
     return DocxDocument.Paragraph(style: style, alignment: alignment, runs: runs)
   }
 }
+#endif

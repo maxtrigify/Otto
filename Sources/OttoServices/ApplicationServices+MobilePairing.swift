@@ -87,6 +87,8 @@ public actor ApplicationServicesMobilePairingAdapter: OttoHostPairingHandling {
     case .runControl: .interruptRuns
     case .approvalRespond: .respondApprovals
     case .secureLogin: .controlComputer
+    // Owner-level: phones are never granted bot management (rpcScope maps nothing back to it).
+    case .botManage: .manageDevices
     }
   }
 

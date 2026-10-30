@@ -22,6 +22,7 @@ let package = Package(
     .executable(name: "otto-hookd", targets: ["otto-hookd"]),
     .executable(name: "otto-release", targets: ["otto-release"]),
     .executable(name: "ottod", targets: ["ottod"]),
+    .executable(name: "otto-engine", targets: ["otto-engine"]),
     .executable(name: "otto-performance", targets: ["otto-performance"]),
     .executable(name: "otto-voice-benchmark", targets: ["otto-voice-benchmark"]),
     .executable(name: "otto-mobile-demo-host", targets: ["otto-mobile-demo-host"]),
@@ -236,6 +237,13 @@ let package = Package(
       dependencies: [
         "OttoModels", "OttoRemote",
         .target(name: "OttoCommercial", condition: .when(platforms: [.macOS])),
+      ]
+    ),
+    .executableTarget(
+      name: "otto-engine",
+      dependencies: [
+        "OttoCore", "OttoHostRuntime", "OttoModels", "OttoPersistence", "OttoRPCContracts",
+        "OttoSecurity", "OttoServices", "OttoTools",
       ]
     ),
     .executableTarget(

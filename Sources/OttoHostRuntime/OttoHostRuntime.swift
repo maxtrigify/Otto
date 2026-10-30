@@ -18,6 +18,7 @@ public protocol OttoHostDataSource: Sendable {
   func secureLogin(_ input: SecureLoginInput, deviceID: UUID) async throws -> SecureLoginOutput
   func environment() async -> ExecutionEnvironment
   func listBots() async throws -> MobileRosterOutput
+  func createBot(_ input: BotCreateInput) async throws -> MobileBotSummary
   func listThreads() async throws -> [OttoModels.Thread]
   func startThread(_ input: ThreadStartInput) async throws -> ThreadStartOutput
   func registerPush(deviceID: UUID, input: DeviceRegisterPushInput) async throws
@@ -45,6 +46,9 @@ extension OttoHostDataSource {
     -> SecureLoginOutput
   {
     throw OttoHostError.unsupportedOperation("Secure sign-in")
+  }
+  public func createBot(_: BotCreateInput) async throws -> MobileBotSummary {
+    throw OttoHostError.unsupportedOperation("bot.create")
   }
   public func listBots() async throws -> MobileRosterOutput {
     MobileRosterOutput(bots: [], teams: [])
@@ -388,6 +392,9 @@ public actor OttoHostRuntime {
         return try response(request, ThreadListOutput(threads: threads))
       case .botList:
         return try response(request, try await dataSource.listBots())
+      case .botCreate:
+        let input = try request.decodeParameters(BotCreateInput.self)
+        return try response(request, try await dataSource.createBot(input))
       case .threadStart:
         let input = try request.decodeParameters(ThreadStartInput.self)
         return try response(request, try await dataSource.startThread(input))

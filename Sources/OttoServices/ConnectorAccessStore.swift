@@ -1,3 +1,8 @@
+#if canImport(Combine)
+  import Combine
+#else
+  import OpenCombine
+#endif
 import Foundation
 
 /// Connectors Otto can route through. Each one has its own set of Otto bots allowed to use it.

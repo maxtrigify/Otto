@@ -64,6 +64,29 @@ public enum ZipArchive {
     return archive
   }
 
+  /// The bytes of a "stored" (uncompressed) entry, as `make` writes them. Returns nil when the
+  /// entry is missing or compressed; compressed archives need an inflater.
+  public static func storedEntry(named path: String, in archive: Data) -> Data? {
+    let bytes = [UInt8](archive)
+    func u16(_ at: Int) -> Int { Int(bytes[at]) | Int(bytes[at + 1]) << 8 }
+    func u32(_ at: Int) -> Int { u16(at) | u16(at + 2) << 16 }
+    var offset = 0
+    while offset + 30 <= bytes.count, u32(offset) == 0x0403_4b50 {
+      let flags = u16(offset + 6)
+      let method = u16(offset + 8)
+      let size = u32(offset + 18)
+      let nameLength = u16(offset + 26)
+      let extraLength = u16(offset + 28)
+      let start = offset + 30 + nameLength + extraLength
+      // Bit 3: sizes live in a trailing descriptor, so this entry cannot be skipped safely.
+      guard flags & 0x08 == 0, start + size <= bytes.count else { return nil }
+      let name = String(decoding: bytes[(offset + 30)..<(offset + 30 + nameLength)], as: UTF8.self)
+      if name == path { return method == 0 ? Data(bytes[start..<(start + size)]) : nil }
+      offset = start + size
+    }
+    return nil
+  }
+
   /// Standard CRC-32 (IEEE 802.3, reflected polynomial 0xEDB88320).
   static func crc32(_ data: Data) -> UInt32 {
     var crc: UInt32 = 0xFFFF_FFFF

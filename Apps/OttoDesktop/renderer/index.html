@@ -22,40 +22,93 @@
         <span class="workspace-name" id="workspace-name">Choose a folder</span>
       </button>
 
-      <button class="new-chat" id="new-chat">
-        <span class="plus" aria-hidden="true">+</span> New chat
-      </button>
+      <button class="new-chat" id="new-chat"><span class="plus" aria-hidden="true">+</span> New chat</button>
 
-      <div class="section-title">Chats</div>
-      <ul class="sessions" id="sessions" aria-label="Chats"></ul>
+      <div class="lists">
+        <div class="section-title">Chats</div>
+        <ul class="sessions" id="threads" aria-label="Chats"></ul>
+        <div class="section-title section-row">
+          <span>Terminals</span>
+          <button class="tiny" id="new-terminal" title="Open a terminal">+</button>
+        </div>
+        <ul class="sessions" id="terminals-list" aria-label="Terminals"></ul>
+      </div>
 
       <footer class="engine" id="engine-status">Starting engine…</footer>
     </aside>
 
     <main class="stage">
-      <header class="stage-header drag" id="stage-header" hidden>
-        <div class="stage-title">
-          <span class="dot" id="stage-dot"></span>
-          <span id="stage-name"></span>
-          <span class="stage-meta" id="stage-meta"></span>
-        </div>
-        <button class="ghost no-drag" id="stop-button">Stop</button>
-      </header>
-
+      <!-- Start: pick a bot, or open a terminal -->
       <section class="welcome" id="welcome">
         <div class="halo-large" aria-hidden="true"></div>
         <h1 id="welcome-title">What should we work on?</h1>
-        <p class="welcome-sub" id="welcome-sub">Start a chat with an agent in your workspace.</p>
-        <div class="agents" id="agents"></div>
+        <p class="welcome-sub" id="welcome-sub">Start a chat with one of your bots.</p>
+        <div class="agents" id="bots"></div>
+        <p class="chat-note" id="chat-note" hidden></p>
+        <div class="terminal-row" id="terminal-row"></div>
         <button class="primary" id="choose-workspace" hidden>Choose a workspace folder</button>
       </section>
 
-      <section class="terminals" id="terminals" hidden></section>
+      <!-- A chat with a bot -->
+      <section class="chat" id="chat" hidden>
+        <header class="stage-header drag">
+          <div class="stage-title">
+            <span class="dot" id="chat-dot"></span>
+            <span id="chat-name"></span>
+            <span class="stage-meta" id="chat-meta"></span>
+          </div>
+          <button class="ghost no-drag" id="chat-stop" hidden>Stop</button>
+        </header>
+        <div class="transcript" id="transcript" aria-live="polite"></div>
+        <div class="approval" id="approval" hidden>
+          <div class="approval-text">
+            <strong>Needs your approval</strong>
+            <span id="approval-reason"></span>
+          </div>
+          <div class="approval-actions">
+            <button class="ghost" id="approval-deny">Deny</button>
+            <button class="primary" id="approval-approve">Approve once</button>
+          </div>
+        </div>
+        <form class="composer" id="composer">
+          <textarea id="composer-input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
+          <button class="send" id="composer-send" type="submit" aria-label="Send">↑</button>
+        </form>
+      </section>
+
+      <!-- Raw terminals through ottod -->
+      <section class="terminal-view" id="terminal-view" hidden>
+        <header class="stage-header drag">
+          <div class="stage-title">
+            <span class="dot" id="stage-dot"></span>
+            <span id="stage-name"></span>
+            <span class="stage-meta" id="stage-meta"></span>
+          </div>
+          <button class="ghost no-drag" id="stop-button">Stop</button>
+        </header>
+        <section class="terminals" id="terminals"></section>
+      </section>
+
       <div class="toast" id="toast" role="status" hidden></div>
     </main>
 
+    <dialog class="dialog" id="bot-dialog">
+      <form method="dialog" id="bot-form">
+        <h2>New bot</h2>
+        <label>Name<input id="bot-name" required maxlength="60" placeholder="e.g. Scout" /></label>
+        <label>What it does<textarea id="bot-job" required rows="3" placeholder="e.g. Research competitors and summarise what changed"></textarea></label>
+        <label>Runs on<select id="bot-provider"></select></label>
+        <div class="dialog-actions">
+          <button class="ghost" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary" value="create" id="bot-create">Create bot</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="markdown.js"></script>
+    <script src="terminals.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

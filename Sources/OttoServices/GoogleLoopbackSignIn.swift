@@ -14,15 +14,11 @@ import Foundation
   import Security
 #endif
 
+#if canImport(Network)
 /// Native installed-app OAuth. Google disallows password entry in embedded WKWebViews.
 /// The listener binds only to IPv4 loopback and lives for a single PKCE transaction.
 @MainActor
 final class GoogleLoopbackSignIn {
-  struct Authorization: Sendable {
-    let code: String
-    let verifier: String
-    let redirectURI: String
-  }
   private var listener: NWListener?
   private var ready: CheckedContinuation<UInt16, Error>?
   private var response: CheckedContinuation<Authorization, Error>?
@@ -92,26 +88,6 @@ final class GoogleLoopbackSignIn {
     }
   }
 
-  /// `include_granted_scopes` makes the new grant cover the scopes the account already gave
-  /// Otto, so granting calendar access later does not drop Gmail sending, and vice versa.
-  nonisolated static func authorizationURL(
-    clientID: String, redirectURI: String, scopes: Set<String>, state: String, challenge: String
-  ) -> URL {
-    var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
-    components.queryItems = [
-      URLQueryItem(name: "client_id", value: clientID),
-      URLQueryItem(name: "redirect_uri", value: redirectURI),
-      URLQueryItem(name: "response_type", value: "code"),
-      URLQueryItem(name: "scope", value: scopes.sorted().joined(separator: " ")),
-      URLQueryItem(name: "state", value: state),
-      URLQueryItem(name: "code_challenge_method", value: "S256"),
-      URLQueryItem(name: "code_challenge", value: challenge),
-      URLQueryItem(name: "access_type", value: "offline"),
-      URLQueryItem(name: "include_granted_scopes", value: "true"),
-      URLQueryItem(name: "prompt", value: "consent select_account"),
-    ]
-    return components.url!
-  }
 
   func cancel() { finish(.failure(AppConnectionError.cancelled)) }
   private func accept(_ connection: NWConnection) {
@@ -206,6 +182,48 @@ final class GoogleLoopbackSignIn {
     state = ""
     verifier = ""
   }
+}
+#else
+  /// Google sign-in listens on a loopback port with Network.framework; other platforms need a
+  /// portable listener before Gmail and Calendar can connect there.
+  @MainActor
+  final class GoogleLoopbackSignIn {
+    func authorize(clientID _: String, scopes _: Set<String>) async throws -> Authorization {
+      throw AppConnectionError.unsupportedPlatform
+    }
+    func cancel() {}
+  }
+#endif
+
+/// PKCE and callback validation are platform-neutral.
+extension GoogleLoopbackSignIn {
+  struct Authorization: Sendable {
+    let code: String
+    let verifier: String
+    let redirectURI: String
+  }
+
+  /// `include_granted_scopes` makes the new grant cover the scopes the account already gave
+  /// Otto, so granting calendar access later does not drop Gmail sending, and vice versa.
+  nonisolated static func authorizationURL(
+    clientID: String, redirectURI: String, scopes: Set<String>, state: String, challenge: String
+  ) -> URL {
+    var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+    components.queryItems = [
+      URLQueryItem(name: "client_id", value: clientID),
+      URLQueryItem(name: "redirect_uri", value: redirectURI),
+      URLQueryItem(name: "response_type", value: "code"),
+      URLQueryItem(name: "scope", value: scopes.sorted().joined(separator: " ")),
+      URLQueryItem(name: "state", value: state),
+      URLQueryItem(name: "code_challenge_method", value: "S256"),
+      URLQueryItem(name: "code_challenge", value: challenge),
+      URLQueryItem(name: "access_type", value: "offline"),
+      URLQueryItem(name: "include_granted_scopes", value: "true"),
+      URLQueryItem(name: "prompt", value: "consent select_account"),
+    ]
+    return components.url!
+  }
+
   static func validateCallback(_ components: URLComponents, expectedState: String) throws -> String
   {
     guard components.path == "/oauth2callback", components.fragment == nil,
@@ -225,11 +243,9 @@ final class GoogleLoopbackSignIn {
   static func challenge(_ verifier: String) -> String {
     Data(SHA256.hash(data: Data(verifier.utf8))).base64URL
   }
-  private static func random() throws -> String {
-    var bytes = [UInt8](repeating: 0, count: 32)
-    guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
-      throw AppConnectionError.invalidCallback
-    }
+  fileprivate static func random() throws -> String {
+    var generator = SystemRandomNumberGenerator()
+    let bytes = (0..<32).map { _ in UInt8.random(in: .min ... .max, using: &generator) }
     return Data(bytes).base64URL
   }
 }

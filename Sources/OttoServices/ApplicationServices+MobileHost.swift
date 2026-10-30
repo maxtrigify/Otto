@@ -20,6 +20,8 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
   private let environmentName: String
   private let hostVersion: String?
   private let pairingStore: RemotePairingStore?
+  /// The person's own desktop client sees every bot; paired phones only those shared with Mobile.
+  private let isOwnerClient: Bool
   private let attachmentTransfers: MobileAttachmentTransferStore
   private var completedAttachmentUploads:
     [UUID: (
@@ -36,8 +38,10 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
     environmentID: UUID,
     environmentName: String = Host.current().localizedName ?? "This Mac",
     hostVersion: String? = nil,
-    pairingStore: RemotePairingStore? = nil
+    pairingStore: RemotePairingStore? = nil,
+    isOwnerClient: Bool = false
   ) {
+    self.isOwnerClient = isOwnerClient
     self.services = services
     self.environmentID = environmentID
     self.environmentName = environmentName
@@ -108,6 +112,16 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
         )
       }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     return MobileRosterOutput(bots: bots, teams: teams)
+  }
+
+  public func createBot(_ input: BotCreateInput) async throws -> OttoModels.MobileBotSummary {
+    let profile = try services.createBot(
+      BotCreationRequest(
+        name: input.name, responsibility: input.responsibility, provider: input.provider,
+        model: input.model))
+    return OttoModels.MobileBotSummary(
+      id: profile.id, name: profile.name, jobTitle: profile.jobTitle, role: profile.role,
+      provider: profile.provider, hasSession: false, updatedAt: profile.updatedAt)
   }
 
   public func startThread(_ input: ThreadStartInput) async throws -> ThreadStartOutput {
@@ -455,7 +469,7 @@ public final class ApplicationServicesMobileHostAdapter: OttoHostDataSource {
 
   /// Mobile reaches only the bots the Mac owner allowed for the Mobile connector.
   private func mobileMayUse(_ profileID: UUID) -> Bool {
-    services.connectorAccess.canUse(.mobile, profileID: profileID)
+    isOwnerClient || services.connectorAccess.canUse(.mobile, profileID: profileID)
   }
 
   private func channel(threadID: UUID) -> BotChannel? {

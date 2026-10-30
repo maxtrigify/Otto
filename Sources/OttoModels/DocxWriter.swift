@@ -199,3 +199,39 @@ public enum DocxWriter {
       .filter { $0 == "\t" || $0.unicodeScalars.allSatisfy { $0.value >= 0x20 } }
   }
 }
+
+extension DocxDocument {
+  /// The paragraph texts of a .docx whose document part is stored uncompressed (as Otto writes
+  /// them). Formatting is dropped. Returns nil for compressed or unrecognised files.
+  public static func plainParagraphs(fromDocx data: Data) -> [String]? {
+    guard let part = ZipArchive.storedEntry(named: "word/document.xml", in: data) else {
+      return nil
+    }
+    let xml = String(decoding: part, as: UTF8.self)
+    guard xml.contains("<w:body") else { return nil }
+    return xml.components(separatedBy: "</w:p>").dropLast().map { paragraph in
+      var text = ""
+      var rest = Substring(paragraph)
+      while let open = rest.range(of: "<w:t") {
+        guard let tagEnd = rest[open.upperBound...].firstIndex(of: ">") else { break }
+        // Skip <w:tab/>, <w:tbl> and similar tags that merely share the prefix.
+        let tagName = rest[open.upperBound..<tagEnd]
+        guard tagName.isEmpty || tagName.first == " " else {
+          rest = rest[tagEnd...]
+          continue
+        }
+        guard rest[rest.index(before: tagEnd)] != "/",
+          let close = rest[tagEnd...].range(of: "</w:t>")
+        else {
+          rest = rest[tagEnd...]
+          continue
+        }
+        text += rest[rest.index(after: tagEnd)..<close.lowerBound]
+        rest = rest[close.upperBound...]
+      }
+      return text.replacingOccurrences(of: "&lt;", with: "<")
+        .replacingOccurrences(of: "&gt;", with: ">").replacingOccurrences(of: "&quot;", with: "\"")
+        .replacingOccurrences(of: "&apos;", with: "'").replacingOccurrences(of: "&amp;", with: "&")
+    }
+  }
+}

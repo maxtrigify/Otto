@@ -142,9 +142,11 @@ public final class WebsiteAccountService: ObservableObject {
       owner: ownerID, workspace: workspaceID, account: accountID, origin: account.origin)
     // Remove policy before cookie cleanup: a cleanup failure cannot retain bot access.
     try await broker.disconnect(accountID: accountID, userID: ownerID, workspaceID: workspaceID)
-    let dataStore = WKWebsiteDataStore(forIdentifier: accountID)
-    await dataStore.removeData(
-      ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+    #if canImport(WebKit)
+      let dataStore = WKWebsiteDataStore(forIdentifier: accountID)
+      await dataStore.removeData(
+        ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+    #endif
     await refresh()
   }
   private func invalidate(_ id: UUID) {
@@ -202,6 +204,7 @@ public final class WebsiteAccountService: ObservableObject {
       onOpenLogin?(accountID)
     } catch { notice = error.localizedDescription }
   }
+  #if canImport(WebKit)
   /// Native UI only. Never register this view with an agent browser/capture handler.
   public func humanWebView(accountID: UUID) -> WKWebView? {
     guard
@@ -211,6 +214,7 @@ public final class WebsiteAccountService: ObservableObject {
     else { return nil }
     return drivers[accountID]?.webView
   }
+  #endif
   public func finishLogin(accountID: UUID) async throws {
     guard
       let lease = leases.values.first(where: { $0.accountID == accountID && $0.deviceID == nil })
@@ -510,6 +514,7 @@ public final class WebsiteAccountService: ObservableObject {
   }
 }
 
+#if canImport(WebKit)
 @MainActor
 private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
   let webView: WKWebView
@@ -768,3 +773,47 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
     throw WebsiteAccountError.unavailable
   }
 }
+#else
+  /// Website sign-in drives a private WebKit view; other platforms report it as unavailable
+  /// until a Chromium-backed driver lands.
+  @MainActor
+  private final class WebsiteAccountDriver {
+    /// The few page facts the service reads; nothing ever loads here.
+    final class Page {
+      var url: URL? { nil }
+      var isLoading: Bool { false }
+      func removeFromSuperview() {}
+    }
+    let webView = Page()
+    let origin: String
+    var locked = false
+    var busy = false
+    #if DEBUG
+      var fixtureURL: URL?
+    #endif
+    struct Snapshot {
+      var revision: UUID
+      var elements: [SecureLoginElement]
+      var text: String?
+    }
+    init(accountID _: UUID, origin: String) { self.origin = origin }
+    func close() { locked = true }
+    func allowed(_: URL?) -> Bool { false }
+    func load(_: String) async throws { throw WebsiteAccountError.unavailable }
+    func requireNoSensitiveFields() async throws { throw WebsiteAccountError.unavailable }
+    func inspect(human _: Bool) async throws -> Snapshot { throw WebsiteAccountError.unavailable }
+    func fillSavedCredential(_: WebsiteCredentialVault.Credential) async throws -> Bool {
+      throw WebsiteAccountError.unavailable
+    }
+    func credentialCandidate(_: SecureLoginInput) async throws -> WebsiteCredentialVault.Credential? {
+      throw WebsiteAccountError.unavailable
+    }
+    func targetLabel(revision _: UUID?, elementID _: String?) async throws -> String {
+      throw WebsiteAccountError.unavailable
+    }
+    func act(
+      kind _: String, revision _: UUID?, elementID _: String?, value _: String?, human _: Bool,
+      fields _: [String: String] = [:]
+    ) async throws { throw WebsiteAccountError.unavailable }
+  }
+#endif

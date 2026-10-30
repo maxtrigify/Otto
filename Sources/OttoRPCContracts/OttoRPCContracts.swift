@@ -10,6 +10,7 @@ public enum OttoRPCMethod: String, Codable, CaseIterable, Sendable {
   case environmentGetCapabilities = "environment.getCapabilities"
   case threadList = "thread.list"
   case botList = "bot.list"
+  case botCreate = "bot.create"
   case threadStart = "thread.start"
   case deviceRegisterPush = "device.registerPush"
   case threadGetSnapshot = "thread.getSnapshot"
@@ -34,6 +35,8 @@ public enum OttoRPCScope: String, Codable, CaseIterable, Hashable, Sendable {
   case runControl = "run:control"
   case approvalRespond = "approval:respond"
   case secureLogin = "secure-login:control"
+  /// Creating bots; held by the owner's own desktop client, not granted to paired phones.
+  case botManage = "bot:manage"
 }
 
 extension OttoRPCMethod {
@@ -46,6 +49,7 @@ extension OttoRPCMethod {
     case .threadStart, .messageSend, .attachmentPrepareUpload, .attachmentUploadChunk:
       .messageWrite
     case .runInterrupt, .runStop: .runControl
+    case .botCreate: .botManage
     case .approvalGet, .approvalRespond: .approvalRespond
     }
   }
@@ -212,6 +216,21 @@ public struct MobileRosterOutput: Codable, Equatable, Sendable {
   public init(bots: [MobileBotSummary], teams: [MobileTeamSummary]) {
     self.bots = bots
     self.teams = teams
+  }
+}
+
+public struct BotCreateInput: Codable, Equatable, Sendable {
+  public var name: String
+  /// What the bot is responsible for; becomes its job title and seeds its instructions.
+  public var responsibility: String
+  public var provider: AgentProvider
+  public var model: String?
+
+  public init(name: String, responsibility: String, provider: AgentProvider, model: String? = nil) {
+    self.name = name
+    self.responsibility = responsibility
+    self.provider = provider
+    self.model = model
   }
 }
 

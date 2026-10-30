@@ -19,8 +19,10 @@ import OttoTools
 public enum AppConnectionError: Error, LocalizedError, Equatable {
   case setupRequired, cancelled, invalidCallback, reconnectRequired, unavailable, invalidMessage
   case requestFailed(Int)
+  case unsupportedPlatform
   public var errorDescription: String? {
     switch self {
+    case .unsupportedPlatform: "Connecting Google accounts is not available on this platform yet."
     case .setupRequired: "Google sign-in is not configured for this Otto installation yet."
     case .cancelled: "Google sign-in was cancelled or timed out."
     case .invalidCallback: "Google sign-in could not be verified. Please try again."

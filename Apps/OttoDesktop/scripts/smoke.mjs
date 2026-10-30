@@ -72,8 +72,14 @@ try {
   console.log(`engine: ${engine}`);
   await shot('1-welcome.png');
   if (!engine?.startsWith('Engine ')) throw new Error(`engine did not start: ${engine}`);
+  if (process.env.OTTO_ENGINE_PATH) {
+    // With the chat engine the start screen offers bots; creating one needs an agent CLI.
+    const newBot = await evaluate(`Boolean(document.querySelector('.agent-card.new-bot'))`);
+    console.log(`chat engine: ${newBot ? 'available' : 'missing'}`);
+    if (!newBot) throw new Error('the chat engine did not come up');
+  }
 
-  await evaluate(`[...document.querySelectorAll('.agent-card')].find((b) => b.textContent.startsWith('Terminal')).click()`);
+  await evaluate(`[...document.querySelectorAll('.terminal-row .chip')].find((b) => b.textContent.startsWith('Terminal')).click()`);
   await sleep(4000);
   await evaluate(`document.querySelector('.terminal-host:not([hidden]) textarea').focus()`);
   const marker = 'otto-smoke-ok';

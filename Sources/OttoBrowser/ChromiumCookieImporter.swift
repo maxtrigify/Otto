@@ -1,6 +1,10 @@
 #if os(macOS)
 import CommonCrypto
-import CryptoKit
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
 import SQLite3
 import Security
