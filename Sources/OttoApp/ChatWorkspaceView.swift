@@ -154,6 +154,7 @@ struct ChatWorkspaceView: View {
   @State private var teamError: String?
   @State private var teamNotice: String?
   @State private var pendingDeletion: DeletionTarget?
+  @State private var pendingClear: ClearChatTarget?
   @State private var editingBot: AgentProfile?
   @State private var editingTeam: BotChannel?
   @State private var activitySearchQuery = ""
@@ -242,6 +243,12 @@ struct ChatWorkspaceView: View {
     let profileID: UUID?
     let handle: String
     let title: String
+  }
+
+  struct ClearChatTarget: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let isBot: Bool
   }
 
   private struct DeletionTarget: Identifiable {
@@ -515,6 +522,7 @@ struct ChatWorkspaceView: View {
           : "This removes the bot profile and archives its canonical chat and private memory."
       )
     }
+    .modifier(ClearChatConfirmation(target: $pendingClear, services: services))
   }
 
   private var launchPoint: WorldPoint {
@@ -2813,6 +2821,9 @@ struct ChatWorkspaceView: View {
     }
     .contextMenu {
       Button("Rename session…", systemImage: "pencil") { beginSessionRename(node) }
+      Button("Clear chat…", systemImage: "eraser") {
+        pendingClear = ClearChatTarget(id: node.id, name: node.displayName, isBot: false)
+      }
       Divider()
       Button("Close session", systemImage: "xmark", role: .destructive) {
         closeSession(node)
@@ -2984,6 +2995,11 @@ struct ChatWorkspaceView: View {
     .accessibilityLabel("Open chat with \(entry.profile.name)")
     .contextMenu {
       Button("Edit bot…") { editingBot = entry.profile }
+      if let nodeID = entry.nodeID {
+        Button("Clear chat…") {
+          pendingClear = ClearChatTarget(id: nodeID, name: entry.profile.name, isBot: true)
+        }
+      }
       Divider()
       Button("Delete bot…", role: .destructive) {
         pendingDeletion = DeletionTarget(
@@ -5885,5 +5901,48 @@ private struct SessionRenameAlert: ViewModifier {
     } message: {
       Text("Name this conversation without changing the bot or its history.")
     }
+  }
+}
+
+/// Asks before clearing a chat, since its messages cannot be brought back, then clears it.
+private struct ClearChatConfirmation: ViewModifier {
+  @Binding var target: ChatWorkspaceView.ClearChatTarget?
+  let services: ApplicationServices
+  @State private var failure: String?
+
+  func body(content: Content) -> some View {
+    content
+      .alert(
+        target.map { "Clear the chat with \($0.name)?" } ?? "Clear chat?",
+        isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+        presenting: target
+      ) { target in
+        Button("Clear Chat", role: .destructive) {
+          self.target = nil
+          Task {
+            do {
+              try await services.clearChat(nodeID: target.id)
+            } catch {
+              failure = error.localizedDescription
+            }
+          }
+        }
+        Button("Cancel", role: .cancel) { self.target = nil }
+      } message: { target in
+        Text(
+          "All messages in this chat are deleted and the next message starts a new conversation. "
+            + (target.isBot
+              ? "\(target.name) won't remember this conversation, but anything saved to its memory or notes stays, along with files and settings. "
+              : "Files and settings stay. ")
+            + "If it's working, it stops first. This can't be undone.")
+      }
+      .alert(
+        "Couldn't clear the chat",
+        isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
+      ) {
+        Button("OK", role: .cancel) { failure = nil }
+      } message: {
+        Text(failure ?? "")
+      }
   }
 }

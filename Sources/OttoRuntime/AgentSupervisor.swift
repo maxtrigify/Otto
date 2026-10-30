@@ -1193,6 +1193,23 @@ public actor AgentSupervisor {
     }
   }
 
+  /// Forgets a chat: its transcript, result and the provider session a next turn would resume,
+  /// so the next message starts a new conversation. The agent's process must have exited.
+  public func clearConversation(agentID: UUID) throws {
+    guard var agent = agents[agentID] else { throw RuntimeError.agentNotFound(agentID) }
+    guard agent.snapshot.exitCode != nil else {
+      throw RuntimeError.launchFailed("Stop the agent before clearing its chat")
+    }
+    agent.snapshot.transcript = []
+    agent.snapshot.result = nil
+    agent.snapshot.structuredResult = nil
+    agent.snapshot.providerSessionID = nil
+    agent.snapshot.attentionReason = nil
+    agent.snapshot.childRuns = []
+    agent.hiddenTurnTranscript = []
+    agents[agentID] = agent
+  }
+
   public func snapshot(agentID: UUID) throws -> AgentRuntimeSnapshot {
     guard let agent = agents[agentID] else { throw RuntimeError.agentNotFound(agentID) }
     return projectedSnapshot(agent.snapshot)

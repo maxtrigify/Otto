@@ -1875,6 +1875,58 @@ public final class ApplicationServices: ObservableObject {
     return try botContext.project(channelID: channel.id, messages: messages)
   }
 
+  /// Clears one chat so its next message starts a new conversation: the messages on screen, the
+  /// provider session it would resume, and for a bot the conversation Otto carries into its
+  /// channel. Files, memory, notes, settings and the bot itself are left as they are. A running
+  /// agent is stopped first so nothing writes into the cleared chat.
+  public func clearChat(nodeID: UUID) async throws {
+    guard
+      let canvas = store.snapshot.canvases.first(where: { canvas in
+        canvas.nodes.contains { $0.id == nodeID }
+      }),
+      let node = canvas.nodes.first(where: { $0.id == nodeID }),
+      var definition = node.agentDefinition
+    else { throw RuntimeError.agentNotFound(nodeID) }
+
+    if let live = try? await supervisor.snapshot(agentID: nodeID), live.exitCode == nil {
+      try? await supervisor.stop(agentID: nodeID)
+      for _ in 0..<50 {
+        if (try? await supervisor.snapshot(agentID: nodeID))?.exitCode != nil { break }
+        try? await Task.sleep(for: .milliseconds(100))
+      }
+    }
+    if (try? await supervisor.snapshot(agentID: nodeID)) != nil {
+      try await supervisor.clearConversation(agentID: nodeID)
+    }
+
+    definition.resumeSessionID = nil
+    store.dispatch(
+      .setAgentDefinition(id: nodeID, definition: definition), targetCanvasID: canvas.id)
+    if let profileID = definition.profileID,
+      var channel = botChannels.canonicalChannel(for: profileID), channel.nodeID == nodeID
+    {
+      channel.providerSessionID = nil
+      try botChannels.save(channel)
+      _ = try botContext.clear(channelID: channel.id)
+    }
+
+    if var snapshot = (try? await supervisor.snapshot(agentID: nodeID))
+      ?? fleetStore.snapshot(
+        for: nodeID)
+    {
+      snapshot.transcript = []
+      snapshot.result = nil
+      snapshot.structuredResult = nil
+      snapshot.providerSessionID = nil
+      snapshot.attentionReason = nil
+      snapshot.childRuns = []
+      fleetStore.update(snapshot)
+    }
+    runHistory[nodeID] = nil
+    turnChanges[nodeID] = nil
+    objectWillChange.send()
+  }
+
   public func isTeamRunning(channelID: UUID) -> Bool {
     teamDrives[channelID] != nil
   }
