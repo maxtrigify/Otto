@@ -1036,6 +1036,9 @@ public final class ApplicationServices: ObservableObject {
   }
 
   public func connectRemote(socketPath: String, token: String? = nil) async throws {
+    #if os(Windows)
+      throw RemoteError.invalidInput("Remote Unix-socket hosts are not available on Windows yet")
+    #else
     let normalizedPath = socketPath.trimmingCharacters(in: .whitespacesAndNewlines)
     guard normalizedPath.hasPrefix("/"), normalizedPath.utf8.count < 100 else {
       throw RemoteError.invalidInput("remote socket must be a short absolute Unix-socket path")
@@ -1070,6 +1073,7 @@ public final class ApplicationServices: ObservableObject {
         }
       }
     }
+    #endif
   }
 
   public func disconnectRemote(forgetToken: Bool = false) async {
@@ -1080,6 +1084,9 @@ public final class ApplicationServices: ObservableObject {
   }
 
   public func rotateRemoteToken(socketPath: String) async throws {
+    #if os(Windows)
+      throw RemoteError.invalidInput("Remote Unix-socket hosts are not available on Windows yet")
+    #else
     guard let currentToken = try await secrets.value(for: "remote.default.token") else {
       throw RemoteError.invalidInput("connect to the remote daemon before rotating its token")
     }
@@ -1092,6 +1099,7 @@ public final class ApplicationServices: ObservableObject {
     try await secrets.set(newToken, for: "remote.default.token")
     remoteFleet = try await remoteCoordinator.refresh(
       using: RemoteSocketClient(socketPath: socketPath, token: newToken))
+    #endif
   }
 
   public func markCleanTermination() {
