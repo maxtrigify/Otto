@@ -1,0 +1,274 @@
+import OttoModels
+import OttoServices
+import SwiftUI
+
+/// Drafts agents left on Home to approve, comment on or reject, e.g. a tip of the day that is
+/// only posted to Discord once approved. Hidden when nothing is waiting.
+struct HomeReviewsView: View {
+  @ObservedObject var reviews: HomeReviewStore
+  let services: ApplicationServices
+  let openAgent: (UUID) -> Void
+  @Environment(\.ottoPalette) private var palette
+  @State private var status: OttoStatusToast?
+
+  var body: some View {
+    let open = reviews.open
+    if !open.isEmpty {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text("For your review").font(.ottoDisplay(16).weight(.semibold))
+          Text("\(open.count)").font(.ottoMono(11, weight: .semibold))
+          Spacer()
+        }
+        .foregroundStyle(palette.paper)
+        .shadow(color: palette.textHalo, radius: 6)
+        ForEach(open) { review in
+          HomeReviewCard(
+            review: review, services: services, openAgent: openAgent,
+            report: { status = $0 })
+        }
+      }
+      .padding(.bottom, 36)
+      .accessibilityIdentifier("home.reviews")
+      .ottoStatusToast($status)
+    }
+  }
+}
+
+struct HomeReviewCard: View {
+  let review: HomeReview
+  let services: ApplicationServices
+  let openAgent: (UUID) -> Void
+  let report: (OttoStatusToast) -> Void
+  @Environment(\.ottoPalette) private var palette
+  @State private var commenting = false
+  @State private var comment = ""
+  @State private var editing = false
+  @State private var edited = ""
+  @State private var expanded = false
+  @State private var working = false
+  @FocusState private var commentFocused: Bool
+
+  private var revising: Bool { review.state == .revising }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      header
+      draft
+      if let action = review.afterApproval {
+        Label {
+          Text("When you approve: \(action)")
+        } icon: {
+          Image(systemName: "arrow.turn.down.right")
+        }
+        .font(.ottoDisplay(11))
+        .foregroundStyle(palette.muted)
+      }
+      if !review.notes.isEmpty { thread }
+      if commenting { commentField }
+      if let problem = review.problem {
+        Text(problem).font(.ottoDisplay(11)).foregroundStyle(palette.red)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      actions
+    }
+    .padding(18)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .ottoGlass(cornerRadius: 12)
+    .overlay(alignment: .leading) {
+      // A thin accent edge marks it as waiting on the person, not just information.
+      RoundedRectangle(cornerRadius: 2).fill(palette.signal.opacity(0.85))
+        .frame(width: 3).padding(.vertical, 16)
+    }
+    .foregroundStyle(palette.paper)
+    .accessibilityIdentifier("home.review.\(review.id.uuidString)")
+  }
+
+  private var header: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      VStack(alignment: .leading, spacing: 3) {
+        Text(review.title).font(.ottoDisplay(14).weight(.semibold)).lineLimit(1)
+        Text(
+          "\(review.requester) · \(review.createdAt.formatted(.relative(presentation: .named)))"
+        )
+        .font(.ottoDisplay(10.5)).foregroundStyle(palette.muted).lineLimit(1)
+      }
+      Spacer()
+      if revising {
+        HStack(spacing: 6) {
+          ProgressView().controlSize(.mini)
+          Text("Revising…")
+        }
+        .font(.ottoDisplay(10.5)).foregroundStyle(palette.signal)
+      } else {
+        Text("NEEDS YOU").font(.ottoMono(9, weight: .semibold)).tracking(1.4)
+          .foregroundStyle(palette.signal)
+          .padding(.horizontal, 6).padding(.vertical, 2)
+          .background(palette.signal.opacity(0.12), in: Capsule())
+      }
+    }
+  }
+
+  @ViewBuilder private var draft: some View {
+    if editing {
+      TextEditor(text: $edited)
+        .font(.ottoDisplay(13))
+        .scrollContentBackground(.hidden)
+        .frame(minHeight: 110, maxHeight: 260)
+        .padding(8)
+        .background(palette.paper.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(palette.signal.opacity(0.5)))
+    } else {
+      VStack(alignment: .leading, spacing: 6) {
+        Text(review.draft)
+          .font(.ottoDisplay(13))
+          .lineSpacing(2)
+          .lineLimit(expanded ? nil : 8)
+          .textSelection(.enabled)
+          .fixedSize(horizontal: false, vertical: true)
+          .padding(12)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(palette.paper.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+          .opacity(revising ? 0.55 : 1)
+        if review.draft.count > 480 || review.draft.filter(\.isNewline).count > 7 {
+          Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
+            .buttonStyle(.plain).font(.ottoDisplay(10.5)).foregroundStyle(palette.muted)
+        }
+      }
+    }
+  }
+
+  private var thread: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(review.notes.suffix(6)) { note in
+        HStack(alignment: .top, spacing: 8) {
+          Image(systemName: note.author == .person ? "person.crop.circle" : "sparkles")
+            .font(.system(size: 11))
+            .foregroundStyle(note.author == .person ? palette.muted : palette.signal)
+            .frame(width: 14)
+          Text(note.text).font(.ottoDisplay(11.5))
+            .foregroundStyle(note.author == .person ? palette.paper.opacity(0.85) : palette.paper)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+        }
+      }
+    }
+  }
+
+  private var commentField: some View {
+    HStack(alignment: .bottom, spacing: 8) {
+      TextField("Ask for a change or a question…", text: $comment, axis: .vertical)
+        .textFieldStyle(.plain)
+        .font(.ottoDisplay(12.5))
+        .lineLimit(1...5)
+        .focused($commentFocused)
+        .onSubmit(sendComment)
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(palette.paper.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+      Button(action: sendComment) {
+        Image(systemName: "arrow.up").font(.system(size: 11, weight: .bold))
+          .frame(width: 26, height: 26)
+          .background(palette.signal, in: Circle())
+          .foregroundStyle(palette.onSignal)
+      }
+      .buttonStyle(.plain)
+      .disabled(comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      .accessibilityLabel("Send comment")
+    }
+  }
+
+  private var actions: some View {
+    HStack(spacing: 8) {
+      if editing {
+        Button("Approve edited") { approve() }
+          .buttonStyle(.borderedProminent)
+          .tint(palette.signal)
+          .disabled(edited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        Button("Cancel") { editing = false }.buttonStyle(.bordered)
+      } else {
+        Button {
+          approve()
+        } label: {
+          Label("Approve", systemImage: "checkmark")
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(palette.signal)
+        .accessibilityIdentifier("home.review.approve")
+        Button {
+          commenting.toggle()
+          commentFocused = commenting
+        } label: {
+          Label("Comment", systemImage: "text.bubble")
+        }
+        .buttonStyle(.bordered)
+        Button {
+          edited = review.draft
+          editing = true
+          commenting = false
+        } label: {
+          Label("Edit", systemImage: "pencil")
+        }
+        .buttonStyle(.bordered)
+        Button(role: .destructive) {
+          reject()
+        } label: {
+          Label("Reject", systemImage: "xmark")
+        }
+        .buttonStyle(.bordered)
+      }
+      Spacer()
+      if let nodeID = review.agentNodeID {
+        Button("Open chat") { openAgent(nodeID) }
+          .buttonStyle(.plain).font(.ottoDisplay(10.5)).foregroundStyle(palette.muted)
+      }
+    }
+    .controlSize(.small)
+    .disabled(working || revising)
+  }
+
+  private func approve() {
+    let text = editing ? edited : nil
+    let action = review.afterApproval
+    let id = review.id
+    working = true
+    Task {
+      do {
+        try await services.approveReview(id: id, editedDraft: text)
+        report(
+          OttoStatusToast(
+            kind: .success, title: "Approved",
+            detail: action.map { "Now: \($0)" }))
+      } catch {
+        report(
+          OttoStatusToast(
+            kind: .error, title: "Couldn’t finish approving", detail: error.localizedDescription)
+        )
+      }
+      working = false
+    }
+  }
+
+  private func reject() {
+    do {
+      try services.rejectReview(
+        id: review.id, reason: comment.trimmingCharacters(in: .whitespacesAndNewlines))
+      report(OttoStatusToast(kind: .info, title: "Rejected", detail: "Nothing else will run."))
+    } catch {
+      report(
+        OttoStatusToast(kind: .error, title: "Couldn’t reject", detail: error.localizedDescription))
+    }
+  }
+
+  private func sendComment() {
+    let text = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return }
+    let id = review.id
+    comment = ""
+    commenting = false
+    Task {
+      do { try await services.commentOnReview(id: id, text: text) } catch {
+        // The card shows the problem; the comment stays in the thread.
+      }
+    }
+  }
+}

@@ -33,6 +33,11 @@ public struct Routine: Codable, Identifiable, Sendable, Equatable {
   public var model: String?
   /// True when the automation was built in the advanced canvas, so lists can label it.
   public var advanced: Bool? = nil
+  /// When true, each answer waits on Home for the person to approve, comment on or reject,
+  /// and nothing after it (the next steps, `afterApproval`) runs until they approve.
+  public var reviewOnHome: Bool? = nil
+  /// What the agent does once the person approves its answer, e.g. "Post it in #tips".
+  public var afterApproval: String? = nil
 
   public init(
     id: UUID = UUID(), name: String, instruction: String, trigger: RoutineTrigger,
@@ -43,7 +48,8 @@ public struct Routine: Codable, Identifiable, Sendable, Equatable {
     createdAt: Date = .now, updatedAt: Date = .now, lastFiredAt: Date? = nil,
     fireCount: Int = 0, lastError: String? = nil,
     suspendedByProfileArchive: Bool? = nil, accountID: UUID? = nil,
-    runAfter: RoutineChainLink? = nil, model: String? = nil
+    runAfter: RoutineChainLink? = nil, model: String? = nil, reviewOnHome: Bool? = nil,
+    afterApproval: String? = nil
   ) {
     self.id = id
     self.name = name
@@ -67,6 +73,8 @@ public struct Routine: Codable, Identifiable, Sendable, Equatable {
     self.accountID = accountID
     self.runAfter = runAfter
     self.model = model
+    self.reviewOnHome = reviewOnHome
+    self.afterApproval = afterApproval
   }
 
   /// The trigger every chained step stores. No event bus event has this type, so the step
@@ -79,6 +87,8 @@ public struct Routine: Codable, Identifiable, Sendable, Equatable {
     runAfter = RoutineChainLink(routineID: parentID, when: condition)
     trigger = Self.chainedTrigger
   }
+
+  public var needsReview: Bool { reviewOnHome == true }
 
   public var triggerSummary: String {
     runAfter.map { "after the previous automation \($0.when.rawValue)" }

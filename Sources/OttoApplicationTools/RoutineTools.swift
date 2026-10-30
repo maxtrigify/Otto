@@ -154,7 +154,7 @@ public struct RoutineCreateTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "routine.create",
     description:
-      "Creates an automation. Bots and sessions can set enabled to true to turn it on, or false to save it paused. Webhook automations need a signing secret configured before they can turn on. To chain it into a flow, set runAfter to {\"routineID\": \"<UUID>\", \"when\": \"succeeded\"|\"failed\"|\"finished\"}; it then runs when that routine finishes and receives its answer as untrusted payload.",
+      "Creates an automation. Bots and sessions can set enabled to true to turn it on, or false to save it paused. Webhook automations need a signing secret configured before they can turn on. To chain it into a flow, set runAfter to {\"routineID\": \"<UUID>\", \"when\": \"succeeded\"|\"failed\"|\"finished\"}; it then runs when that routine finishes and receives its answer as untrusted payload. To have the user approve each answer first, set reviewOnHome to true: the answer waits on their Home page to approve, comment on or reject, and following steps run only once approved. afterApproval (optional) is what the same agent then does with the approved text, e.g. \"Post it in #tips on Discord\".",
     inputSchema: routineSchema, outputSchema: .objectSchema(), requiredScopes: [.canvasWrite],
     riskLevel: .consequential)
   private let handler: @MainActor @Sendable (Routine, ToolContext) async throws -> Routine

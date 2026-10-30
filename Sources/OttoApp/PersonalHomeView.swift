@@ -179,7 +179,9 @@ struct PersonalHomeView: View {
       return !attention.contains { $0.nodeID == nodeID }
     }
   }
-  private var attentionCount: Int { attention.count + recordedAttention.count }
+  private var attentionCount: Int {
+    attention.count + recordedAttention.count + services.homeReviews.open.count
+  }
 
   var body: some View {
     TimelineView(.periodic(from: .now, by: 60)) { timeline in
@@ -207,6 +209,9 @@ struct PersonalHomeView: View {
             hero(today, now: now)
               .padding(.top, geometry.size.height < 720 ? 90 : 140)
               .padding(.bottom, 44)
+            HomeReviewsView(reviews: services.homeReviews, services: services, openAgent: openAgent)
+              .environment(\.ottoPalette, cardPalette)
+              .environment(\.colorScheme, cardColorScheme)
             if !today.isEmpty || addingTodo {
               briefView(today, now: now, width: geometry.size.width).padding(.bottom, 40)
             } else if profile.briefRoutineID == nil {
@@ -816,6 +821,16 @@ struct PersonalHomeView: View {
           .buttonStyle(.plain)
           .accessibilityLabel("Review \(agentName(item.nodeID))")
         }
+      }
+      let waitingReviews = services.homeReviews.open.count
+      if waitingReviews > 0 {
+        VStack(alignment: .leading, spacing: 4) {
+          Text(waitingReviews == 1 ? "1 draft to review" : "\(waitingReviews) drafts to review")
+            .font(.ottoDisplay(12).weight(.medium))
+          Text("Approve, comment on or reject them under For your review.")
+            .font(.ottoDisplay(11)).foregroundStyle(cardPalette.muted).lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
       ForEach(recordedAttention.prefix(max(0, 3 - attention.count))) { item in
         Button {

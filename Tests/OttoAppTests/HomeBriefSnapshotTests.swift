@@ -148,6 +148,67 @@ struct HomeBriefSnapshotTests {
     }
   }
 
+  /// Home with drafts waiting for review: a tip of the day to post once approved, and one
+  /// mid-conversation, over Shorelight. Also the automation editor's "Check with you first?".
+  @Test func renderHomeReviews() throws {
+    let env = ProcessInfo.processInfo.environment
+    guard let output = env["OTTO_HOME_SNAPSHOT_DIR"] else { return }
+    let workspace = FileManager.default.temporaryDirectory.appending(path: "home-reviews-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    let canvas = CanvasStore()
+    let services = ApplicationServices(store: canvas, workspacePath: workspace.path)
+    let tip = try services.routines.save(
+      Routine(
+        name: "Tip of the day", instruction: "Write one practical Otto tip for the community",
+        trigger: .schedule(cron: "0 9 * * *", intervalSeconds: nil),
+        target: .spawnProvider(provider: "Claude Code"), reviewOnHome: true,
+        afterApproval: "Post it in #tips on the Otto Discord"))
+    try services.homeReviews.add(
+      HomeReview(
+        title: "Tip of the day", requester: "Tip of the day",
+        draft: """
+          💡 Tip of the day: press ⌃⌥Space anywhere on your Mac and just say what you want. \
+          Otto picks the right agent, and you can keep working while it runs.
+          """,
+        afterApproval: tip.afterApproval, agentNodeID: UUID(), routineID: tip.id,
+        createdAt: .now.addingTimeInterval(-25 * 60)))
+    try services.homeReviews.add(
+      HomeReview(
+        title: "Reply to Jo about seat pricing", requester: "Aria",
+        draft:
+          "Hi Jo, thanks for the call. We can do 40 seats at the team rate if you sign by Friday.",
+        afterApproval: "Send it from my Gmail",
+        notes: [
+          .init(author: .person, text: "Can we mention the annual discount too?"),
+          .init(author: .agent, text: "Updated the draft."),
+        ],
+        agentNodeID: UUID(), createdAt: .now.addingTimeInterval(-3 * 3600)))
+    for themeID in ["shorelight", "halcyon"] {
+      canvas.dispatch(.setTheme(themeID))
+      let theme = OttoThemeCatalog.theme(id: themeID)
+      let view = ZStack {
+        ThemeBackgroundView(theme: theme, isActive: false, scrimScale: 0.25)
+        PersonalHomeView(
+          store: canvas, services: services, activity: services.botActivity,
+          brief: services.dailyBrief, draft: .constant(""), provider: .constant(.claudeCode),
+          conversationTarget: .constant(.newSession), openMarkdown: { _ in },
+          openBot: { _ in }, openAgent: { _ in }, openCloud: {},
+          openLibrary: { _ in }, hireBot: {}, submit: { _, _, _ in })
+      }
+      .environment(\.ottoPalette, OttoPalette(theme: theme))
+      try render(
+        view, size: CGSize(width: 1280, height: 1300), to: "\(output)/reviews-\(themeID).png",
+        light: theme.isLightAppearance)
+    }
+    let theme = OttoThemeCatalog.theme(id: "shorelight")
+    let editor = AutomationEditor(services: services, target: .edit(tip), onFinish: { _ in })
+      .environment(\.ottoPalette, OttoPalette(theme: theme))
+    try render(
+      editor.frame(height: 1180), size: CGSize(width: 620, height: 1180),
+      to: "\(output)/reviews-editor.png",
+      light: theme.isLightAppearance)
+  }
+
   /// Dashboards and Documents with realistic content, for review.
   @Test func renderWorkPages() throws {
     let env = ProcessInfo.processInfo.environment

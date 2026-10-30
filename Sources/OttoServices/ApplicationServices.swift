@@ -202,6 +202,8 @@ public final class ApplicationServices: ObservableObject {
   /// Home profiles and the items users, routines and bots add to the daily brief.
   public let dailyBrief: DailyBriefStore
   public let homeCards: HomeCardsStore
+  /// Drafts waiting on Home for the person to approve, comment on or reject.
+  public let homeReviews: HomeReviewStore
   public let office: OfficeStore
   /// App-wide profile list. Nil in isolated previews and tests that do not exercise profiles.
   public let profiles: OttoProfileRegistry?
@@ -322,6 +324,10 @@ public final class ApplicationServices: ObservableObject {
   var routineObservation: AnyCancellable?
   private var routineStoreForwarding: AnyCancellable?
   private var appConnectionsForwarding: AnyCancellable?
+  private var homeReviewsForwarding: AnyCancellable?
+  /// Tests stand in for the agent that wrote a reviewed draft: gets its node and the prompt,
+  /// returns its answer. Nil in the app, where the prompt goes to the real session.
+  var reviewAgentOverride: (@MainActor (UUID, String) async throws -> String?)?
   var hookDaemon: Process?
   var hookOutputTask: Task<Void, Never>?
   var hookRoutesSignature: String?
@@ -389,6 +395,7 @@ public final class ApplicationServices: ObservableObject {
         .filter { $0.kind == .agent }.map(\.id))
     self.dailyBrief = DailyBriefStore(workspacePath: workspacePath)
     self.homeCards = HomeCardsStore(workspacePath: workspacePath)
+    self.homeReviews = HomeReviewStore(workspacePath: workspacePath)
     self.office = OfficeStore(workspacePath: workspacePath)
     self.botContext = BotChannelContextStore(workspacePath: workspacePath)
     self.botActivity = BotActivityStore(workspacePath: workspacePath)
@@ -450,12 +457,20 @@ public final class ApplicationServices: ObservableObject {
       },
       deliveryHandler: { [weak self] routine, nodeID, result in
         try await self?.deliverRoutineResult(routine, nodeID: nodeID, result: result)
+      },
+      reviewHandler: { [weak self] routine, runID, nodeID, result, depth in
+        try self?.holdRoutineResultForReview(
+          routine, runID: runID, nodeID: nodeID, result: result, depth: depth)
       }
     )
     self.appConnectionsForwarding = self.appConnections.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
     }
     self.routineStoreForwarding = routines.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    // Home's "Needs you" count includes drafts waiting for review.
+    self.homeReviewsForwarding = homeReviews.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
     }
   }
@@ -571,6 +586,7 @@ public final class ApplicationServices: ObservableObject {
       try await registerRoutineTools()
       try await registerBriefTools()
       try await registerHomeCardTools()
+      try await registerHomeReviewTools()
       try await registerOfficeTools()
       try await registerProfileTools()
       botPresence.start()

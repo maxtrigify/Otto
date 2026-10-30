@@ -758,6 +758,9 @@ struct AutomationEditor: View {
   /// The card a "Home card" automation refreshes; nil makes a new card named after it.
   @State private var cardID: UUID?
   @State private var allowChanges = false
+  /// Each answer waits on Home for approval before anything after it runs.
+  @State private var reviewOnHome = false
+  @State private var afterApproval = ""
   @State private var model: String?
   @State private var enabled = true
   /// Set for a step that runs after another automation instead of on a schedule.
@@ -928,6 +931,25 @@ struct AutomationEditor: View {
             )
             .font(.ottoDisplay(12))
           }
+          step("7", "Check with you first?") {
+            Toggle("Ask me on Home to approve, comment or reject each result", isOn: $reviewOnHome)
+              .font(.ottoDisplay(12))
+              .accessibilityIdentifier("automations.editor.review")
+            if reviewOnHome {
+              TextField(
+                "When I approve, do this (optional), e.g. Post it in #tips on Discord",
+                text: $afterApproval, axis: .vertical
+              )
+              .textFieldStyle(.roundedBorder)
+              .lineLimit(1...3)
+              Text(
+                afterApproval.trimmingCharacters(in: .whitespaces).isEmpty
+                  ? "The draft waits on Home. Nothing after it runs until you approve."
+                  : "The same agent does this with the approved text. Posting or sending needs “Allow it to make changes” on."
+              )
+              .font(.ottoDisplay(11)).foregroundStyle(palette.muted)
+            }
+          }
           if let error {
             Text(error).font(.ottoDisplay(12)).foregroundStyle(palette.red)
           }
@@ -946,7 +968,7 @@ struct AutomationEditor: View {
       }
       .padding(16)
     }
-    .frame(width: 620, height: 700)
+    .frame(width: 620, height: 740)
     .background(palette.surface)
     .foregroundStyle(palette.paper)
     .onAppear {
@@ -956,6 +978,10 @@ struct AutomationEditor: View {
     .onChange(of: doer) { _, newValue in
       if loadedDoer != newValue { model = nil }
       if case .provider = newValue, destination == .botChat { destination = .brief }
+    }
+    // The review card already shows the result, so it needn't land in the brief as well.
+    .onChange(of: reviewOnHome) { _, on in
+      if on, destination == .brief { destination = .none }
     }
   }
 
@@ -1084,6 +1110,8 @@ struct AutomationEditor: View {
       enabled = routine.enabled
       accountID = routine.accountID
       allowChanges = routine.permissionMode == AgentPermissionMode.workspaceWrite.rawValue
+      reviewOnHome = routine.needsReview
+      afterApproval = routine.afterApproval ?? ""
       switch routine.target {
       case .spawnProfile(let id): doer = .bot(id)
       case .spawnProvider(let raw):
@@ -1151,6 +1179,9 @@ struct AutomationEditor: View {
     if case .provider = doer { routine.model = model } else { routine.model = nil }
     routine.enabled = enabled
     routine.quietWhenUnchanged = destination == .brief
+    routine.reviewOnHome = reviewOnHome ? true : nil
+    let action = afterApproval.trimmingCharacters(in: .whitespacesAndNewlines)
+    routine.afterApproval = reviewOnHome && !action.isEmpty ? action : nil
     routine.permissionMode =
       (allowChanges ? AgentPermissionMode.workspaceWrite : .readOnly).rawValue
     routine.timeZoneIdentifier = TimeZone.current.identifier
