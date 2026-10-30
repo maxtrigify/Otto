@@ -21,8 +21,9 @@ jobs:
       - name: Install Swift
         uses: compnerd/gha-setup-swift@main
         with:
-          branch: swift-6.2-release
-          tag: 6.2-RELEASE
+          # Matches the Mac toolchain (Xcode 27, Swift 6.4); 6.2 rejects swift-websocket's Span use.
+          branch: swift-6.4.2-release
+          tag: 6.4.2-RELEASE
 
       - name: Build ottod
         shell: pwsh
@@ -51,6 +52,21 @@ jobs:
           Copy-Item "$bin/otto-engine.exe" Apps/OttoDesktop/bin/win32-x64/
           Get-ChildItem "$bin" -Filter *.dll | Copy-Item -Destination Apps/OttoDesktop/bin/win32-x64/ -Force
 
+      - name: Build engine modules one by one (diagnostics)
+        if: steps.engine.outcome == 'failure'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # One failing module hides the rest; build each so a single run reports every error.
+          $targets = "OttoControl","OttoWorktrees","OttoObservability","OttoMemory","OttoDocuments",
+            "OttoBrowser","OttoMedia","OttoHooks","OttoHostTransport","OttoApplicationTools",
+            "OttoCore","OttoServices"
+          foreach ($target in $targets) {
+            "=== $target ===" | Out-File -Append modules-build.log
+            swift build -c release --target $target 2>&1 | Out-File -Append modules-build.log
+            "=== $target exit $LASTEXITCODE ===" | Out-File -Append modules-build.log
+          }
+
       - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -59,6 +75,7 @@ jobs:
           path: |
             ottod-build.log
             engine-build.log
+            modules-build.log
           if-no-files-found: ignore
 
       - uses: actions/setup-node@v4
