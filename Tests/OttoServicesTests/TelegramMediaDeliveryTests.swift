@@ -27,9 +27,17 @@ struct TelegramMediaDeliveryTests {
     await services.start()
     let bot = try services.createBot(BotCreationRequest(name: "Scout", responsibility: "Help"))
     try services.connectorAccess.setAllowed(true, profileID: bot.id, for: .telegram)
+    // The bot's session is a plain shell tagged with the bot, so opening the bot reuses it and
+    // the test runs on Macs without Codex or Claude Code, such as CI runners.
     let node = try #require(
       services.store.dispatch(.createNode(kind: .agent, at: WorldPoint(x: 0, y: 0)))
         .affectedNodeIDs.first)
+    services.store.dispatch(
+      .setAgentDefinition(
+        id: node,
+        definition: AgentDefinition(
+          provider: .shell, workingDirectory: root.path, launchCommand: "/bin/sh",
+          permissionMode: "workspaceWrite", profileID: bot.id)))
     _ = try services.botChannels.bindNode(profileID: bot.id, nodeID: node)
     _ = try await services.supervisor.spawn(
       provider: .shell,
@@ -59,17 +67,19 @@ struct TelegramMediaDeliveryTests {
     await connector.connect(token: "123456:abcdefghijklmnopqrstuvwxyz")
     #expect(connector.username == "ottotestbot")
 
-    // Opening the bot may start its own session, so read whichever node the bot is on now.
     func prompt() async -> String? {
-      guard let current = services.botRoster().first(where: { $0.profile.id == bot.id })?.nodeID,
-        let snapshot = try? await services.supervisor.snapshot(agentID: current)
-      else { return nil }
+      guard let snapshot = try? await services.supervisor.snapshot(agentID: node) else {
+        return nil
+      }
       return snapshot.transcript.last {
         $0.role == .user && $0.text.contains("[The user attached")
       }?
       .text
     }
-    try await waitUntil(timeout: .seconds(20)) {
+    try await waitUntil(
+      timeout: .seconds(60),
+      describe: "status: \(connector.status); files: \(api.fileRequests); sent: \(api.sentMessages)"
+    ) {
       await prompt() != nil && api.sentMessages.contains { $0.hasPrefix("Sent to @") }
     }
     connector.stop()
@@ -92,14 +102,15 @@ struct TelegramMediaDeliveryTests {
   }
 
   private func waitUntil(
-    timeout: Duration = .seconds(15), _ condition: @MainActor () async throws -> Bool
+    timeout: Duration = .seconds(15), describe: @autoclosure () -> String = "",
+    _ condition: @MainActor () async throws -> Bool
   ) async throws {
     let deadline = ContinuousClock.now + timeout
     while ContinuousClock.now < deadline {
       if try await condition() { return }
       try await Task.sleep(for: .milliseconds(20))
     }
-    Issue.record("Timed out waiting for Telegram media to reach the bot")
+    Issue.record("Timed out waiting for Telegram media to reach the bot. \(describe())")
   }
 }
 
@@ -115,6 +126,7 @@ private final class FakeBotAPI: @unchecked Sendable {
   init(videoBytes: Data) { self.videoBytes = videoBytes }
 
   var fileRequests: [String] { lock.withLock { _fileRequests } }
+  var hasServed: Bool { lock.withLock { served } }
   var sentMessages: [String] { lock.withLock { _sentMessages } }
 
   func respond(to request: URLRequest) -> Data {
@@ -185,6 +197,15 @@ private final class FakeBotAPIProtocol: URLProtocol, @unchecked Sendable {
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
   override func startLoading() {
+    // Telegram holds an empty long poll open; answering at once would spin the poll loop.
+    if request.url?.path.hasSuffix("/getUpdates") == true, FakeBotAPI.current?.hasServed == true {
+      DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) { [self] in respond() }
+      return
+    }
+    respond()
+  }
+
+  private func respond() {
     guard let api = FakeBotAPI.current, let url = request.url,
       let response = HTTPURLResponse(
         url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])
