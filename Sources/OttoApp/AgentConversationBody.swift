@@ -1176,20 +1176,29 @@ struct AgentConversationBody: View {
           }
           assistantBody(entry)
           HStack(spacing: 9 * scale) {
-            Button {
-              NSPasteboard.general.clearContents()
-              NSPasteboard.general.setString(entry.text, forType: .string)
-              toastNotice = OttoToastNotice(message: "Response copied")
-            } label: {
-              Image(systemName: "doc.on.doc")
+            // The turn's time and tokens stay visible; the actions appear on hover.
+            if let stats = entry.turnStats {
+              Text(TurnStatsText.summary(stats))
+                .monospacedDigit()
+                .help(TurnStatsText.detail(stats))
+                .accessibilityLabel(TurnStatsText.detail(stats))
             }
-            .help("Copy response")
-            handoffMenu(for: entry)
+            HStack(spacing: 9 * scale) {
+              Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(entry.text, forType: .string)
+                toastNotice = OttoToastNotice(message: "Response copied")
+              } label: {
+                Image(systemName: "doc.on.doc")
+              }
+              .help("Copy response")
+              handoffMenu(for: entry)
+            }
+            .opacity(hoveredMessageID == entry.id ? 1 : 0)
+            .allowsHitTesting(hoveredMessageID == entry.id)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hoveredMessageID)
           }
           .frame(height: 12 * scale)
-          .opacity(hoveredMessageID == entry.id ? 1 : 0)
-          .allowsHitTesting(hoveredMessageID == entry.id)
-          .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: hoveredMessageID)
           .textSelection(.disabled)
           .buttonStyle(.plain)
           .font(.ottoLabel(max(5.5, 6.5 * scale), weight: .medium))

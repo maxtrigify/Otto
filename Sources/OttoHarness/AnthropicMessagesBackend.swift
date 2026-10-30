@@ -101,7 +101,8 @@ public struct AnthropicMessagesBackend: HarnessModelBackend {
     return HarnessBackendResponse(
       providerContinuation: .object(["messages": .array(continuationMessages)]),
       text: text.joined(separator: "\n"),
-      toolCalls: toolCalls)
+      toolCalls: toolCalls,
+      usage: HarnessTokenUsage.parse(object["usage"]))
   }
 
   private func requestMessages(for request: HarnessBackendRequest) throws -> [JSONValue] {

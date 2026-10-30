@@ -166,7 +166,13 @@ private enum OttoOpenAIAgent {
         }
       })
     emit(["type": "item.completed", "item": ["type": "agent_message", "text": result.text]])
-    emit(["type": "turn.completed"])
+    var completed: [String: Any] = ["type": "turn.completed"]
+    if let usage = result.usage {
+      completed["usage"] = [
+        "input_tokens": usage.inputTokens, "output_tokens": usage.outputTokens,
+      ]
+    }
+    emit(completed)
   }
 
   private static func modelBackend(id: String, apiKey: String) throws -> any HarnessModelBackend {

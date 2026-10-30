@@ -65,6 +65,7 @@ public struct HarnessRunner: Sendable {
     try await sessionStore.save(session)
     var providerContinuation = request.legacyProviderResponseID.map { JSONValue.string($0) }
     var finalText = ""
+    var usage: HarnessTokenUsage?
 
     for round in 0..<maximumToolRounds {
       let response = try await backend.complete(
@@ -76,6 +77,7 @@ public struct HarnessRunner: Sendable {
           tools: request.tools,
           providerContinuation: providerContinuation))
       if !response.text.isEmpty { finalText = response.text }
+      usage = HarnessTokenUsage.combined(usage, response.usage)
       if response.toolCalls.isEmpty {
         guard !finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
           throw HarnessError.missingFinalResponse
@@ -84,7 +86,7 @@ public struct HarnessRunner: Sendable {
         session.providerID = request.providerID
         session.modelID = request.modelID
         try await sessionStore.save(session)
-        return HarnessTurnResult(sessionID: session.id, text: finalText)
+        return HarnessTurnResult(sessionID: session.id, text: finalText, usage: usage)
       }
       guard round + 1 < maximumToolRounds else { throw HarnessError.toolLoopLimitExceeded }
       guard let toolExecutor else {

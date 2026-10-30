@@ -112,7 +112,8 @@ public struct OpenAIResponsesBackend: HarnessModelBackend {
     return HarnessBackendResponse(
       providerContinuation: .string(responseID),
       text: texts.joined(separator: "\n"),
-      toolCalls: calls)
+      toolCalls: calls,
+      usage: HarnessTokenUsage.parse(object["usage"]))
   }
 
   private func jsonObject(_ value: JSONValue) throws -> Any {

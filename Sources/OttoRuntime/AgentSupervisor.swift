@@ -1345,6 +1345,7 @@ public actor AgentSupervisor {
         // Messages were already projected as they completed; the summary only lands as a new
         // entry when the provider's final result differs from the last message (dedupe below).
         appendTranscript(.assistant, text: result.summaryCandidate, to: &agent)
+        attachTurnStats(result, to: &agent)
       case .assistantMessage(let text):
         appendTranscript(.assistant, text: text, to: &agent)
       case .reasoning(let text):
@@ -1609,6 +1610,25 @@ public actor AgentSupervisor {
     return String(plain.prefix(240))
   }
 
+  /// Puts the turn's time and tokens on its last reply. The turn runs from the person's message
+  /// to this result; the provider's own duration is used when it reports one.
+  private func attachTurnStats(_ result: AgentResult, to agent: inout ManagedAgent) {
+    guard !agent.hiddenTurnActive,
+      let replyIndex = agent.snapshot.transcript.lastIndex(where: {
+        $0.role == .assistant && $0.kind == .text
+      })
+    else { return }
+    let transcript = agent.snapshot.transcript
+    let turnStart =
+      transcript[..<replyIndex].last(where: { $0.role == .user })?.createdAt
+      ?? agent.snapshot.startedAt
+    let measured = max(0, Date.now.timeIntervalSince(turnStart))
+    let reported = result.durationMilliseconds.map { Double($0) / 1_000 }
+    agent.snapshot.transcript[replyIndex].turnStats = AgentTurnStats(
+      durationSeconds: reported ?? measured,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens)
+  }
+
   private func appendTranscript(
     _ role: AgentTranscriptRole,
     kind: AgentTranscriptKind = .text,
@@ -1786,6 +1806,7 @@ public actor AgentSupervisor {
         agent.snapshot.structuredResult = result
         agent.snapshot.result = result.summaryCandidate
         appendTranscript(.assistant, text: result.summaryCandidate, to: &agent)
+        attachTurnStats(result, to: &agent)
       case .diagnostic(let message):
         appendTranscript(.activity, kind: .notice, text: message, to: &agent)
       case .childStarted(let child):

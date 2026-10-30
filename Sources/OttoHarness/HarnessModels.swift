@@ -144,15 +144,19 @@ public struct HarnessBackendResponse: Equatable, Sendable {
   public var providerContinuation: JSONValue?
   public var text: String
   public var toolCalls: [HarnessToolCall]
+  /// Tokens the provider billed for this one request, when it reported them.
+  public var usage: HarnessTokenUsage?
 
   public init(
     providerContinuation: JSONValue? = nil,
     text: String = "",
-    toolCalls: [HarnessToolCall] = []
+    toolCalls: [HarnessToolCall] = [],
+    usage: HarnessTokenUsage? = nil
   ) {
     self.providerContinuation = providerContinuation
     self.text = text
     self.toolCalls = toolCalls
+    self.usage = usage
   }
 }
 
@@ -173,10 +177,44 @@ public enum HarnessEvent: Equatable, Sendable {
 public struct HarnessTurnResult: Equatable, Sendable {
   public var sessionID: String
   public var text: String
+  /// Summed over every model request in the turn, tool rounds included.
+  public var usage: HarnessTokenUsage?
 
-  public init(sessionID: String, text: String) {
+  public init(sessionID: String, text: String, usage: HarnessTokenUsage? = nil) {
     self.sessionID = sessionID
     self.text = text
+    self.usage = usage
+  }
+}
+
+public struct HarnessTokenUsage: Equatable, Sendable {
+  public var inputTokens: Int
+  public var outputTokens: Int
+
+  public init(inputTokens: Int, outputTokens: Int) {
+    self.inputTokens = inputTokens
+    self.outputTokens = outputTokens
+  }
+
+  /// Reads `usage` from a Chat Completions, Responses or Messages reply. Cached input counts as
+  /// input; Anthropic reports it apart from `input_tokens`.
+  static func parse(_ object: Any?) -> Self? {
+    guard let usage = object as? [String: Any] else { return nil }
+    func int(_ key: String) -> Int? { (usage[key] as? NSNumber)?.intValue }
+    guard
+      let input = int("prompt_tokens") ?? int("input_tokens"),
+      let output = int("completion_tokens") ?? int("output_tokens")
+    else { return nil }
+    let cached = (int("cache_read_input_tokens") ?? 0) + (int("cache_creation_input_tokens") ?? 0)
+    return Self(inputTokens: input + cached, outputTokens: output)
+  }
+
+  static func combined(_ lhs: Self?, _ rhs: Self?) -> Self? {
+    guard let lhs else { return rhs }
+    guard let rhs else { return lhs }
+    return Self(
+      inputTokens: lhs.inputTokens + rhs.inputTokens,
+      outputTokens: lhs.outputTokens + rhs.outputTokens)
   }
 }
 

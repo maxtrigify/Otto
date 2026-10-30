@@ -98,7 +98,8 @@ public struct OpenAIChatCompletionsBackend: HarnessModelBackend {
     return HarnessBackendResponse(
       providerContinuation: .object(["messages": .array(continuationMessages)]),
       text: content,
-      toolCalls: calls)
+      toolCalls: calls,
+      usage: HarnessTokenUsage.parse(object["usage"]))
   }
 
   private func requestMessages(for request: HarnessBackendRequest) throws -> [JSONValue] {

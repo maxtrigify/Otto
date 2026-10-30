@@ -8,6 +8,8 @@ public struct AgentResult: Codable, Sendable, Equatable {
   public var filesChanged: [String]
   public var commandsRun: [String]
   public var durationMilliseconds: Int?
+  public var inputTokens: Int?
+  public var outputTokens: Int?
 
   public init(
     status: AgentLifecycleState,
@@ -15,7 +17,9 @@ public struct AgentResult: Codable, Sendable, Equatable {
     rawText: String,
     filesChanged: [String] = [],
     commandsRun: [String] = [],
-    durationMilliseconds: Int? = nil
+    durationMilliseconds: Int? = nil,
+    inputTokens: Int? = nil,
+    outputTokens: Int? = nil
   ) {
     self.status = status
     self.summaryCandidate = summaryCandidate
@@ -23,6 +27,25 @@ public struct AgentResult: Codable, Sendable, Equatable {
     self.filesChanged = filesChanged
     self.commandsRun = commandsRun
     self.durationMilliseconds = durationMilliseconds
+    self.inputTokens = inputTokens
+    self.outputTokens = outputTokens
+  }
+}
+
+/// Reads a provider's usage object. Claude reports cache reads and writes apart from
+/// `input_tokens`, Codex reports `cached_input_tokens` as part of it; both become one input
+/// figure. Nil when the object carries no counts.
+public enum ProviderTokenUsage {
+  public static func parse(_ usage: Any?) -> (input: Int?, output: Int?) {
+    guard let usage = usage as? [String: Any] else { return (nil, nil) }
+    func int(_ key: String) -> Int? {
+      (usage[key] as? Int) ?? (usage[key] as? Double).map { Int($0) }
+    }
+    let base = int("input_tokens") ?? int("prompt_tokens") ?? int("inputTokens")
+    let cache = (int("cache_read_input_tokens") ?? 0) + (int("cache_creation_input_tokens") ?? 0)
+    let input = base.map { $0 + cache }
+    let output = int("output_tokens") ?? int("completion_tokens") ?? int("outputTokens")
+    return (input, output)
   }
 }
 
@@ -579,6 +602,7 @@ public struct ClaudeOutputParser: Sendable {
       }
       let resultText = object["result"] as? String ?? assistantText
       let duration = object["duration_ms"] as? Int
+      let usage = ProviderTokenUsage.parse(object["usage"])
       events.append(
         .result(
           AgentResult(
@@ -587,7 +611,9 @@ public struct ClaudeOutputParser: Sendable {
             rawText: assistantText.isEmpty ? resultText : assistantText,
             filesChanged: unique(files),
             commandsRun: unique(commands),
-            durationMilliseconds: duration
+            durationMilliseconds: duration,
+            inputTokens: usage.input,
+            outputTokens: usage.output
           )))
       events.append(.state(.done, confidence: 0.99))
       return events
@@ -706,6 +732,7 @@ public struct CodexOutputParser: Sendable {
           .state(.failed, confidence: 0.95),
         ]
       }
+      let usage = ProviderTokenUsage.parse(object["usage"])
       return [
         .result(
           AgentResult(
@@ -713,7 +740,9 @@ public struct CodexOutputParser: Sendable {
             summaryCandidate: finalText,
             rawText: finalText,
             filesChanged: unique(files),
-            commandsRun: unique(commands)
+            commandsRun: unique(commands),
+            inputTokens: usage.input,
+            outputTokens: usage.output
           )),
         .state(.done, confidence: 0.99),
       ]
@@ -961,6 +990,7 @@ public struct CursorOutputParser: Sendable {
         events.append(.state(.failed, confidence: 0.9))
         break
       }
+      let usage = ProviderTokenUsage.parse(object["usage"])
       events.append(
         .result(
           AgentResult(
@@ -968,7 +998,10 @@ public struct CursorOutputParser: Sendable {
             summaryCandidate: text,
             rawText: text,
             filesChanged: unique(files),
-            commandsRun: unique(commands)
+            commandsRun: unique(commands),
+            durationMilliseconds: object["duration_ms"] as? Int,
+            inputTokens: usage.input,
+            outputTokens: usage.output
           )))
       events.append(.state(.done, confidence: 0.99))
     default:
