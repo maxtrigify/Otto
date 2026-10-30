@@ -72,11 +72,36 @@ private struct ControlToolExecutor: HarnessToolExecutor {
     guard let actualName = actualNames[call.name] else {
       throw DirectRuntimeError.invalidArguments("Unknown Otto tool: \(call.name)")
     }
-    let result = try await client.callAsync(
-      actualName,
-      arguments: call.arguments,
-      requestID: call.id,
-      timeoutMilliseconds: 3_600_000)
+    let result: JSONValue
+    do {
+      result = try await client.callAsync(
+        actualName,
+        arguments: call.arguments,
+        requestID: call.id,
+        timeoutMilliseconds: 3_600_000)
+    } catch ControlProtocolError.remote(let failure)
+      where failure.code == "tool_error"
+      && failure.message == ToolRegistryError.confirmationRequired(actualName).localizedDescription
+    {
+      // Like Claude Code and Codex through the otto-mcp bridge: ask on Otto's approval card (and
+      // Telegram, when allowed), then run the exact same call only if the person approves.
+      let approval = try await client.callAsync(
+        AgentPermissionPrompt.toolName,
+        arguments: .object(["tool_name": .string(actualName), "input": call.arguments]),
+        timeoutMilliseconds: actualName == "browser.click"
+          ? AgentPermissionPrompt.browserResponseTimeoutMilliseconds
+          : AgentPermissionPrompt.responseTimeoutMilliseconds)
+      guard approval["behavior"]?.stringValue == "allow" else {
+        let reason = approval["message"]?.stringValue ?? "The user denied \(actualName) in Otto"
+        return "Not done: \(reason). Do not retry this action unless the user asks again."
+      }
+      result = try await client.callAsync(
+        actualName,
+        arguments: call.arguments,
+        confirmed: true,
+        requestID: "\(call.id)-approved",
+        timeoutMilliseconds: 3_600_000)
+    }
     guard let data = try? JSONEncoder().encode(result) else { return "null" }
     return String(decoding: data, as: UTF8.self)
   }
@@ -116,7 +141,8 @@ private enum OttoOpenAIAgent {
 
     let client = controlClient()
     let definitions = (try? await client?.listToolsAsync()) ?? []
-    let callable = definitions.filter { !$0.isProviderInternal && !$0.requiresConfirmation }
+    // Tools that need confirmation are offered too; ControlToolExecutor asks the person first.
+    let callable = definitions.filter { !$0.isProviderInternal }
     let rawTools = callable.map {
       HarnessTool(name: $0.name, description: $0.description, inputSchema: $0.inputSchema)
     }

@@ -33,8 +33,10 @@ public struct GmailConnection: Codable, Identifiable, Equatable, Sendable {
 }
 
 public enum SharedAppProviders {
+  /// Otto Harness (`.openAI`) is included: like the others, its sends go through Otto's
+  /// approval card before anything leaves the Mac.
   public static let supported: Set<AgentProvider> = [
-    .claudeCode, .codex, .cursor, .grok, .kimi, .openCode, .pi,
+    .claudeCode, .codex, .cursor, .grok, .kimi, .openCode, .pi, .openAI,
   ]
 }
 
