@@ -50,6 +50,57 @@ struct AutomationFlowSnapshotTests {
       light: true)
   }
 
+  /// An advanced flow whose first agent asks for approval: the canvas builder with the
+  /// switch on, then the saved flow waiting on Home.
+  @Test func renderApprovalFlow() async throws {
+    guard let output = ProcessInfo.processInfo.environment["OTTO_FLOW_SNAPSHOT_DIR"] else {
+      return
+    }
+    let workspace = FileManager.default.temporaryDirectory.appending(path: "approval-\(UUID())")
+    try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    let canvas = CanvasStore()
+    let services = ApplicationServices(store: canvas, workspacePath: workspace.path)
+    let palette = OttoPalette(theme: OttoThemeCatalog.theme(id: "shorelight"))
+    var draft = AutomationFlowDraft()
+    draft.name = "Tip of the day"
+    draft.schedule = AutomationSchedule(frequency: .daily, hour: 9, minute: 0)
+    var tip = AutomationFlowDraft.Step()
+    tip.name = "Tip of the day"
+    tip.task = "Write one practical Otto tip for the community."
+    tip.reviewOnHome = true
+    tip.afterApproval = "Post it in #tips on the Otto Discord"
+    var log = AutomationFlowDraft.Step(parentID: tip.id)
+    log.name = "Log the tip"
+    log.task = "Add {{Tip of the day}} to tips.md with today's date."
+    log.allowChanges = true
+    draft.steps = [tip, log]
+    try render(
+      ZStack {
+        palette.ink
+        AutomationFlowBuilder(services: services, initial: draft) { _ in }
+      }.environment(\.ottoPalette, palette), size: CGSize(width: 1440, height: 1000),
+      to: "\(output)/approval-builder.png", light: true)
+
+    let rootID = try await draft.save(services: services)
+    let run = RoutineRunRecord(
+      routineID: rootID, triggerSummary: "schedule 0 9 * * *",
+      firedAt: .now.addingTimeInterval(-20 * 60), outcome: .completed, durationMs: 41_000,
+      result: "💡 Press ⌃⌥Space anywhere and just say what you want.")
+    try services.routines.appendRun(run)
+    try services.homeReviews.add(
+      HomeReview(
+        title: "Tip of the day", requester: "Tip of the day", draft: run.result ?? "",
+        afterApproval: tip.afterApproval, routineID: rootID, runID: run.runID))
+    try render(
+      ZStack {
+        palette.ink
+        AutomationsView(
+          store: canvas, services: services, routines: services.routines, initialFlowID: rootID)
+      }.environment(\.ottoPalette, palette), size: CGSize(width: 1440, height: 900),
+      to: "\(output)/approval-flow.png", light: true)
+  }
+
   /// The whole journey: empty Automations, the Simple/Advanced choice, the canvas builder
   /// empty and filled, and the saved flow in Flow view.
   @Test func renderJourney() async throws {

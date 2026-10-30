@@ -32,6 +32,33 @@ public struct TelegramIncomingMessage: Codable, Sendable {
       case fileSize = "file_size"
     }
   }
+  /// One size of a photo. Telegram sends several, smallest first.
+  public struct PhotoSize: Codable, Sendable, Equatable {
+    public let fileID: String
+    public let width: Int
+    public let height: Int
+    public let fileSize: Int?
+    enum CodingKeys: String, CodingKey {
+      case fileID = "file_id"
+      case width, height
+      case fileSize = "file_size"
+    }
+  }
+  /// A video, round video note, GIF-style animation or file. Only its Bot API handle is kept.
+  public struct File: Codable, Sendable, Equatable {
+    public let fileID: String
+    public let duration: Int?
+    public let fileSize: Int?
+    public let mimeType: String?
+    public let fileName: String?
+    enum CodingKeys: String, CodingKey {
+      case fileID = "file_id"
+      case duration
+      case fileSize = "file_size"
+      case mimeType = "mime_type"
+      case fileName = "file_name"
+    }
+  }
   public let messageID: Int64
   public let chat: Peer
   public let from: Sender?
@@ -40,14 +67,51 @@ public struct TelegramIncomingMessage: Codable, Sendable {
   public let caption: String?
   public let voice: Audio?
   public let audio: Audio?
+  public let photo: [PhotoSize]?
+  public let video: File?
+  public let videoNote: File?
+  public let animation: File?
+  public let document: File?
+  /// Shared by the photos and videos of one album, which Telegram delivers as separate messages.
+  public let mediaGroupID: String?
   enum CodingKeys: String, CodingKey {
     case messageID = "message_id"
-    case chat, from, text, caption, voice, audio
+    case chat, from, text, caption, voice, audio, photo, video, animation, document
     case senderChat = "sender_chat"
+    case videoNote = "video_note"
+    case mediaGroupID = "media_group_id"
   }
 
   /// The recording to transcribe when the message has no text of its own.
   public var recording: Audio? { text == nil ? voice ?? audio : nil }
+
+  /// The photo or video this message carries, if any. A photo uses its largest size that the
+  /// Bot API will serve; a file counts only when Telegram labels it as an image or a video.
+  public var media: TelegramMedia? {
+    if let photo {
+      let servable = photo.filter { ($0.fileSize ?? 0) <= TelegramMedia.maxBytes }
+      guard let best = servable.max(by: { $0.width * $0.height < $1.width * $1.height })
+      else { return nil }
+      return TelegramMedia(kind: .image, fileID: best.fileID, fileSize: best.fileSize)
+    }
+    if let file = video ?? videoNote ?? animation {
+      return TelegramMedia(
+        kind: .video, fileID: file.fileID, fileSize: file.fileSize, duration: file.duration)
+    }
+    if let document, let type = document.mimeType?.lowercased() {
+      if type.hasPrefix("image/"), let ext = TelegramMedia.imageExtension(forMIMEType: type) {
+        return TelegramMedia(
+          kind: .image, fileID: document.fileID, fileSize: document.fileSize,
+          fileExtension: ext)
+      }
+      if type.hasPrefix("video/") {
+        return TelegramMedia(
+          kind: .video, fileID: document.fileID, fileSize: document.fileSize,
+          duration: document.duration)
+      }
+    }
+    return nil
+  }
 
   public var isPrivateHuman: Bool {
     chat.type == "private" && from?.id == chat.id && from?.isBot == false
@@ -291,7 +355,10 @@ public actor TelegramBotTransport {
   }
 
   /// Downloads a file the bot received into a private temporary folder. The caller removes it.
-  public func download(fileID: String, maxBytes: Int) async throws -> URL {
+  public func download(
+    fileID: String, maxBytes: Int, named name: String = "recording",
+    defaultExtension: String = "oga"
+  ) async throws -> URL {
     struct File: Decodable {
       let filePath: String?
       let fileSize: Int?
@@ -318,7 +385,8 @@ public actor TelegramBotTransport {
         at: directory, withIntermediateDirectories: true,
         attributes: [.posixPermissions: 0o700])
       let ext = (path as NSString).pathExtension
-      let destination = directory.appending(path: "recording.\(ext.isEmpty ? "oga" : ext)")
+      let destination = directory.appending(
+        path: "\(name).\((ext.isEmpty ? defaultExtension : ext).lowercased())")
       try data.write(to: destination, options: .atomic)
       return destination
     } catch is CancellationError {
@@ -375,6 +443,14 @@ public final class TelegramConnector: ObservableObject {
   /// Work for one message that outlives its poll, such as following a run or transcribing a
   /// voice note. Cancelled on stop, disconnect and before a new token connects.
   private var messageTasks: [UUID: Task<Void, Never>] = [:]
+  /// Photos and videos of one album, collected until Telegram stops delivering them.
+  private var pendingAlbums: [String: PendingAlbum] = [:]
+
+  private struct PendingAlbum {
+    var media: [TelegramMedia]
+    var caption: String
+    var generation: Int
+  }
 
   /// One approval sent to Telegram, kept until it is answered, expires or the run moves on.
   private struct PendingApproval {
@@ -658,6 +734,10 @@ public final class TelegramConnector: ObservableObject {
       await handleRecording(recording, in: message, client: client)
       return
     }
+    if message.text == nil, let media = message.media {
+      await handleMedia(media, in: message, client: client)
+      return
+    }
     guard let text = message.text,
       let command = TelegramCommand.parse(text, addressedTo: username),
       message.isPrivateHuman || message.isGroupHuman
@@ -697,7 +777,7 @@ public final class TelegramConnector: ObservableObject {
     switch command {
     case .help:
       try? await client.send(
-        "Otto commands:\n/bots — list the Otto bots you can reach\n/use @handle — talk to that bot in this chat\n/bot @handle message — ask one bot once\nPlain text and voice notes go to this chat's bot. The Mac owner decides which bots are allowed. "
+        "Otto commands:\n/bots — list the Otto bots you can reach\n/use @handle — talk to that bot in this chat\n/bot @handle message — ask one bot once\nPlain text, voice notes, photos and videos go to this chat's bot. Start a caption with /bot @handle to send media to one bot. The Mac owner decides which bots are allowed. "
           + (approvalsFromTelegram
             ? "Tool approvals arrive here with Approve and Deny buttons."
             : "Tool approvals stay in Otto on the Mac unless the owner allows them here."),
@@ -931,6 +1011,127 @@ public final class TelegramConnector: ObservableObject {
       await connector.sendPrompt(
         caption.isEmpty ? transcript : "\(caption)\n\n\(transcript)", to: bot, client: client,
         chat: chat)
+    }
+  }
+
+  /// A photo or video from the paired person goes to this chat's bot, or to the bot a
+  /// `/bot @handle` caption names. Photos and videos of one album arrive as separate messages and
+  /// are sent together once Telegram stops delivering them. Nothing is downloaded for anyone else.
+  private func handleMedia(
+    _ media: TelegramMedia, in message: TelegramIncomingMessage, client: TelegramBotTransport
+  ) async {
+    guard message.isPrivateHuman || message.isGroupHuman,
+      message.isAuthorized(
+        privateChatID: approvedChatID, groupChatID: approvedGroupID,
+        groupSenderID: approvedGroupSenderID)
+    else { return }
+    let chat = message.chat.id
+    let caption = message.caption ?? ""
+    guard let album = message.mediaGroupID else {
+      deliver([media], caption: caption, client: client, chat: chat)
+      return
+    }
+    let key = "\(chat):\(album)"
+    var pending = pendingAlbums[key] ?? PendingAlbum(media: [], caption: "", generation: 0)
+    if pending.media.count < TelegramMedia.maxAlbumItems { pending.media.append(media) }
+    // Telegram puts an album's caption on one of its items, not always the first.
+    if pending.caption.isEmpty { pending.caption = caption }
+    pending.generation += 1
+    pendingAlbums[key] = pending
+    let generation = pending.generation
+    track { connector in
+      try? await Task.sleep(for: .milliseconds(1_500))
+      guard !Task.isCancelled, let album = connector.pendingAlbums[key],
+        album.generation == generation
+      else { return }
+      connector.pendingAlbums[key] = nil
+      connector.deliver(album.media, caption: album.caption, client: client, chat: chat)
+    }
+  }
+
+  /// Downloads the media into the workspace's chat attachments, takes stills (and, when voice
+  /// notes are supported, the sound) from videos, and sends one prompt to the chosen bot.
+  private func deliver(
+    _ media: [TelegramMedia], caption: String, client: TelegramBotTransport, chat: Int64
+  ) {
+    var bot = activeBot(for: chat)
+    let route = TelegramMedia.route(caption: caption, botUsername: username)
+    let text = route.text
+    if let handle = route.botHandle {
+      guard let named = allowedBot(matching: handle) else {
+        Task {
+          try? await client.send(
+            "No allowed Otto bot matches \(handle). Send /bots to see them.", to: chat)
+        }
+        return
+      }
+      bot = named
+    }
+    guard let bot, let services else {
+      Task { try? await client.send(self.noBotsMessage, to: chat) }
+      return
+    }
+    let servable = media.filter(\.isServable)
+    let skipped = media.count - servable.count
+    guard !servable.isEmpty else {
+      Task {
+        try? await client.send(
+          "Telegram only lets bots download files up to 20 MB. Send a smaller or compressed version.",
+          to: chat)
+      }
+      return
+    }
+    let directory = TelegramMediaStore.directory(workspacePath: services.defaultWorkspacePath)
+    let transcribe = transcribeRecording
+    // Downloading and reading videos can take a while; polling must not wait for it.
+    track { connector in
+      var images: [String] = []
+      var videos: [TelegramVideoNote] = []
+      var failed = skipped
+      for item in servable {
+        guard !Task.isCancelled else { return }
+        do {
+          let file = try await client.download(
+            fileID: item.fileID, maxBytes: TelegramMedia.maxBytes, named: "media",
+            defaultExtension: item.fileExtension)
+          defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+          let kept = try TelegramMediaStore.keep(file, kind: item.kind, in: directory)
+          switch item.kind {
+          case .image:
+            images.append(kept.path)
+          case .video:
+            let frames = (try? await TelegramVideoFrames.extract(from: kept)) ?? []
+            var transcript: String?
+            if let transcribe,
+              (item.duration ?? 0) <= TelegramMedia.maxTranscribedVideoSeconds
+            {
+              // Best effort: a silent clip or one with no speech is still worth sending.
+              transcript = try? await transcribe(kept)
+            }
+            videos.append(
+              TelegramVideoNote(
+                path: kept.path, duration: item.duration, frames: frames.map(\.path),
+                transcript: transcript?.trimmingCharacters(in: .whitespacesAndNewlines)))
+          }
+        } catch {
+          if Task.isCancelled { return }
+          failed += 1
+        }
+      }
+      guard !Task.isCancelled else { return }
+      guard !images.isEmpty || !videos.isEmpty else {
+        try? await client.send(
+          "Couldn't download that from Telegram. Try sending it again.", to: chat)
+        return
+      }
+      if failed > 0 {
+        try? await client.send(
+          "\(failed) item\(failed == 1 ? "" : "s") couldn't be downloaded; sending the rest.",
+          to: chat)
+      }
+      await connector.sendPrompt(
+        TelegramMediaStore.prompt(caption: text, images: images, videos: videos), to: bot,
+        client: client, chat: chat)
     }
   }
 }

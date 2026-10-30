@@ -175,10 +175,13 @@ struct AutomationFlowBuilder: View {
         badge: .tag(step.allowChanges ? "CAN EDIT" : "READ ONLY"),
         task: needsTask ? "Add a task for this agent" : AutomationsView.firstLine(of: step.task),
         taskIsPlaceholder: needsTask,
-        meta: step.parentID == nil
-          ? nil
-          : (step.when == .succeeded
-            ? "on success" : step.when == .failed ? "if it fails" : "either way"),
+        meta: [
+          step.parentID == nil
+            ? nil
+            : (step.when == .succeeded
+              ? "on success" : step.when == .failed ? "if it fails" : "either way"),
+          step.reviewOnHome ? "asks you first" : nil,
+        ].compactMap { $0 }.joined(separator: " · ").nilIfEmpty,
         trailing: destinationLabel(step.destination),
         childCount: draft.children(of: step.id).count, selected: selected)
     }
@@ -365,6 +368,24 @@ struct AutomationFlowBuilder: View {
           Text("Can make changes").tag(true)
         }
         .pickerStyle(.segmented).labelsHidden()
+      }
+      field("Check with you first?") {
+        Toggle("Ask me on Home to approve each answer", isOn: step.reviewOnHome)
+          .font(.ottoDisplay(12))
+          .accessibilityIdentifier("automations.builder.review")
+        if step.wrappedValue.reviewOnHome {
+          TextField(
+            "When I approve, do this (optional)", text: step.afterApproval, axis: .vertical
+          )
+          .textFieldStyle(.roundedBorder)
+          .lineLimit(1...3)
+          Text(
+            draft.children(of: step.wrappedValue.id).isEmpty
+              ? "The answer waits on Home until you approve, comment or reject."
+              : "The agents after this wait until you approve it on Home."
+          )
+          .font(.ottoDisplay(11)).foregroundStyle(palette.muted)
+        }
       }
       field("Results go to") {
         Picker("Results", selection: step.destination) {
@@ -637,6 +658,9 @@ struct AutomationFlowDraft: Equatable {
     var model: String?
     var accountID: UUID?
     var allowChanges = false
+    /// Each answer waits on Home for approval before the agents after it run.
+    var reviewOnHome = false
+    var afterApproval = ""
     var destination: AutomationEditor.Destination = .none
     /// The card a Home-card step refreshes, when editing one that already has a card.
     var cardID: UUID?
@@ -736,6 +760,9 @@ struct AutomationFlowDraft: Equatable {
         default: .canvas
         }
       routine.quietWhenUnchanged = step.destination == .brief
+      routine.reviewOnHome = step.reviewOnHome ? true : nil
+      let action = step.afterApproval.trimmingCharacters(in: .whitespacesAndNewlines)
+      routine.afterApproval = step.reviewOnHome && !action.isEmpty ? action : nil
       let saved = try await services.saveRoutine(routine)
       if let cardID, step.destination == .card {
         _ = try? services.homeCards.update(id: cardID) { $0.automationID = saved.id }
@@ -766,6 +793,8 @@ extension AutomationFlowDraft.Step {
     model = routine.model
     accountID = routine.accountID
     allowChanges = routine.permissionMode == AgentPermissionMode.workspaceWrite.rawValue
+    reviewOnHome = routine.needsReview
+    afterApproval = routine.afterApproval ?? ""
     switch routine.delivery {
     case .brief: destination = .brief
     case .homeCard(let id):
@@ -775,4 +804,8 @@ extension AutomationFlowDraft.Step {
     default: destination = .none
     }
   }
+}
+
+extension String {
+  fileprivate var nilIfEmpty: String? { isEmpty ? nil : self }
 }

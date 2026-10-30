@@ -44,6 +44,8 @@ extension AutomationsView {
     let runs: [UUID: [RoutineRunRecord]]
     /// Status of each agent node that still exists.
     let nodes: [UUID: NodeStatus]
+    /// Runs whose answer is waiting on Home for the person to approve.
+    var runsAwaitingApproval: Set<UUID> = []
 
     func children(of id: UUID) -> [Routine] {
       steps.filter { $0.runAfter?.routineID == id }
@@ -76,12 +78,18 @@ extension AutomationsView {
       runs[id]?.first { $0.outcome != .skipped } ?? runs[id]?.first
     }
 
+    /// Its latest answer is waiting on Home: done working, but the flow is held for the person.
+    func isAwaitingApproval(_ routine: Routine) -> Bool {
+      latestRun(routine.id).map { runsAwaitingApproval.contains($0.runID) } ?? false
+    }
+
     func state(of routine: Routine) -> StepState {
       if let run = latestRun(routine.id) {
         switch run.outcome {
         case .running:
           if let nodeID = run.agentNodeID, nodes[nodeID] == .waiting { return .needsYou }
           return .running
+        case .completed where runsAwaitingApproval.contains(run.runID): return .needsYou
         case .completed where routine.enabled: return .done
         case .failed where routine.enabled: return .failed
         case .noChange where routine.enabled: return .nothingNew
@@ -99,7 +107,9 @@ extension AutomationsView {
     let runs = Dictionary(
       grouping: routines.recentRuns(limit: 800).filter { ids.contains($0.routineID) },
       by: \.routineID)
-    return FlowSnapshot(steps: steps, runs: runs, nodes: live.statuses)
+    return FlowSnapshot(
+      steps: steps, runs: runs, nodes: live.statuses,
+      runsAwaitingApproval: Set(services.homeReviews.open.compactMap(\.runID)))
   }
 
   // MARK: Layout
@@ -225,7 +235,10 @@ extension AutomationsView {
 
   /// The floating bar under the canvas: run the flow, or see that it is running.
   private func runBar(root: Routine, tree: [Routine], snapshot: FlowSnapshot) -> some View {
-    let live = tree.filter { snapshot.state(of: $0).isLive }
+    // A step waiting for approval isn't working, so it doesn't count as running.
+    let live = tree.filter {
+      snapshot.state(of: $0).isLive && !snapshot.isAwaitingApproval($0)
+    }
     let started = tree.compactMap { snapshot.latestRun($0.id) }
       .filter { $0.outcome == .running }.map(\.firedAt).min()
     return HStack(spacing: 10) {
@@ -487,7 +500,13 @@ extension AutomationsView {
             Text("\(agentName(routine.target)) · \(triggerLabel(routine))")
               .font(.ottoDisplay(12)).foregroundStyle(palette.muted).lineLimit(2)
           }
-          if state == .needsYou {
+          if state == .needsYou, snapshot.isAwaitingApproval(routine) {
+            callout(
+              title: "Waiting for your approval",
+              detail:
+                "Its answer is on Home to approve, comment on or reject. The steps after it start once you approve.",
+              color: palette.amber, action: nil)
+          } else if state == .needsYou {
             callout(
               title: "Waiting for you",
               detail: "\(routine.name) has a question or wants approval before it carries on.",
@@ -499,7 +518,9 @@ extension AutomationsView {
               detail: latest?.error ?? routine.lastError ?? "The agent stopped with an error.",
               color: palette.red, action: ("Retry", { run(routine) }))
           }
-          latestOutput(routine, state: state, latest: latest, session: session)
+          latestOutput(
+            routine, state: state, latest: latest, session: session,
+            awaitingApproval: snapshot.isAwaitingApproval(routine))
           VStack(alignment: .leading, spacing: 8) {
             HStack {
               Text("INSTRUCTION").font(.ottoMicro).tracking(2).foregroundStyle(palette.muted)
@@ -535,6 +556,13 @@ extension AutomationsView {
                 Button("Skip that run") { update(routine) { $0.concurrency = .skip } }
                 Button("Run once it’s free") { update(routine) { $0.concurrency = .queueLatest } }
               }
+            }
+            settingRow("Approval") {
+              Menu(routine.needsReview ? "Ask me on Home first" : "Carry straight on") {
+                Button("Carry straight on") { update(routine) { $0.reviewOnHome = nil } }
+                Button("Ask me on Home first") { update(routine) { $0.reviewOnHome = true } }
+              }
+              .help("Each answer waits on Home for your approval before the next step")
             }
             settingRow("Permissions") {
               Menu(canWrite(routine) ? "Can make changes" : "Read only") {
@@ -615,19 +643,22 @@ extension AutomationsView {
 
   /// What the step produced last time, or that it is working right now.
   @ViewBuilder private func latestOutput(
-    _ routine: Routine, state: StepState, latest: RoutineRunRecord?, session: UUID?
+    _ routine: Routine, state: StepState, latest: RoutineRunRecord?, session: UUID?,
+    awaitingApproval: Bool = false
   ) -> some View {
+    // A finished answer waiting on Home shows the answer, not a "working" timer.
+    let working = state.isLive && !awaitingApproval
     if state == .running || state == .needsYou || latest?.result != nil {
       VStack(alignment: .leading, spacing: 8) {
         HStack {
-          Text(state.isLive ? "RUNNING NOW" : "LATEST OUTPUT")
+          Text(working ? "RUNNING NOW" : awaitingApproval ? "AWAITING APPROVAL" : "LATEST OUTPUT")
             .font(.ottoMicro).tracking(2).foregroundStyle(palette.muted)
           Spacer()
-          if let latest, !state.isLive {
+          if let latest, !working {
             Text(Self.ago(latest.firedAt)).font(.ottoMono(10.5)).foregroundStyle(palette.muted)
           }
         }
-        if state.isLive, let latest {
+        if working, let latest {
           HStack(spacing: 8) {
             ProgressView().controlSize(.small)
             TimelineView(.periodic(from: .now, by: 1)) { context in

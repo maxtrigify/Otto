@@ -39,6 +39,41 @@ struct AutomationFlowDraftTests {
     #expect(routines.flowRoot(of: digest.id)?.id == rootID)
   }
 
+  @Test func aCanvasStepCanAskForApprovalAndOthersCarryStraightOn() async throws {
+    let (services, workspace) = try services()
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    var draft = AutomationFlowJourney.sampleDraft()
+    let repliesIndex = try #require(draft.steps.firstIndex { $0.name == "Reply drafter" })
+    draft.steps[repliesIndex].reviewOnHome = true
+    draft.steps[repliesIndex].afterApproval = "  Send them from my Gmail  "
+    let rootID = try await draft.save(services: services)
+
+    let replies = try #require(services.routines.routines.first { $0.name == "Reply drafter" })
+    #expect(replies.needsReview)
+    #expect(replies.afterApproval == "Send them from my Gmail")
+    // Only the step that asked waits; the rest are saved exactly as before.
+    for other in services.routines.routines where other.id != replies.id {
+      #expect(!other.needsReview)
+      #expect(other.reviewOnHome == nil)
+      #expect(other.afterApproval == nil)
+    }
+
+    var edit = AutomationFlowDraft(
+      flowFrom: try #require(services.routines.routine(id: rootID)),
+      in: services.routines.routines)
+    let loaded = try #require(edit.steps.first { $0.name == "Reply drafter" })
+    #expect(loaded.reviewOnHome)
+    #expect(loaded.afterApproval == "Send them from my Gmail")
+
+    // Turning it off clears the action too, so nothing is left waiting.
+    let index = try #require(edit.steps.firstIndex { $0.name == "Reply drafter" })
+    edit.steps[index].reviewOnHome = false
+    _ = try await edit.save(services: services)
+    let cleared = try #require(services.routines.routine(id: replies.id))
+    #expect(cleared.reviewOnHome == nil)
+    #expect(cleared.afterApproval == nil)
+  }
+
   @Test func editingAFlowUpdatesInPlaceAndDeletesRemovedAgents() async throws {
     let (services, workspace) = try services()
     defer { try? FileManager.default.removeItem(at: workspace) }
