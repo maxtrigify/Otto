@@ -74,6 +74,8 @@ struct AgentConversationBody: View {
   /// Terminals this conversation started that are waiting on the person.
   var waitingTerminals: [ChatTerminalNotice] = []
   var openTerminal: (UUID) -> Void = { _ in }
+  /// Speech from the voice button that was not a command, added to the composer to review.
+  var voiceInsertion: ChatVoiceInsertion? = nil
 
   @State private var input = ""
   @State private var selectedRunID: UUID?
@@ -307,6 +309,11 @@ struct AgentConversationBody: View {
       }
       .onChange(of: input) { _, text in
         ComposerDrafts.save(text, for: ComposerDrafts.agentKey(node.id))
+      }
+      .onChange(of: voiceInsertion) { _, insertion in
+        guard let insertion, acceptsComposerInput else { return }
+        input = input.isEmpty ? insertion.text : input + " " + insertion.text
+        composerFocused = true
       }
       .onChange(of: draftAttachments) { _, attachments in
         ComposerDrafts.saveAttachments(attachments, for: ComposerDrafts.agentKey(node.id))

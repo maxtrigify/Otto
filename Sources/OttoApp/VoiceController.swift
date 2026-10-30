@@ -183,8 +183,22 @@ final class VoiceController: ObservableObject {
   @Published private(set) var previewError: String?
   @Published private(set) var talkTransition: VoiceTalkTransition?
   @Published private(set) var pushToTalkHeld = false
+  /// The on-device mode being held down (button or shortcut) in Push to Talk, if any.
+  @Published private(set) var heldLocalMode: VoiceInteractionMode?
+  /// True between releasing an on-device capture and its transcript arriving. Batch engines
+  /// such as Whistle and Parakeet show nothing while listening, so this is their feedback.
+  @Published private(set) var localTranscribing = false
+  /// The on-device mode whose result the voice control shows, until the next capture starts.
+  @Published private(set) var lastLocalResultMode: VoiceInteractionMode?
+  /// Speech a hold in Chat heard that was not a command, for the open chat's composer.
+  @Published private(set) var chatVoiceInsertion: ChatVoiceInsertion?
+  @Published private(set) var lastCommandWentToChat = false
+  /// Set by a hold that started in Chat until its command result arrives.
+  private var heldFallsBackToChat = false
   @Published private(set) var parakeetInstallationState = ParakeetInstallationState.notInstalled
   @Published private(set) var parakeetWarmState = ParakeetWarmState.inactive
+  @Published private(set) var whistleInstallationState = WhistleInstallationState.notInstalled
+  @Published private(set) var whistleTermsAccepted = WhistleTerms.isAccepted()
   @Published private(set) var wakeWordStatus = WakeWordStatus.disabled
   @Published private(set) var wakeQualificationRecordingState =
     WakeQualificationRecordingState.idle
@@ -261,15 +275,17 @@ final class VoiceController: ObservableObject {
   private let store: CanvasStore
   private let services: ApplicationServices
   private let parakeetInstaller: ParakeetInstaller
+  private let whistleInstaller: WhistleInstaller
   private var dictation: DictationSession?
   private var dictationTask: Task<Void, Never>?
-  private var dictationListening = false
+  // Published so the voice control shows Listening while on-device capture runs.
+  @Published private var dictationListening = false
   private let dictationDraftStore = DictationDraftStore()
   private let captureLease = VoiceCaptureLease()
   private var captureOwner: String?
   private var command: LocalCommandSession?
   private var commandTask: Task<Void, Never>?
-  private var commandListening = false
+  @Published private var commandListening = false
   private let observability: ObservabilityStore?
   private let workspacePath: String
   /// Starts with the active workspace and fills in from a background scan, so launch never
@@ -280,6 +296,7 @@ final class VoiceController: ObservableObject {
   private var traceTask: Task<Void, Never>?
   private var previewTask: Task<Void, Never>?
   private var parakeetInstallerTask: Task<Void, Never>?
+  private var whistleInstallerTask: Task<Void, Never>?
   private var parakeetRecognizer: ParakeetWarmRecognizer?
   private var parakeetPrewarmTask: Task<Void, Never>?
   private var wakeWordDetector: (any AcousticWakeWordDetecting)?
@@ -298,6 +315,8 @@ final class VoiceController: ObservableObject {
   private var lastVoiceContext: VoiceContext?
   private var knownNodeStatuses: [UUID: NodeStatus] = [:]
   private var pushToTalkMonitor: VoicePushToTalkMonitor?
+  private var commandHoldMonitor: VoicePushToTalkMonitor?
+  private var dictateHoldMonitor: VoicePushToTalkMonitor?
   private var cloudMicrophoneEnabled = false
 
   init(
@@ -317,6 +336,8 @@ final class VoiceController: ObservableObject {
     self.services = services
     let parakeetInstaller = ParakeetInstaller()
     self.parakeetInstaller = parakeetInstaller
+    let whistleInstaller = WhistleInstaller()
+    self.whistleInstaller = whistleInstaller
     self.knownWorkspaces = [workspacePath]
     let savedEngine =
       VoiceEngine(rawValue: UserDefaults.standard.string(forKey: "otto.voice.engine") ?? "")
@@ -385,6 +406,13 @@ final class VoiceController: ObservableObject {
       for await state in parakeetInstaller.updates {
         guard !Task.isCancelled else { break }
         self?.parakeetInstallationState = state
+        if state == .installed { await self?.resetLocalSpeechSessions() }
+      }
+    }
+    whistleInstallerTask = Task { [weak self, whistleInstaller] in
+      for await state in whistleInstaller.updates {
+        guard !Task.isCancelled else { break }
+        self?.whistleInstallationState = state
         if state == .installed { await self?.resetLocalSpeechSessions() }
       }
     }
@@ -550,6 +578,7 @@ final class VoiceController: ObservableObject {
     commandTask?.cancel()
     previewTask?.cancel()
     parakeetInstallerTask?.cancel()
+    whistleInstallerTask?.cancel()
     parakeetPrewarmTask?.cancel()
     wakeWordTask?.cancel()
   }
@@ -629,13 +658,118 @@ final class VoiceController: ObservableObject {
         guard let self else { return }
         Task {
           if operatingMode == .pushToTalk || operatingMode == .outputOnly {
-            if pressed { await beginPushToTalk() } else { await endPushToTalk() }
+            if pressed { await beginHeldVoice() } else { await endHeldVoice() }
           } else if pressed, operatingMode == .alwaysListening {
             await toggleTalk()
           }
         }
       }
     )
+    // In Push to Talk, Command and Dictate follow the same gesture as Talk: hold to listen,
+    // release to transcribe. Handled presses are consumed, so the menu's toggle does not also
+    // fire; in other modes the monitors stand aside and the menu toggles as before.
+    commandHoldMonitor = localHoldMonitor(.command) { [weak self] in self?.commandShortcut }
+    dictateHoldMonitor = localHoldMonitor(.dictate) { [weak self] in self?.dictateShortcut }
+  }
+
+  private func localHoldMonitor(
+    _ mode: VoiceInteractionMode, shortcut: @escaping () -> VoiceShortcut?
+  ) -> VoicePushToTalkMonitor {
+    VoicePushToTalkMonitor(
+      shortcut: { shortcut() ?? mode.defaultShortcut },
+      isEnabled: { [weak self] in
+        self?.spaceIsActive == true && self?.localVoiceHoldsToTalk == true
+      },
+      changed: { [weak self] pressed in
+        Task {
+          if pressed { await self?.beginHeldLocal(mode) } else { await self?.endHeldLocal() }
+        }
+      })
+  }
+
+  /// What the last on-device command or dictation heard and did, for the voice control. Short
+  /// enough for one line; `localVoiceResultDetail` carries the full explanation.
+  var localVoiceResult: String? {
+    switch lastLocalResultMode {
+    case .command:
+      let heard = commandUpdate.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+      switch commandUpdate.outcome {
+      case .completed(_, let confirmation): return confirmation
+      case .unrecognized, .clarification:
+        if heard.isEmpty { return "Heard nothing" }
+        return lastCommandWentToChat
+          ? "Added “\(heard)” to chat" : "Heard “\(heard)”: not a command"
+      case .sleeping: return nil
+      case nil: return commandUpdate.detail.isEmpty ? nil : commandUpdate.detail
+      }
+    case .dictate:
+      let heard = dictationUpdate.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+      if dictationUpdate.delivered, !heard.isEmpty { return "Typed “\(heard)”" }
+      if heard.isEmpty { return "Heard nothing" }
+      return dictationUpdate.detail.isEmpty ? "Heard “\(heard)”" : dictationUpdate.detail
+    case .talk, nil:
+      return nil
+    }
+  }
+
+  var localVoiceResultDetail: String? {
+    switch lastLocalResultMode {
+    case .command:
+      switch commandUpdate.outcome {
+      case .unrecognized where lastCommandWentToChat, .clarification where lastCommandWentToChat:
+        return "Not a command, so it went into the chat box. Press Return to send it."
+      case .unrecognized(let reason), .clarification(let reason): return reason
+      default: return commandUpdate.detail.isEmpty ? nil : commandUpdate.detail
+      }
+    case .dictate: return dictationUpdate.detail.isEmpty ? nil : dictationUpdate.detail
+    case .talk, nil: return nil
+    }
+  }
+
+  /// Push to Talk and Output Only use a hold gesture for every voice action.
+  var localVoiceHoldsToTalk: Bool {
+    operatingMode == .pushToTalk || operatingMode == .outputOnly
+  }
+
+  var isHoldingVoice: Bool { pushToTalkHeld || heldLocalMode != nil }
+
+  /// Holding the voice button or Talk shortcut: realtime Talk when a cloud voice key is stored,
+  /// otherwise on-device Command, so the gesture works without a cloud provider. From Chat,
+  /// speech that is not a command goes into the chat box instead.
+  func beginHeldVoice(fallingBackToChat: Bool = false) async {
+    if hasAPIKey {
+      await beginPushToTalk()
+    } else {
+      await beginHeldLocal(.command)
+      heldFallsBackToChat = fallingBackToChat
+    }
+  }
+
+  func endHeldVoice() async {
+    if heldLocalMode != nil { await endHeldLocal() } else { await endPushToTalk() }
+  }
+
+  /// Starts on-device listening for a hold. Releasing calls `endHeldLocal`.
+  func beginHeldLocal(_ mode: VoiceInteractionMode) async {
+    guard heldLocalMode == nil, mode != .talk else { return }
+    heldLocalMode = mode
+    heldFallsBackToChat = false
+    switch mode {
+    case .command where !(activeMode == .command && commandListening): await toggleCommand()
+    case .dictate where !(activeMode == .dictate && dictationListening): await toggleDictation()
+    default: break
+    }
+  }
+
+  /// Ends a hold: stops listening, then transcribes and runs (Command) or delivers (Dictate).
+  func endHeldLocal() async {
+    guard let mode = heldLocalMode else { return }
+    heldLocalMode = nil
+    switch mode {
+    case .command where activeMode == .command && commandListening: await toggleCommand()
+    case .dictate where activeMode == .dictate && dictationListening: await toggleDictation()
+    default: break
+    }
   }
 
   private func saveNotificationPolicy() {
@@ -770,7 +904,10 @@ final class VoiceController: ObservableObject {
     let command = ensureCommandSession()
     if activeMode == .command, commandListening {
       commandListening = false
+      localTranscribing = true
       await command.stopAndExecute()
+      localTranscribing = false
+      lastLocalResultMode = .command
       releaseCapture(owner: "command")
       activeMode = nil
       await reconcileWakeWord()
@@ -787,6 +924,8 @@ final class VoiceController: ObservableObject {
     }
     activeMode = .command
     commandListening = true
+    lastLocalResultMode = nil
+    lastCommandWentToChat = false
     await command.start()
   }
 
@@ -797,7 +936,10 @@ final class VoiceController: ObservableObject {
     let dictation = ensureDictationSession()
     if activeMode == .dictate, dictationListening {
       dictationListening = false
+      localTranscribing = true
       await dictation.stopAndDeliver(to: focusedDictationTarget())
+      localTranscribing = false
+      lastLocalResultMode = .dictate
       releaseCapture(owner: "dictation")
       activeMode = nil
       await reconcileWakeWord()
@@ -813,6 +955,7 @@ final class VoiceController: ObservableObject {
       }
       activeMode = .dictate
       dictationListening = true
+      lastLocalResultMode = nil
       await dictation.start()
     }
   }
@@ -896,6 +1039,7 @@ final class VoiceController: ObservableObject {
       for await update in created.updates {
         guard !Task.isCancelled else { break }
         self?.commandUpdate = update
+        if let outcome = update.outcome { self?.handOffToChat(outcome, heard: update.transcript) }
         if case .completed? = update.outcome {
           // Ticks "Say a command" on Home's Getting started card.
           UserDefaults.standard.set(true, forKey: FirstRunPreferences.voiceCommandUsed)
@@ -950,6 +1094,24 @@ final class VoiceController: ObservableObject {
     await parakeetInstaller.install()
   }
 
+  var isWhistleInstalled: Bool {
+    WhistleRuntimeConfiguration.installed() != nil
+  }
+
+  /// Records agreement to Whistle's license terms for the pinned files. Downloading needs it.
+  func acceptWhistleTerms() {
+    WhistleTerms.accept()
+    whistleTermsAccepted = true
+  }
+
+  func installWhistle() async {
+    await whistleInstaller.install()
+  }
+
+  func removeWhistle() async {
+    await whistleInstaller.remove()
+  }
+
   var localSpeechEngineDetail: String {
     switch localSpeechEngine {
     case .apple:
@@ -958,6 +1120,10 @@ final class VoiceController: ObservableObject {
       "Installed locally. Audio is processed offline with sherpa-onnx."
     case .parakeet:
       "Runtime and model are not installed yet. Command and Dictate will show an installation error."
+    case .whistle where isWhistleInstalled:
+      "Installed locally. Audio is processed offline by Cactus Compute's needle engine."
+    case .whistle:
+      "Not downloaded yet. Download it below after reviewing its license."
     }
   }
 
@@ -976,6 +1142,13 @@ final class VoiceController: ObservableObject {
         return UnavailableSpeechTranscriber(
           message: "Install the Parakeet runtime and model in Voice Settings first."
         )
+      }
+    case .whistle:
+      if let configuration = WhistleRuntimeConfiguration.installed() {
+        return WhistleSpeechTranscriber(configuration: configuration)
+      } else {
+        return UnavailableSpeechTranscriber(
+          message: "Download Whistle in Voice Settings first.")
       }
     }
   }
@@ -1265,6 +1438,20 @@ final class VoiceController: ObservableObject {
     guard let summary = try? await relayQualificationStore.summary() else { return }
     relayQualificationCaseCount = summary.cases
     relayQualificationSpeakerCount = summary.speakers
+  }
+
+  /// A Chat hold's speech that is not a command goes into the open chat's composer.
+  private func handOffToChat(_ outcome: LocalVoiceCommandOutcome, heard: String) {
+    defer { heldFallsBackToChat = false }
+    let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard heldFallsBackToChat, !text.isEmpty else { return }
+    switch outcome {
+    case .unrecognized, .clarification:
+      chatVoiceInsertion = ChatVoiceInsertion(text: text)
+      lastCommandWentToChat = true
+    case .completed, .sleeping:
+      break
+    }
   }
 
   /// Dictation lands on the focused agent or terminal node; anything else has no harness.
@@ -1619,4 +1806,10 @@ private final class UnavailableSpeechTranscriber: SpeechTranscriber, @unchecked 
   }
 
   func stopTranscribing() async {}
+}
+
+/// One piece of speech for the chat composer; each has its own id so repeats still arrive.
+struct ChatVoiceInsertion: Equatable {
+  let id = UUID()
+  let text: String
 }

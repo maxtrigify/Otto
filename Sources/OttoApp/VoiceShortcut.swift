@@ -31,6 +31,7 @@ enum VoiceOperatingMode: String, CaseIterable, Identifiable {
 enum LocalSpeechEngine: String, CaseIterable, Identifiable {
   case apple
   case parakeet
+  case whistle
 
   var id: String { rawValue }
 
@@ -38,6 +39,7 @@ enum LocalSpeechEngine: String, CaseIterable, Identifiable {
     switch self {
     case .apple: "Apple On-Device"
     case .parakeet: "Parakeet v3 · Experimental"
+    case .whistle: "Whistle · Cactus Compute"
     }
   }
 
@@ -45,6 +47,8 @@ enum LocalSpeechEngine: String, CaseIterable, Identifiable {
     switch self {
     case .apple: "Built into macOS; streaming partial transcripts."
     case .parakeet: "Higher-accuracy 25-language model; about 643 MB plus runtime."
+    case .whistle:
+      "Fast open-source model for English, German, French, Spanish, Italian, Dutch and Polish; about 18 MB."
     }
   }
 }
