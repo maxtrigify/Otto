@@ -23,9 +23,35 @@
   "build": {
     "appId": "io.openotto.desktop",
     "productName": "Otto",
-    "files": ["src/**", "renderer/**", "node_modules/@xterm/**", "package.json"],
-    "extraResources": [{ "from": "bin/${platform}-${arch}", "to": "bin", "filter": ["**/*"] }],
-    "win": { "target": ["nsis"], "artifactName": "Otto-Setup-${version}-${arch}.${ext}" },
-    "linux": { "category": "Development", "maintainer": "Otto <hello@openotto.io>" }
-  }
+    "files": [
+      "src/**",
+      "renderer/**",
+      "node_modules/@xterm/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "bin/${platform}-${arch}",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Otto-Setup-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "category": "Development",
+      "maintainer": "Otto <hello@openotto.io>"
+    }
+  },
+  "author": {
+    "name": "Otto",
+    "email": "hello@openotto.io"
+  },
+  "homepage": "https://openotto.io"
 }

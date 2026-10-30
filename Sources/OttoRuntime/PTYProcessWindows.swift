@@ -188,7 +188,8 @@
     public func forceTerminate() throws { _ = TerminateJobObject(job, 1) }
 
     private func startReading() {
-      let handle = outputRead
+      // Only this thread reads the pipe; the handle is closed after the stream finishes.
+      nonisolated(unsafe) let handle = outputRead
       let continuation = outputContinuation
       Thread.detachNewThread {
         var buffer = [UInt8](repeating: 0, count: 16_384)

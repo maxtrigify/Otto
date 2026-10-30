@@ -12,7 +12,9 @@ const [workspace, outputDirectory] = process.argv.slice(2);
 const port = 9333;
 fs.mkdirSync(outputDirectory, { recursive: true });
 
-const app = spawn(electron, ['.', `--remote-debugging-port=${port}`], {
+// CI Linux runners cannot set up Chromium's user-namespace sandbox; the app itself keeps it.
+const linuxCI = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : [];
+const app = spawn(electron, ['.', `--remote-debugging-port=${port}`, ...linuxCI], {
   cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
   env: { ...process.env, OTTO_DESKTOP_WORKSPACE: workspace },
   stdio: 'inherit',

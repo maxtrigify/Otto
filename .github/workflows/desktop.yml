@@ -1,6 +1,6 @@
-# Builds ottod for Windows, drives it through the desktop bridge (ConPTY end to end), packages the
-# Otto desktop installer and screenshots the real app running on Windows.
-name: Windows
+# Builds ottod for Windows and Linux, drives it through the desktop bridge (ConPTY / Unix PTY end
+# to end), screenshots the real app on each platform and packages the installers.
+name: Desktop
 
 on:
   push:
@@ -92,3 +92,57 @@ jobs:
         with:
           name: otto-windows-installer
           path: Apps/OttoDesktop/dist/*.exe
+
+  linux-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ottod
+        run: |
+          docker run --rm -v "$PWD":/src -w /src swift:6.2-noble \
+            swift build -c release --product ottod --static-swift-stdlib -Xswiftc -warnings-as-errors
+          mkdir -p Apps/OttoDesktop/bin/linux-x64
+          cp .build/release/ottod Apps/OttoDesktop/bin/linux-x64/
+          sudo chown -R "$USER" .build Apps/OttoDesktop/bin
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install desktop dependencies
+        working-directory: Apps/OttoDesktop
+        run: npm ci
+
+      - name: Bridge tests against ottod (Unix PTY)
+        working-directory: Apps/OttoDesktop
+        run: OTTOD_PATH="$PWD/bin/linux-x64/ottod" node --test --test-timeout=60000 test/ottod.test.js
+
+      - name: Smoke test the desktop app
+        working-directory: Apps/OttoDesktop
+        run: |
+          workspace="$RUNNER_TEMP/Demo Project"
+          mkdir -p "$workspace" && echo "# Demo" > "$workspace/README.md"
+          OTTOD_PATH="$PWD/bin/linux-x64/ottod" xvfb-run -a -s "-screen 0 1280x820x24" \
+            node scripts/smoke.mjs "$workspace" "$RUNNER_TEMP/smoke"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-screenshots
+          path: ${{ runner.temp }}/smoke/*.png
+          if-no-files-found: ignore
+
+      - name: Package AppImage and deb
+        working-directory: Apps/OttoDesktop
+        run: npx electron-builder --linux AppImage deb --x64 --publish never
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: otto-linux-packages
+          path: |
+            Apps/OttoDesktop/dist/*.AppImage
+            Apps/OttoDesktop/dist/*.deb
