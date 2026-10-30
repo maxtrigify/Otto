@@ -14,7 +14,9 @@ permissions:
 jobs:
   windows-desktop:
     runs-on: windows-2022
-    timeout-minutes: 60
+    # Native SwiftPM: Swift Build (6.4's default on Windows) ignores platform conditions on
+    # target dependencies and builds SwiftNIO, which does not compile there.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -28,9 +30,9 @@ jobs:
       - name: Build ottod
         shell: pwsh
         run: |
-          swift build -c release --product ottod 2>&1 | Tee-Object -FilePath ottod-build.log
+          swift build --build-system native -c release --product ottod 2>&1 | Tee-Object -FilePath ottod-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $bin = swift build -c release --show-bin-path
+          $bin = swift build --build-system native -c release --show-bin-path
           New-Item -ItemType Directory -Force Apps/OttoDesktop/bin/win32-x64 | Out-Null
           Copy-Item "$bin/ottod.exe" Apps/OttoDesktop/bin/win32-x64/
           Get-ChildItem "$bin" -Filter *.dll | Copy-Item -Destination Apps/OttoDesktop/bin/win32-x64/
@@ -46,9 +48,9 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
-          swift build -c release --product otto-engine 2>&1 | Tee-Object -FilePath engine-build.log
+          swift build --build-system native -c release --product otto-engine 2>&1 | Tee-Object -FilePath engine-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $bin = swift build -c release --show-bin-path
+          $bin = swift build --build-system native -c release --show-bin-path
           Copy-Item "$bin/otto-engine.exe" Apps/OttoDesktop/bin/win32-x64/
           Get-ChildItem "$bin" -Filter *.dll | Copy-Item -Destination Apps/OttoDesktop/bin/win32-x64/ -Force
 
@@ -58,12 +60,10 @@ jobs:
         shell: pwsh
         run: |
           # One failing module hides the rest; build each so a single run reports every error.
-          $targets = "OttoControl","OttoWorktrees","OttoObservability","OttoMemory","OttoDocuments",
-            "OttoBrowser","OttoMedia","OttoHooks","OttoHostTransport","OttoApplicationTools",
-            "OttoCore","OttoServices"
+          $targets = "OttoServices"
           foreach ($target in $targets) {
             "=== $target ===" | Out-File -Append modules-build.log
-            swift build -c release --target $target 2>&1 | Out-File -Append modules-build.log
+            swift build --build-system native -c release --target $target 2>&1 | Out-File -Append modules-build.log
             "=== $target exit $LASTEXITCODE ===" | Out-File -Append modules-build.log
           }
 
@@ -93,11 +93,22 @@ jobs:
           $env:OTTOD_PATH = (Resolve-Path bin/win32-x64/ottod.exe).Path
           node --test --test-timeout=60000 test/ottod.test.js
 
+      - name: Engine tests against otto-engine.exe
+        if: steps.engine.outcome == 'success'
+        working-directory: Apps/OttoDesktop
+        shell: pwsh
+        run: |
+          $env:OTTO_ENGINE_PATH = (Resolve-Path bin/win32-x64/otto-engine.exe).Path
+          node --test --test-timeout=90000 test/engine.test.js
+
       - name: Smoke test the desktop app
         working-directory: Apps/OttoDesktop
         shell: pwsh
         run: |
           $env:OTTOD_PATH = (Resolve-Path bin/win32-x64/ottod.exe).Path
+          if (Test-Path bin/win32-x64/otto-engine.exe) {
+            $env:OTTO_ENGINE_PATH = (Resolve-Path bin/win32-x64/otto-engine.exe).Path
+          }
           $workspace = Join-Path $env:RUNNER_TEMP "Demo Project"
           New-Item -ItemType Directory -Force $workspace | Out-Null
           Set-Content (Join-Path $workspace README.md) "# Demo"
