@@ -380,6 +380,7 @@ public final class TelegramConnector: ObservableObject {
     let expires: Date
   }
 
+  static let pollingInterrupted = "Telegram polling interrupted. Retrying connection."
   /// Voice notes longer than this are not transcribed.
   static let maxRecordingSeconds = 300
 
@@ -596,6 +597,10 @@ public final class TelegramConnector: ObservableObject {
         guard let self, let client = self.transport else { return }
         do {
           let updates = try await client.updates(after: self.offset)
+          // A poll that succeeds after an interruption clears the stale warning.
+          if self.status == Self.pollingInterrupted {
+            self.status = "Connected to @\(self.username ?? "bot")"
+          }
           for update in updates.sorted(by: { $0.updateID < $1.updateID }) {
             guard !Task.isCancelled else { return }
             if update.updateID < self.offset { continue }
@@ -607,7 +612,7 @@ public final class TelegramConnector: ObservableObject {
           }
         } catch {
           if !Task.isCancelled {
-            self.status = "Telegram polling interrupted. Retrying connection."
+            self.status = Self.pollingInterrupted
           }
           try? await Task.sleep(for: .seconds(5))
         }
