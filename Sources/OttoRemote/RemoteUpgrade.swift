@@ -9,7 +9,7 @@ import OttoCommercial
 #if canImport(Darwin)
   import Darwin
 #elseif os(Windows)
-  import WinSDK
+  import ucrt  // not WinSDK: its UUID typedef shadows Foundation.UUID
 #else
   #if canImport(Glibc)
     import Glibc
