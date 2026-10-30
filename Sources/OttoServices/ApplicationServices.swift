@@ -611,7 +611,13 @@ public final class ApplicationServices: ObservableObject {
         scopes: Set(ToolScope.allCases),
         source: .cli
       )
-      let directory = "/tmp/otto-\(getpid())-\(UUID().uuidString.prefix(6))"
+      #if os(Windows)
+        let directory = FileManager.default.temporaryDirectory
+          .appending(path: "otto-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(6))")
+          .path
+      #else
+        let directory = "/tmp/otto-\(getpid())-\(UUID().uuidString.prefix(6))"
+      #endif
       let socketPath = URL(fileURLWithPath: directory).appending(path: "control.sock").path
       controlSocketPath = socketPath
       server = try ControlServer(

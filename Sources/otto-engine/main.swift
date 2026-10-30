@@ -250,7 +250,7 @@ actor EngineSecretStore: SecretStore {
   private func save(_ secrets: [String: String]) throws {
     let data = try JSONEncoder().encode(secrets)
     if !FileManager.default.fileExists(atPath: fileURL.path) {
-      FileManager.default.createFile(
+      _ = FileManager.default.createFile(
         atPath: fileURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
     }
     try data.write(to: fileURL, options: .atomic)

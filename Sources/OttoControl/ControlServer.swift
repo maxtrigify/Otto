@@ -2,6 +2,8 @@
   import Darwin
 #elseif canImport(Glibc)
   import Glibc
+#elseif os(Windows)
+  import ucrt
 #endif
 import Dispatch
 import Foundation
@@ -12,8 +14,10 @@ public final class ControlServer: @unchecked Sendable {
 
   private let registry: ToolRegistry
   private let authenticator: ControlAuthenticator
-  private let listener: Int32
-  private let source: DispatchSourceRead
+  private let listener: SocketHandle
+  #if !os(Windows)
+    private let source: DispatchSourceRead
+  #endif
   private let connectionQueue: OperationQueue
   private let stateLock = NSLock()
   private var stopped = false
@@ -38,27 +42,36 @@ public final class ControlServer: @unchecked Sendable {
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700]
     )
-    chmod(directory.path, 0o700)
-    unlink(socketPath)
+    #if !os(Windows)
+      chmod(directory.path, 0o700)
+    #endif
+    try? FileManager.default.removeItem(atPath: socketPath)
 
     let listener = try UnixSocket.create()
     do {
       try UnixSocket.bind(listener, path: socketPath)
-      guard Posix.listen(listener, SOMAXCONN) == 0 else { throw UnixSocket.socketError() }
-      try UnixSocket.setNonBlocking(listener)
-      chmod(socketPath, 0o600)
+      guard Posix.listen(listener) == 0 else { throw UnixSocket.socketError() }
+      #if !os(Windows)
+        try UnixSocket.setNonBlocking(listener)
+        chmod(socketPath, 0o600)
+      #endif
     } catch {
       Posix.close(listener)
       throw error
     }
     self.listener = listener
-    self.source = DispatchSource.makeReadSource(
-      fileDescriptor: listener,
-      queue: DispatchQueue(label: "io.openotto.control.accept", qos: .userInitiated)
-    )
-    self.source.setEventHandler { [weak self] in self?.acceptConnections() }
-    self.source.setCancelHandler {}
-    self.source.resume()
+    #if os(Windows)
+      // A blocking accept on its own thread; closing the listener in stop() ends it.
+      Thread.detachNewThread { [weak self] in self?.acceptConnections() }
+    #else
+      self.source = DispatchSource.makeReadSource(
+        fileDescriptor: listener,
+        queue: DispatchQueue(label: "io.openotto.control.accept", qos: .userInitiated)
+      )
+      self.source.setEventHandler { [weak self] in self?.acceptConnections() }
+      self.source.setCancelHandler {}
+      self.source.resume()
+    #endif
   }
 
   deinit {
@@ -69,17 +82,19 @@ public final class ControlServer: @unchecked Sendable {
     stateLock.withLock {
       guard !stopped else { return }
       stopped = true
-      source.cancel()
+      #if !os(Windows)
+        source.cancel()
+      #endif
       Posix.close(listener)
-      unlink(socketPath)
+      try? FileManager.default.removeItem(atPath: socketPath)
     }
   }
 
   private func acceptConnections() {
     while true {
-      let client = Posix.accept(listener, nil, nil)
-      if client < 0 {
-        if errno == EINTR { continue }
+      let client = Posix.accept(listener)
+      if !Posix.isValid(client) {
+        if Posix.interrupted() { continue }
         return
       }
       do {
@@ -95,7 +110,7 @@ public final class ControlServer: @unchecked Sendable {
     }
   }
 
-  private func readAndHandle(_ client: Int32) {
+  private func readAndHandle(_ client: SocketHandle) {
     let request: ControlRequest
     do {
       request = try UnixSocket.readMessage(ControlRequest.self, from: client)
@@ -119,7 +134,7 @@ public final class ControlServer: @unchecked Sendable {
     }
   }
 
-  private func handle(_ request: ControlRequest, client: Int32) async {
+  private func handle(_ request: ControlRequest, client: SocketHandle) async {
     defer { Posix.close(client) }
     let response = await process(request)
     try? UnixSocket.writeMessage(response, to: client)

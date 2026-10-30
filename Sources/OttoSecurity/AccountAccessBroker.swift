@@ -102,7 +102,7 @@ public actor AccountAccessBroker {
   private let now: @Sendable () -> Date
   private var pending: [UUID: Pending] = [:]
   private var transactionActive = false
-  private var lockDescriptor: Int32 = -1
+  private var processLock: ProcessFileLock?
   private var needsProcessLock = true
   private static let storageKey = "account-access-v1"
 
@@ -264,24 +264,20 @@ public actor AccountAccessBroker {
         try FileManager.default.createDirectory(
           at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
       } catch { throw Failure.unavailable }
-      let fd = open(
-        root.appending(path: "writer.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
-      guard fd >= 0 else { throw Failure.unavailable }
-      guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-        close(fd)
+      do {
+        processLock = try ProcessFileLock(path: root.appending(path: "writer.lock").path)
+      } catch ProcessFileLock.Failure.busy {
         throw Failure.busy
+      } catch {
+        throw Failure.unavailable
       }
-      lockDescriptor = fd
     }
     transactionActive = true
   }
 
   private func endTransaction() {
-    if lockDescriptor >= 0 {
-      flock(lockDescriptor, LOCK_UN)
-      close(lockDescriptor)
-      lockDescriptor = -1
-    }
+    processLock?.release()
+    processLock = nil
     transactionActive = false
   }
 
