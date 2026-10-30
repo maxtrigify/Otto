@@ -441,19 +441,39 @@ public enum ExecutableLocator {
     homeDirectory: String = NSHomeDirectory(),
     preferredPaths: [String] = []
   ) -> [String] {
-    let pathDirectories = environment["PATH"]?.split(separator: ":").map(String.init) ?? []
-    let launchServicesFallbacks = [
-      "\(homeDirectory)/.local/bin",
-      "\(homeDirectory)/.npm-global/bin",
-      "\(homeDirectory)/.bun/bin",
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
-      "/usr/bin",
-      "/bin",
-    ]
-    let discoveredPaths = (pathDirectories + launchServicesFallbacks).map {
-      URL(fileURLWithPath: $0).appending(path: name).path
-    }
+    #if os(Windows)
+      // Windows: `Path` (any case) separated by ";", and commands carry a PATHEXT extension.
+      let path = environment.first { $0.key.uppercased() == "PATH" }?.value ?? ""
+      let pathDirectories = path.split(separator: ";").map(String.init)
+      let launchServicesFallbacks = [
+        "\(homeDirectory)\\.local\\bin",
+        environment["APPDATA"].map { "\($0)\\npm" },
+        environment["LOCALAPPDATA"].map { "\($0)\\Programs" },
+        "\(homeDirectory)\\.bun\\bin",
+      ].compactMap { $0 }
+      let extensions =
+        name.contains(".")
+        ? [""]
+        : (environment.first { $0.key.uppercased() == "PATHEXT" }?.value ?? ".COM;.EXE;.BAT;.CMD")
+          .split(separator: ";").map { String($0).lowercased() }
+      let discoveredPaths = (pathDirectories + launchServicesFallbacks).flatMap { directory in
+        extensions.map { URL(fileURLWithPath: directory).appending(path: name + $0).path }
+      }
+    #else
+      let pathDirectories = environment["PATH"]?.split(separator: ":").map(String.init) ?? []
+      let launchServicesFallbacks = [
+        "\(homeDirectory)/.local/bin",
+        "\(homeDirectory)/.npm-global/bin",
+        "\(homeDirectory)/.bun/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+      ]
+      let discoveredPaths = (pathDirectories + launchServicesFallbacks).map {
+        URL(fileURLWithPath: $0).appending(path: name).path
+      }
+    #endif
     var visited = Set<String>()
     return (preferredPaths + discoveredPaths).compactMap { path in
       let standardized = URL(fileURLWithPath: path).standardizedFileURL.path

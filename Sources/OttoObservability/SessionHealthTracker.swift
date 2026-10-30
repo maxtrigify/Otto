@@ -4,6 +4,8 @@ import Foundation
   import Darwin
 #elseif canImport(Glibc)
   import Glibc
+#elseif os(Windows)
+  import WinSDK
 #endif
 
 /// Records whether the previous session ended cleanly.
@@ -17,13 +19,13 @@ public final class SessionHealthTracker: @unchecked Sendable {
   private enum Marker: Equatable {
     case absent
     case legacy
-    case owned(pid_t)
+    case owned(Int32)
   }
 
   private let markerURL: URL
   private let lock = NSLock()
   private var sessionActive = false
-  private let processIdentifier = getpid()
+  private let processIdentifier = ProcessInfo.processInfo.processIdentifier
 
   public init(directory: URL) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -69,13 +71,22 @@ public final class SessionHealthTracker: @unchecked Sendable {
   private func readMarker() -> Marker {
     guard let data = try? Data(contentsOf: markerURL) else { return .absent }
     let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let pid = pid_t(text), pid > 0 else { return .legacy }
+    guard let pid = Int32(text), pid > 0 else { return .legacy }
     return .owned(pid)
   }
 
   /// `kill` with signal 0 delivers nothing and only checks that the process exists. `EPERM`
   /// means it exists but belongs to someone else, which still counts as running.
-  private static func isProcessRunning(_ pid: pid_t) -> Bool {
-    kill(pid, 0) == 0 || errno == EPERM
+  private static func isProcessRunning(_ pid: Int32) -> Bool {
+    #if os(Windows)
+      // A process we may not query still exists; only a missing one fails with invalid parameter.
+      guard let handle = OpenProcess(DWORD(PROCESS_QUERY_LIMITED_INFORMATION), false, DWORD(pid))
+      else { return GetLastError() == DWORD(ERROR_ACCESS_DENIED) }
+      defer { CloseHandle(handle) }
+      var code: DWORD = 0
+      return GetExitCodeProcess(handle, &code) && code == DWORD(STILL_ACTIVE)
+    #else
+      return kill(pid, 0) == 0 || errno == EPERM
+    #endif
   }
 }

@@ -111,9 +111,13 @@
       startup.lpAttributeList = attributeList
       var information = PROCESS_INFORMATION()
 
-      var commandLine = wide(
-        ([specification.executable] + specification.arguments).map(quoteArgument)
-          .joined(separator: " "))
+      // Batch shims (npm installs `claude.cmd`) only run under the command interpreter.
+      var argv = [specification.executable] + specification.arguments
+      if ["cmd", "bat"].contains(URL(fileURLWithPath: specification.executable).pathExtension.lowercased()) {
+        let root = ProcessInfo.processInfo.environment["SystemRoot"] ?? "C:\\Windows"
+        argv = ["\(root)\\System32\\cmd.exe", "/d", "/s", "/c"] + argv
+      }
+      var commandLine = wide(argv.map(quoteArgument).joined(separator: " "))
       var environment = environmentBlock(
         specification.resolvedEnvironment(inheriting: ProcessInfo.processInfo.environment))
       let directory = wide(specification.workingDirectory)

@@ -216,8 +216,12 @@ public actor GitWorktreeManager {
   private func runGit(_ arguments: [String], at directory: URL) throws -> String {
     let process = Process()
     let output = Pipe()
-    _ = fcntl(output.fileHandleForWriting.fileDescriptor, F_SETFD, FD_CLOEXEC)
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    #if os(Windows)
+      process.executableURL = URL(fileURLWithPath: Self.windowsGit())
+    #else
+      _ = fcntl(output.fileHandleForWriting.fileDescriptor, F_SETFD, FD_CLOEXEC)
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    #endif
     process.arguments = ["-C", directory.path] + arguments
     process.standardOutput = output
     process.standardError = output
@@ -228,6 +232,19 @@ public actor GitWorktreeManager {
     guard process.terminationStatus == 0 else { throw WorktreeError.git(text) }
     return text
   }
+
+  #if os(Windows)
+    /// Git for Windows on PATH, or its default install location.
+    private static func windowsGit() -> String {
+      let environment = ProcessInfo.processInfo.environment
+      let path = environment.first { $0.key.uppercased() == "PATH" }?.value ?? ""
+      for directory in path.split(separator: ";") {
+        let candidate = URL(fileURLWithPath: String(directory)).appending(path: "git.exe").path
+        if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+      }
+      return "C:\\Program Files\\Git\\cmd\\git.exe"
+    }
+  #endif
 
   private func changedPaths(at directory: URL) throws -> Set<String> {
     let tracked = try runGit(
