@@ -1,4 +1,8 @@
-import CryptoKit
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
 
 /// Package-only executor storage; never registered as an agent tool or generic RPC API.

@@ -1,0 +1,94 @@
+# Builds ottod for Windows, drives it through the desktop bridge (ConPTY end to end), packages the
+# Otto desktop installer and screenshots the real app running on Windows.
+name: Windows
+
+on:
+  push:
+    branches: [main, "cross-platform/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.2-release
+          tag: 6.2-RELEASE
+
+      - name: Build ottod
+        shell: pwsh
+        run: |
+          swift build -c release --product ottod 2>&1 | Tee-Object -FilePath ottod-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bin = swift build -c release --show-bin-path
+          New-Item -ItemType Directory -Force Apps/OttoDesktop/bin/win32-x64 | Out-Null
+          Copy-Item "$bin/ottod.exe" Apps/OttoDesktop/bin/win32-x64/
+          Get-ChildItem "$bin" -Filter *.dll | Copy-Item -Destination Apps/OttoDesktop/bin/win32-x64/
+          # Ship the Swift runtime beside ottod.exe; the loader searches the executable's folder first.
+          $runtime = Get-ChildItem "$env:LOCALAPPDATA\Programs\Swift\Runtimes" -Recurse -Filter swiftCore.dll |
+            Select-Object -First 1
+          if (-not $runtime) { throw "Swift runtime not found" }
+          Get-ChildItem $runtime.DirectoryName -Filter *.dll | Copy-Item -Destination Apps/OttoDesktop/bin/win32-x64/
+          Get-ChildItem Apps/OttoDesktop/bin/win32-x64 | Format-Table Name, Length
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ottod-build-log
+          path: ottod-build.log
+          if-no-files-found: ignore
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install desktop dependencies
+        working-directory: Apps/OttoDesktop
+        run: npm ci
+
+      - name: Bridge tests against ottod.exe (ConPTY)
+        working-directory: Apps/OttoDesktop
+        shell: pwsh
+        run: |
+          $env:OTTOD_PATH = (Resolve-Path bin/win32-x64/ottod.exe).Path
+          node --test --test-timeout=60000 test/ottod.test.js
+
+      - name: Smoke test the desktop app
+        working-directory: Apps/OttoDesktop
+        shell: pwsh
+        run: |
+          $env:OTTOD_PATH = (Resolve-Path bin/win32-x64/ottod.exe).Path
+          $workspace = Join-Path $env:RUNNER_TEMP "Demo Project"
+          New-Item -ItemType Directory -Force $workspace | Out-Null
+          Set-Content (Join-Path $workspace README.md) "# Demo"
+          node scripts/smoke.mjs $workspace (Join-Path $env:RUNNER_TEMP smoke)
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-screenshots
+          path: ${{ runner.temp }}/smoke/*.png
+          if-no-files-found: ignore
+
+      - name: Package installer
+        working-directory: Apps/OttoDesktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: otto-windows-installer
+          path: Apps/OttoDesktop/dist/*.exe

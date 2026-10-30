@@ -1,8 +1,18 @@
-import AppKit
-import CryptoKit
+#if canImport(AppKit)
+  import AppKit
+#endif
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
-import Network
-import Security
+#if canImport(Network)
+  import Network
+#endif
+#if canImport(Security)
+  import Security
+#endif
 
 /// Native installed-app OAuth. Google disallows password entry in embedded WKWebViews.
 /// The listener binds only to IPv4 loopback and lives for a single PKCE transaction.

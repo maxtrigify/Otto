@@ -1,6 +1,9 @@
-import AVFoundation
 import Foundation
-import ScreenCaptureKit
+
+#if canImport(ScreenCaptureKit)
+  import AVFoundation
+  import ScreenCaptureKit
+#endif
 
 #if canImport(AppKit)
   import AppKit
@@ -51,6 +54,7 @@ public struct CanvasRecordingStatus: Codable, Sendable, Equatable {
   }
 }
 
+#if canImport(ScreenCaptureKit)
 /// Records the Otto window into an .mp4 through ScreenCaptureKit. One recording at a time; the
 /// capture follows the window (not the display), so other apps in front of Otto never appear in
 /// the video. Frames stream through an AVAssetWriter so stopping produces a finished file
@@ -272,3 +276,26 @@ private final class CaptureSink: NSObject, SCStreamOutput, SCStreamDelegate, @un
     }
   }
 }
+#else
+  /// Window recording uses ScreenCaptureKit; other platforms report it as unavailable.
+  public actor CanvasRecorder {
+    private let stateContinuation: AsyncStream<Bool>.Continuation
+    public nonisolated let stateChanges: AsyncStream<Bool>
+
+    public init() {
+      var continuation: AsyncStream<Bool>.Continuation!
+      stateChanges = AsyncStream { continuation = $0 }
+      stateContinuation = continuation
+    }
+
+    public func status() -> CanvasRecordingStatus { CanvasRecordingStatus(isRecording: false) }
+
+    public func start(directory: String) async throws -> String {
+      throw CanvasRecorderError.captureFailed("Recording is not supported on this platform yet.")
+    }
+
+    public func stop() async throws -> CanvasRecordingResult {
+      throw CanvasRecorderError.notRecording
+    }
+  }
+#endif

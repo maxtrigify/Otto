@@ -3,7 +3,7 @@ import OttoModels
 
 #if canImport(Darwin)
   import Darwin
-#else
+#elseif canImport(Glibc)
   import Glibc
 #endif
 
@@ -60,6 +60,10 @@ enum LiveModelCatalog {
     provider: AgentProvider, executable: String, environment: [String: String],
     timeout: TimeInterval, apps: Bool = false
   ) -> Result? {
+    #if os(Windows)
+      // The probe multiplexes the CLI's pipe with poll(2); Windows uses the static catalog.
+      return nil
+    #else
     let process = Process()
     process.executableURL = URL(fileURLWithPath: executable)
     process.arguments =
@@ -231,6 +235,7 @@ enum LiveModelCatalog {
       }
     } catch { return nil }
     return nil
+    #endif
   }
 
   private static func models(_ rows: [[String: Any]], idKey: String) -> [AgentModel] {

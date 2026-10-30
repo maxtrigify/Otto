@@ -1,3 +1,4 @@
+#if os(macOS)
 import CommonCrypto
 import CryptoKit
 import Foundation
@@ -272,3 +273,4 @@ public enum ChromiumCookieImporter {
     return Data(bytes: pointer, count: count)
   }
 }
+#endif

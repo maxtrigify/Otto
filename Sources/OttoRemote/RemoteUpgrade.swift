@@ -8,6 +8,8 @@ import OttoCommercial
 #endif
 #if canImport(Darwin)
   import Darwin
+#elseif os(Windows)
+  import WinSDK
 #else
   #if canImport(Glibc)
     import Glibc
@@ -123,6 +125,11 @@ public struct RemoteUpgradeInstaller: Sendable {
     currentVersion: String,
     currentBuild: Int
   ) throws -> RemoteUpgradeReceipt {
+    #if os(Windows)
+      // Windows installs update ottod with the desktop app; in-place replacement of a running
+      // executable is not possible there.
+      throw RemoteUpgradeError.incompatiblePlatform
+    #else
     let manifest: RemoteUpgradeManifest
     do {
       manifest = try verifier.verify(document, as: RemoteUpgradeManifest.self)
@@ -208,6 +215,7 @@ public struct RemoteUpgradeInstaller: Sendable {
     } catch {
       throw RemoteUpgradeError.installFailed
     }
+    #endif
   }
 
   private func verifyArtifact(_ artifact: URL, manifest: RemoteUpgradeManifest) throws {
@@ -234,6 +242,7 @@ public struct RemoteUpgradeInstaller: Sendable {
   }
 
   private func validateDestination(_ destination: URL) throws {
+    #if !os(Windows)
     // `mused` is the daemon's name before the rename; installs that have not been migrated
     // still upgrade in place.
     guard destination.isFileURL,
@@ -258,6 +267,7 @@ public struct RemoteUpgradeInstaller: Sendable {
     } else if errno != ENOENT {
       throw RemoteUpgradeError.unsafeDestination
     }
+    #endif
   }
 
   private func compareVersions(_ lhs: String, _ rhs: String) -> Int {

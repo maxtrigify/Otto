@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    />
+    <title>Otto</title>
+    <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand drag">
+        <span class="halo" aria-hidden="true"></span>
+        <span class="wordmark">Otto</span>
+      </div>
+
+      <button class="workspace" id="workspace-button" title="Change workspace folder">
+        <span class="workspace-label">Workspace</span>
+        <span class="workspace-name" id="workspace-name">Choose a folder</span>
+      </button>
+
+      <button class="new-chat" id="new-chat">
+        <span class="plus" aria-hidden="true">+</span> New chat
+      </button>
+
+      <div class="section-title">Chats</div>
+      <ul class="sessions" id="sessions" aria-label="Chats"></ul>
+
+      <footer class="engine" id="engine-status">Starting engine…</footer>
+    </aside>
+
+    <main class="stage">
+      <header class="stage-header drag" id="stage-header" hidden>
+        <div class="stage-title">
+          <span class="dot" id="stage-dot"></span>
+          <span id="stage-name"></span>
+          <span class="stage-meta" id="stage-meta"></span>
+        </div>
+        <button class="ghost no-drag" id="stop-button">Stop</button>
+      </header>
+
+      <section class="welcome" id="welcome">
+        <div class="halo-large" aria-hidden="true"></div>
+        <h1 id="welcome-title">What should we work on?</h1>
+        <p class="welcome-sub" id="welcome-sub">Start a chat with an agent in your workspace.</p>
+        <div class="agents" id="agents"></div>
+        <button class="primary" id="choose-workspace" hidden>Choose a workspace folder</button>
+      </section>
+
+      <section class="terminals" id="terminals" hidden></section>
+      <div class="toast" id="toast" role="status" hidden></div>
+    </main>
+
+    <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,5 +1,13 @@
-import Combine
-import CryptoKit
+#if canImport(Combine)
+  import Combine
+#else
+  import OpenCombine
+#endif
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
 import OttoRemote
 import OttoSecurity

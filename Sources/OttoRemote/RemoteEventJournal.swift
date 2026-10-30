@@ -3,6 +3,8 @@ import OttoTools
 
 #if canImport(Darwin)
   import Darwin
+#elseif os(Windows)
+  import WinSDK
 #else
   #if canImport(Glibc)
     import Glibc
@@ -26,7 +28,7 @@ public actor RemoteEventJournal {
       withIntermediateDirectories: true,
       attributes: [.posixPermissions: 0o700]
     )
-    chmod(directory.path, 0o700)
+    RemotePath.restrict(directory.path, mode: 0o700)
     if !FileManager.default.fileExists(atPath: url.path) {
       guard
         FileManager.default.createFile(
@@ -36,7 +38,7 @@ public actor RemoteEventJournal {
         )
       else { throw RemoteError.journal("Could not create the journal.") }
     }
-    chmod(url.path, 0o600)
+    RemotePath.restrict(url.path, mode: 0o600)
     let data = try Data(contentsOf: url)
     guard Int64(data.count) <= maximumBytes else {
       throw RemoteError.resourceLimit("event journal exceeds the configured byte limit")

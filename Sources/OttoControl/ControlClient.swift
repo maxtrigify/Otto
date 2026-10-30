@@ -1,4 +1,8 @@
-import Darwin
+#if canImport(Darwin)
+  import Darwin
+#elseif canImport(Glibc)
+  import Glibc
+#endif
 import Dispatch
 import Foundation
 import OttoTools
@@ -118,7 +122,7 @@ public struct ControlClient: Sendable {
     timeoutMilliseconds: Int32? = nil
   ) throws -> ControlResponse {
     let descriptor = try UnixSocket.create()
-    defer { Darwin.close(descriptor) }
+    defer { Posix.close(descriptor) }
     try UnixSocket.connect(descriptor, path: socketPath)
     try UnixSocket.setNonBlocking(descriptor)
     try UnixSocket.writeMessage(request, to: descriptor)
@@ -143,3 +147,4 @@ public struct ControlClient: Sendable {
     }
   }
 }
+

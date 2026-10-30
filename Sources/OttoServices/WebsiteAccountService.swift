@@ -1,10 +1,25 @@
-import AppKit
-import Combine
-import CryptoKit
+#if canImport(AppKit)
+  import AppKit
+#endif
+#if canImport(Combine)
+  import Combine
+#else
+  import OpenCombine
+#endif
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
 import OttoRPCContracts
 import OttoSecurity
-import WebKit
+#if canImport(WebKit)
+  import WebKit
+#endif
 
 public enum WebsiteAccountError: Error, LocalizedError {
   case unavailable, denied, signInRequired, expired, stalePage, busy

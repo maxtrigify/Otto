@@ -1,6 +1,6 @@
 import Foundation
 
-#if canImport(OttoSecurity)
+#if os(macOS)  // OttoSecurity is linked only on macOS (see Package.swift)
   import OttoSecurity
 #endif
 
@@ -46,7 +46,7 @@ public actor InMemoryDeviceCredentialStore: DeviceCredentialStore {
   }
 }
 
-#if canImport(OttoSecurity)
+#if os(macOS)  // OttoSecurity is linked only on macOS (see Package.swift)
   public actor KeychainEntitlementStore: EntitlementStore {
     private let secretStore: any SecretStore
     private let key: String

@@ -4,6 +4,8 @@ import Foundation
   import Darwin
 #elseif canImport(Glibc)
   import Glibc
+#elseif os(Windows)
+  import WinSDK
 #endif
 
 /// Names that changed when Muse became Otto, kept in one place so every legacy fallback reads
@@ -228,13 +230,24 @@ public enum OttoDirectoryMigration {
   private enum EntryKind { case missing, directory, symlink, other }
 
   private static func entryKind(_ path: String) -> EntryKind {
-    var info = stat()
-    guard lstat(path, &info) == 0 else { return .missing }
-    switch info.st_mode & S_IFMT {
-    case S_IFLNK: return .symlink
-    case S_IFDIR: return .directory
-    default: return .other
-    }
+    #if os(Windows)
+      guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+        return .missing
+      }
+      switch attributes[.type] as? FileAttributeType {
+      case .typeSymbolicLink: return .symlink
+      case .typeDirectory: return .directory
+      default: return .other
+      }
+    #else
+      var info = stat()
+      guard lstat(path, &info) == 0 else { return .missing }
+      switch info.st_mode & S_IFMT {
+      case S_IFLNK: return .symlink
+      case S_IFDIR: return .directory
+      default: return .other
+      }
+    #endif
   }
 
   /// Uses a relative target when both live in the same folder so the link survives the parent
@@ -257,6 +270,12 @@ public enum OttoDirectoryMigration {
     #if canImport(Darwin)
       if renamex_np(source, destination, UInt32(RENAME_EXCL)) == 0 { return nil }
       return String(cString: strerror(errno))
+    #elseif os(Windows)
+      // Without MOVEFILE_REPLACE_EXISTING the move fails rather than replace the destination.
+      let from = Array(source.utf16) + [0]
+      let to = Array(destination.utf16) + [0]
+      if MoveFileExW(from, to, 0) { return nil }
+      return "Windows error \(GetLastError())"
     #else
       // Linux: link-free fallback. The destination was checked missing just before; rename(2)
       // would only replace an *empty* directory created in the meantime, never user data.

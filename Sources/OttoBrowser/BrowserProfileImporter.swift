@@ -1,6 +1,10 @@
 import Foundation
 import OttoModels
-import SQLite3
+#if canImport(SQLite3)
+  import SQLite3
+#else
+  import SwiftToolchainCSQLite
+#endif
 
 public struct BrowserImportSource: Identifiable, Equatable, Sendable {
   public enum Browser: String, Sendable {

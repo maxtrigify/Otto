@@ -1,4 +1,8 @@
-import CryptoKit
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
 
 /// In-memory, request-scoped authorization ledger. A restarted host has no valid sessions.

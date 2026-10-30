@@ -4,6 +4,8 @@ import OttoTools
 
 #if canImport(Darwin)
   import Darwin
+#elseif os(Windows)
+  import WinSDK
 #else
   #if canImport(Glibc)
     import Glibc
@@ -137,7 +139,7 @@ public actor RemoteDaemon {
     guard workspaceRoots.contains(where: { Self.contains(workspace, root: $0) }) else {
       throw RemoteError.workspaceDenied
     }
-    guard input.executable.hasPrefix("/"),
+    guard RemotePath.isAbsolute(input.executable),
       FileManager.default.isExecutableFile(atPath: input.executable)
     else { throw RemoteError.invalidInput("the executable must be an absolute executable path") }
     let sessionID = UUID()
@@ -257,11 +259,9 @@ public actor RemoteDaemon {
     let parent = try Self.canonicalDirectory(candidate.deletingLastPathComponent())
     guard Self.contains(parent, root: workspace) else { throw RemoteError.workspaceDenied }
     if mustExist {
-      guard let resolved = realpath(candidate.path, nil) else {
+      guard let canonical = RemotePath.resolve(candidate.path) else {
         throw RemoteError.invalidInput("requested file does not exist")
       }
-      defer { free(resolved) }
-      let canonical = decodeRemoteCString(resolved)
       guard Self.contains(canonical, root: workspace) else { throw RemoteError.workspaceDenied }
       return URL(fileURLWithPath: canonical)
     }
@@ -291,12 +291,12 @@ public actor RemoteDaemon {
         try handle.write(contentsOf: Data((input.newToken + "\n").utf8))
         try handle.synchronize()
         try handle.close()
-        chmod(temporary.path, 0o600)
-        guard rename(temporary.path, tokenFile.path) == 0 else {
+        RemotePath.restrict(temporary.path, mode: 0o600)
+        guard RemotePath.replace(temporary.path, with: tokenFile.path) else {
           throw RemoteError.invalidInput("could not atomically replace the token file")
         }
       } catch {
-        unlink(temporary.path)
+        RemotePath.remove(temporary.path)
         throw error
       }
     }
@@ -343,13 +343,12 @@ public actor RemoteDaemon {
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
       isDirectory.boolValue,
-      let resolved = realpath(url.path, nil)
+      let resolved = RemotePath.resolve(url.path)
     else { throw RemoteError.invalidInput("workspace directories must exist") }
-    defer { free(resolved) }
-    return decodeRemoteCString(resolved)
+    return resolved
   }
 
   private static func contains(_ candidate: String, root: String) -> Bool {
-    candidate == root || candidate.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+    RemotePath.contains(candidate, root: root)
   }
 }

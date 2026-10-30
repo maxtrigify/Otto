@@ -1,4 +1,6 @@
-import CoreGraphics
+#if canImport(CoreGraphics)
+  import CoreGraphics
+#endif
 import Foundation
 
 /// Transient graph camera. Zoom preserves the world point under the pointer, including at limits.

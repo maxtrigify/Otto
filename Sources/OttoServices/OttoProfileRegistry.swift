@@ -1,4 +1,8 @@
-import Combine
+#if canImport(Combine)
+  import Combine
+#else
+  import OpenCombine
+#endif
 import Foundation
 import OttoModels
 
@@ -237,7 +241,20 @@ public final class OttoProfileRegistry: ObservableObject {
     try persist(next)
     var report = DeletionReport()
     let discarder =
-      discard ?? { [fileManager] url in try fileManager.trashItem(at: url, resultingItemURL: nil) }
+      discard ?? { [fileManager] url in
+        #if canImport(Darwin)
+          try fileManager.trashItem(at: url, resultingItemURL: nil)
+        #else
+          // No system Trash API off Darwin: move into the freedesktop Trash so it stays recoverable.
+          let trash = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/Trash/files", isDirectory: true)
+          try fileManager.createDirectory(at: trash, withIntermediateDirectories: true)
+          try fileManager.moveItem(
+            at: url,
+            to: trash.appendingPathComponent(
+              "\(Int(Date().timeIntervalSince1970))-\(url.lastPathComponent)"))
+        #endif
+      }
     for url in dataLocations where fileManager.fileExists(atPath: url.path) {
       do {
         try discarder(url)

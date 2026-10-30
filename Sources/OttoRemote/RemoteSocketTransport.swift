@@ -1,3 +1,4 @@
+#if !os(Windows)
 import Dispatch
 import Foundation
 import OttoTools
@@ -440,3 +441,4 @@ private func systemRead(
     Darwin.read(descriptor, buffer, count)
   #endif
 }
+#endif

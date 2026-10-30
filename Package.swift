@@ -3,6 +3,13 @@
 import Foundation
 import PackageDescription
 
+/// Platforms without Apple's SDK frameworks (SQLite3, CryptoKit, Combine, Security).
+let nonApple: [Platform] = [.linux, .windows]
+let portableSQLite: Target.Dependency = .product(
+  name: "SwiftToolchainCSQLite", package: "swift-toolchain-sqlite",
+  condition: .when(platforms: nonApple))
+let systemSQLite: LinkerSetting = .linkedLibrary("sqlite3", .when(platforms: [.macOS, .iOS]))
+
 let package = Package(
   name: "Otto",
   platforms: [.macOS(.v15), .iOS(.v18)],
@@ -47,6 +54,9 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.5.1"),
+    // Linux and Windows: Apple's SQLite3 and Combine modules are Darwin-only.
+    .package(url: "https://github.com/swiftlang/swift-toolchain-sqlite.git", exact: "1.0.13"),
+    .package(url: "https://github.com/OpenCombine/OpenCombine.git", exact: "0.14.0"),
     .package(url: "https://github.com/hummingbird-project/hummingbird.git", exact: "2.26.0"),
     .package(
       url: "https://github.com/hummingbird-project/hummingbird-websocket.git",
@@ -65,16 +75,20 @@ let package = Package(
     .target(name: "OttoObjCSupport"),
     .target(
       name: "OttoMemory",
-      linkerSettings: [.linkedLibrary("sqlite3")]
+      dependencies: [portableSQLite],
+      linkerSettings: [systemSQLite]
     ),
     .target(
       name: "OttoPersistence",
-      dependencies: ["OttoModels", "OttoTools"],
-      linkerSettings: [.linkedLibrary("sqlite3")]
+      dependencies: ["OttoModels", "OttoTools", portableSQLite],
+      linkerSettings: [systemSQLite]
     ),
     .target(
       name: "OttoCore",
-      dependencies: ["OttoModels", "OttoPersistence", "OttoRuntime"]
+      dependencies: [
+        "OttoModels", "OttoPersistence", "OttoRuntime",
+        .product(name: "OpenCombine", package: "OpenCombine", condition: .when(platforms: nonApple)),
+      ]
     ),
     .target(
       name: "OttoRuntime",
@@ -82,7 +96,7 @@ let package = Package(
         "OttoModels",
         // Keychain-backed secrets are macOS-only; the Linux daemon builds the runtime without them.
         .target(name: "OttoSecurity", condition: .when(platforms: [.macOS])),
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: nonApple)),
       ]),
     .target(name: "OttoHarness", dependencies: ["OttoModels", "OttoTools"]),
     .target(name: "OttoTools", dependencies: ["OttoModels"]),
@@ -99,21 +113,25 @@ let package = Package(
     .target(name: "OttoDocuments", dependencies: ["OttoModels"]),
     .target(
       name: "OttoBrowser",
-      dependencies: ["OttoModels"],
-      linkerSettings: [.linkedLibrary("sqlite3")]
+      dependencies: ["OttoModels", portableSQLite],
+      linkerSettings: [systemSQLite]
     ),
     .target(name: "OttoMedia", dependencies: []),
     .target(
       name: "OttoSecurity",
-      dependencies: ["OttoModels", "OttoTools"],
-      linkerSettings: [.linkedFramework("Security")]
+      dependencies: [
+        "OttoModels", "OttoTools",
+        // Unconditional: Swift Build drops Crypto for OttoHooks when this edge is conditional.
+        .product(name: "Crypto", package: "swift-crypto"),
+      ],
+      linkerSettings: [.linkedFramework("Security", .when(platforms: [.macOS, .iOS]))]
     ),
     .target(name: "OttoWorktrees", dependencies: ["OttoModels"]),
     .target(
       name: "OttoCommercial",
       dependencies: [
         .target(name: "OttoSecurity", condition: .when(platforms: [.macOS])),
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: nonApple)),
       ],
       linkerSettings: [.linkedFramework("CryptoKit", .when(platforms: [.macOS]))]
     ),
@@ -136,7 +154,7 @@ let package = Package(
       name: "OttoMobileClient",
       dependencies: [
         "OttoCommercial", "OttoModels", "OttoRPCContracts",
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: nonApple)),
       ],
       linkerSettings: [
         .linkedFramework("Security", .when(platforms: [.iOS, .macOS]))
@@ -147,7 +165,7 @@ let package = Package(
       dependencies: [
         "OttoRuntime", "OttoTools",
         "OttoCommercial", "OttoRPCContracts",
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: nonApple)),
       ],
       linkerSettings: [
         .linkedFramework("CryptoKit", .when(platforms: [.macOS])),
@@ -169,6 +187,8 @@ let package = Package(
         "OttoMedia", "OttoMemory", "OttoModels", "OttoObservability",
         "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote", "OttoSecurity", "OttoHooks",
         "OttoHostRuntime", "OttoHostTransport", "OttoRPCContracts",
+        .product(name: "OpenCombine", package: "OpenCombine", condition: .when(platforms: nonApple)),
+        .product(name: "Crypto", package: "swift-crypto"),
       ],
       resources: [.copy("Resources/PhotonBridge")]
     ),
@@ -208,7 +228,7 @@ let package = Package(
       name: "otto-release",
       dependencies: [
         "OttoCommercial", "OttoModels", "OttoRemote",
-        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+        .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: nonApple)),
       ]
     ),
     .executableTarget(

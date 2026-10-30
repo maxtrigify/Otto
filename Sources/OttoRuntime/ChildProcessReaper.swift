@@ -1,3 +1,4 @@
+#if !os(Windows)
 import Foundation
 
 #if os(Linux)
@@ -57,3 +58,4 @@ final class ChildProcessReaper: @unchecked Sendable {
     handler?(status)
   }
 }
+#endif

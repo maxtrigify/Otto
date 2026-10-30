@@ -1,5 +1,8 @@
 import Foundation
-import Security
+
+#if canImport(Security)
+  import Security
+#endif
 
 public protocol SecretStore: Sendable {
   func set(_ value: String, for key: String) async throws
@@ -8,14 +11,18 @@ public protocol SecretStore: Sendable {
 }
 
 public enum SecretStoreError: Error, LocalizedError, Sendable {
-  case keychain(OSStatus)
+  case keychain(Int32)
   case invalidEncoding
   case storageUnavailable(String)
 
   public var errorDescription: String? {
     switch self {
     case .keychain(let status):
-      SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error \(status)"
+      #if canImport(Security)
+        SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error \(status)"
+      #else
+        "Keychain error \(status)"
+      #endif
     case .invalidEncoding: "Secret was not valid UTF-8"
     case .storageUnavailable(let reason): "Secret storage unavailable: \(reason)"
     }
@@ -112,6 +119,7 @@ public actor LegacyFallbackSecretStore: SecretStore {
   }
 }
 
+#if canImport(Security)
 public actor KeychainSecretStore: SecretStore {
   private let service: String
 
@@ -164,6 +172,25 @@ public actor KeychainSecretStore: SecretStore {
     ]
   }
 }
+#else
+  /// Linux and Windows have no Keychain yet. Until the platform keyring (libsecret, Windows
+  /// Credential Manager) is wired up, reads find nothing and writes fail loudly.
+  public actor KeychainSecretStore: SecretStore {
+    private let service: String
+
+    public init(service: String = OttoSecretService.credentials) {
+      self.service = service
+    }
+
+    public func set(_ value: String, for key: String) async throws {
+      throw SecretStoreError.storageUnavailable("no system keyring on this platform yet")
+    }
+
+    public func value(for key: String) async throws -> String? { nil }
+
+    public func delete(_ key: String) async throws {}
+  }
+#endif
 
 /// File-backed store for development builds: `~/Library/Application Support/Otto/dev-secrets.json`,
 /// readable only by the current user (0600). Existing keychain secrets are imported at most once

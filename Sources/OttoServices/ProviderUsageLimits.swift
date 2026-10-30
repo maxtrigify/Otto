@@ -1,4 +1,8 @@
-import Combine
+#if canImport(Combine)
+  import Combine
+#else
+  import OpenCombine
+#endif
 import Foundation
 import OttoModels
 import OttoRuntime

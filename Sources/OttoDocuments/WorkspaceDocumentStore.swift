@@ -1,4 +1,10 @@
-import Darwin
+#if canImport(Darwin)
+  import Darwin
+#elseif canImport(Glibc)
+  import Glibc
+#elseif canImport(ucrt)
+  import ucrt
+#endif
 import Dispatch
 import Foundation
 
@@ -135,7 +141,17 @@ public actor WorkspaceDocumentStore {
   public func trash(relativePath: String) throws {
     let url = try resolve(relativePath, createParents: false)
     guard FileManager.default.fileExists(atPath: url.path) else { return }
-    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    #if canImport(Darwin)
+      try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    #else
+      // No system Trash API off Darwin: keep the item recoverable in a workspace-local folder.
+      let trash = URL(fileURLWithPath: rootPath, isDirectory: true)
+        .appendingPathComponent(".trash", isDirectory: true)
+      try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+      let stamp = Int(Date().timeIntervalSince1970)
+      try FileManager.default.moveItem(
+        at: url, to: trash.appendingPathComponent("\(stamp)-\(url.lastPathComponent)"))
+    #endif
   }
 
   public func append(relativePath: String, text: String) throws -> String {
@@ -304,25 +320,48 @@ public actor WorkspaceDocumentStore {
 
   public func watch(relativePath: String) throws -> AsyncStream<DocumentFileEvent> {
     let file = try resolve(relativePath, createParents: false)
-    let directory = file.deletingLastPathComponent()
-    let descriptor = open(directory.path, O_EVTONLY)
-    guard descriptor >= 0 else { throw DocumentStoreError.unreadable(relativePath) }
-    let source = DispatchSource.makeFileSystemObjectSource(
-      fileDescriptor: descriptor,
-      eventMask: [.write, .rename, .delete],
-      queue: DispatchQueue(label: "io.openotto.document-watch.\(UUID().uuidString)")
-    )
-    let token = DocumentWatchToken(source: source, descriptor: descriptor)
-    return AsyncStream { continuation in
-      source.setEventHandler {
-        continuation.yield(
-          FileManager.default.fileExists(atPath: file.path) ? .changed : .deleted)
+    #if canImport(Darwin)
+      let directory = file.deletingLastPathComponent()
+      let descriptor = open(directory.path, O_EVTONLY)
+      guard descriptor >= 0 else { throw DocumentStoreError.unreadable(relativePath) }
+      let source = DispatchSource.makeFileSystemObjectSource(
+        fileDescriptor: descriptor,
+        eventMask: [.write, .rename, .delete],
+        queue: DispatchQueue(label: "io.openotto.document-watch.\(UUID().uuidString)")
+      )
+      let token = DocumentWatchToken(source: source, descriptor: descriptor)
+      return AsyncStream { continuation in
+        source.setEventHandler {
+          continuation.yield(
+            FileManager.default.fileExists(atPath: file.path) ? .changed : .deleted)
+        }
+        source.setCancelHandler { close(descriptor) }
+        continuation.onTermination = { [token] _ in token.cancel() }
+        source.resume()
       }
-      source.setCancelHandler { close(descriptor) }
-      continuation.onTermination = { [token] _ in token.cancel() }
-      source.resume()
-    }
+    #else
+      // DispatchSource file-system sources are Darwin-only; poll the modification date instead.
+      return AsyncStream { continuation in
+        let task = Task {
+          var last = Self.modificationDate(of: file)
+          while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1))
+            let current = Self.modificationDate(of: file)
+            guard current != last else { continue }
+            last = current
+            continuation.yield(current == nil ? .deleted : .changed)
+          }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+      }
+    #endif
   }
+
+  #if !canImport(Darwin)
+    private static func modificationDate(of file: URL) -> Date? {
+      (try? FileManager.default.attributesOfItem(atPath: file.path))?[.modificationDate] as? Date
+    }
+  #endif
 
   private func resolve(_ relativePath: String, createParents: Bool) throws -> URL {
     guard !relativePath.hasPrefix("/"), !relativePath.isEmpty else {
@@ -491,6 +530,7 @@ public actor WorkspaceDocumentStore {
   }
 }
 
+#if canImport(Darwin)
 private final class DocumentWatchToken: @unchecked Sendable {
   private let source: DispatchSourceFileSystemObject
   private let lock = NSLock()
@@ -510,3 +550,4 @@ private final class DocumentWatchToken: @unchecked Sendable {
 
   deinit { cancel() }
 }
+#endif

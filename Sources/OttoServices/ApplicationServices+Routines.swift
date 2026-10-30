@@ -1,4 +1,8 @@
-import CryptoKit
+#if canImport(CryptoKit)
+  import CryptoKit
+#else
+  import Crypto
+#endif
 import Foundation
 import OttoApplicationTools
 import OttoHooks
@@ -6,7 +10,9 @@ import OttoModels
 import OttoRuntime
 import OttoSecurity
 import OttoTools
-import Security
+#if canImport(Security)
+  import Security
+#endif
 
 extension ApplicationServices {
   @discardableResult
@@ -518,11 +524,17 @@ extension ApplicationServices {
         }
       }
       hookOutputTask = Task {
-        do {
-          for try await line in output.fileHandleForReading.bytes.lines {
-            _ = line
-          }
-        } catch {}
+        #if canImport(Darwin)
+          do {
+            for try await line in output.fileHandleForReading.bytes.lines {
+              _ = line
+            }
+          } catch {}
+        #else
+          // FileHandle.bytes is Darwin-only; drain the pipe until the listener exits.
+          let handle = output.fileHandleForReading
+          await Task.detached { while !handle.availableData.isEmpty {} }.value
+        #endif
       }
     } catch {
       hookListenerOfflineSince = hookListenerOfflineSince ?? .now
@@ -549,8 +561,13 @@ extension ApplicationServices {
 
   private static func generateRoutineSecret() throws -> String {
     var bytes = [UInt8](repeating: 0, count: 32)
-    let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-    guard status == errSecSuccess else { throw SecretStoreError.keychain(status) }
+    #if canImport(Security)
+      let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+      guard status == errSecSuccess else { throw SecretStoreError.keychain(status) }
+    #else
+      var generator = SystemRandomNumberGenerator()
+      for index in bytes.indices { bytes[index] = generator.next() }
+    #endif
     return Data(bytes).base64EncodedString()
   }
 }

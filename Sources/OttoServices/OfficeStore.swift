@@ -1,5 +1,11 @@
-import AppKit
-import Combine
+#if canImport(AppKit)
+  import AppKit
+#endif
+#if canImport(Combine)
+  import Combine
+#else
+  import OpenCombine
+#endif
 import Foundation
 import OttoModels
 

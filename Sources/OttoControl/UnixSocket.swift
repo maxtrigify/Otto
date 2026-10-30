@@ -1,4 +1,8 @@
-import Darwin
+#if canImport(Darwin)
+  import Darwin
+#elseif canImport(Glibc)
+  import Glibc
+#endif
 import Foundation
 
 enum UnixSocket {
@@ -7,26 +11,31 @@ enum UnixSocket {
   static let clientResponseTimeoutMilliseconds: Int32 = 10_000
 
   static func create() throws -> Int32 {
-    let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    let descriptor = Posix.socket(AF_UNIX, Posix.streamType, 0)
     guard descriptor >= 0 else { throw socketError() }
-    var noSignal: Int32 = 1
-    guard
-      setsockopt(
-        descriptor,
-        SOL_SOCKET,
-        SO_NOSIGPIPE,
-        &noSignal,
-        socklen_t(MemoryLayout<Int32>.size)
-      ) == 0
-    else {
-      let error = socketError()
-      Darwin.close(descriptor)
-      throw error
-    }
+    #if canImport(Darwin)
+      var noSignal: Int32 = 1
+      guard
+        setsockopt(
+          descriptor,
+          SOL_SOCKET,
+          SO_NOSIGPIPE,
+          &noSignal,
+          socklen_t(MemoryLayout<Int32>.size)
+        ) == 0
+      else {
+        let error = socketError()
+        Posix.close(descriptor)
+        throw error
+      }
+    #else
+      // Linux has no SO_NOSIGPIPE; a peer hanging up must not kill the process.
+      _ = signal(SIGPIPE, SIG_IGN)
+    #endif
     do {
       try setCloseOnExec(descriptor)
     } catch {
-      Darwin.close(descriptor)
+      Posix.close(descriptor)
       throw error
     }
     return descriptor
@@ -53,7 +62,7 @@ enum UnixSocket {
     var address = try address(for: path)
     let result = withUnsafePointer(to: &address) { pointer in
       pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-        Darwin.bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_un>.size))
+        Posix.bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_un>.size))
       }
     }
     guard result == 0 else { throw socketError() }
@@ -63,7 +72,7 @@ enum UnixSocket {
     var address = try address(for: path)
     let result = withUnsafePointer(to: &address) { pointer in
       pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-        Darwin.connect(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_un>.size))
+        Posix.connect(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_un>.size))
       }
     }
     guard result == 0 else { throw socketError() }
@@ -91,7 +100,7 @@ enum UnixSocket {
       var remaining = buffer.count
       var offset = 0
       while remaining > 0 {
-        let written = Darwin.write(descriptor, base.advanced(by: offset), remaining)
+        let written = Posix.write(descriptor, base.advanced(by: offset), remaining)
         if written < 0 {
           if errno == EINTR { continue }
           if errno == EAGAIN || errno == EWOULDBLOCK {
@@ -114,7 +123,7 @@ enum UnixSocket {
     var data = Data()
     var bytes = [UInt8](repeating: 0, count: 8_192)
     while data.count <= messageLimit {
-      let count = Darwin.read(descriptor, &bytes, bytes.count)
+      let count = Posix.read(descriptor, &bytes, bytes.count)
       if count < 0 {
         if errno == EINTR { continue }
         if errno == EAGAIN || errno == EWOULDBLOCK {
@@ -174,4 +183,55 @@ extension JSONEncoder {
 
 extension JSONDecoder {
   fileprivate static var control: JSONDecoder { JSONDecoder() }
+}
+
+/// The libc calls used by the control socket, named once so call sites stay platform-neutral.
+enum Posix {
+  #if canImport(Darwin)
+    static let streamType = SOCK_STREAM
+    static func socket(_ domain: Int32, _ type: Int32, _ proto: Int32) -> Int32 {
+      Darwin.socket(domain, type, proto)
+    }
+    @discardableResult static func close(_ fd: Int32) -> Int32 { Darwin.close(fd) }
+    static func bind(_ fd: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
+      Darwin.bind(fd, address, length)
+    }
+    static func connect(_ fd: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t)
+      -> Int32
+    { Darwin.connect(fd, address, length) }
+    static func listen(_ fd: Int32, _ backlog: Int32) -> Int32 { Darwin.listen(fd, backlog) }
+    static func accept(
+      _ fd: Int32, _ address: UnsafeMutablePointer<sockaddr>?,
+      _ length: UnsafeMutablePointer<socklen_t>?
+    ) -> Int32 { Darwin.accept(fd, address, length) }
+    static func read(_ fd: Int32, _ buffer: UnsafeMutableRawPointer?, _ count: Int) -> Int {
+      Darwin.read(fd, buffer, count)
+    }
+    static func write(_ fd: Int32, _ buffer: UnsafeRawPointer?, _ count: Int) -> Int {
+      Darwin.write(fd, buffer, count)
+    }
+  #else
+    static let streamType = Int32(SOCK_STREAM.rawValue)
+    static func socket(_ domain: Int32, _ type: Int32, _ proto: Int32) -> Int32 {
+      Glibc.socket(domain, type, proto)
+    }
+    @discardableResult static func close(_ fd: Int32) -> Int32 { Glibc.close(fd) }
+    static func bind(_ fd: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
+      Glibc.bind(fd, address, length)
+    }
+    static func connect(_ fd: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t)
+      -> Int32
+    { Glibc.connect(fd, address, length) }
+    static func listen(_ fd: Int32, _ backlog: Int32) -> Int32 { Glibc.listen(fd, backlog) }
+    static func accept(
+      _ fd: Int32, _ address: UnsafeMutablePointer<sockaddr>?,
+      _ length: UnsafeMutablePointer<socklen_t>?
+    ) -> Int32 { Glibc.accept(fd, address, length) }
+    static func read(_ fd: Int32, _ buffer: UnsafeMutableRawPointer?, _ count: Int) -> Int {
+      Glibc.read(fd, buffer, count)
+    }
+    static func write(_ fd: Int32, _ buffer: UnsafeRawPointer?, _ count: Int) -> Int {
+      Glibc.write(fd, buffer, count)
+    }
+  #endif
 }

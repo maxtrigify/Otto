@@ -5,7 +5,7 @@ import OttoModels
   import FoundationNetworking
 #endif
 
-#if canImport(OttoSecurity)
+#if os(macOS)  // OttoSecurity is linked only on macOS (see Package.swift)
   import OttoSecurity
 #endif
 
@@ -636,7 +636,7 @@ public struct OpenAIDirectAdapter: AgentAdapter {
   @Sendable public static func defaultCredential(for provider: OttoHarnessProvider) async throws
     -> String?
   {
-    #if canImport(OttoSecurity)
+    #if os(macOS)  // OttoSecurity is linked only on macOS (see Package.swift)
       try await makeDefaultSecretStore().value(for: provider.credentialKey)
     #else
       nil

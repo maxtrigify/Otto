@@ -44,8 +44,10 @@ public actor WorkspaceAttachmentStore {
   }
 
   private func importFile(_ sourceURL: URL) throws -> OttoAttachment {
-    let accessed = sourceURL.startAccessingSecurityScopedResource()
-    defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+    #if canImport(Darwin)
+      let accessed = sourceURL.startAccessingSecurityScopedResource()
+      defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+    #endif
 
     let values: URLResourceValues
     do {

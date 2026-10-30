@@ -19,6 +19,12 @@ jobs:
         run: swift build -c release --product ottod -Xswiftc -warnings-as-errors
       - name: Build Linux release signer
         run: swift build -c release --product otto-release -Xswiftc -warnings-as-errors
+      - name: Build portable engine modules
+        # Engine layers that already compile off macOS; OttoServices still has Mac-only features.
+        run: |
+          for target in OttoCore OttoMemory OttoMCP OttoApplicationTools; do
+            swift build -c release --target "$target" -Xswiftc -warnings-as-errors
+          done
       - name: Smoke Linux daemon
         run: .build/release/ottod --help
       - name: Exercise Linux PTY and remote protocol

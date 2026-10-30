@@ -5,6 +5,8 @@ import OttoRemote
 
 #if canImport(Darwin)
   import Darwin
+#elseif os(Windows)
+  import WinSDK
 #else
   #if canImport(Glibc)
     import Glibc
@@ -51,13 +53,17 @@ struct OttodCommand {
         workspaceRoots: configuration.workspaces
       )
       if configuration.mode == .serve {
-        let server = try RemoteSocketServer(
-          socketPath: configuration.socketPath,
-          daemon: daemon
-        )
-        FileHandle.standardError.write(Data("ottod listening on a private Unix socket.\n".utf8))
-        await server.waitUntilStopped()
-        return
+        #if os(Windows)
+          throw OttodError.serveUnsupported
+        #else
+          let server = try RemoteSocketServer(
+            socketPath: configuration.socketPath,
+            daemon: daemon
+          )
+          FileHandle.standardError.write(Data("ottod listening on a private Unix socket.\n".utf8))
+          await server.waitUntilStopped()
+          return
+        #endif
       }
       let decoder = JSONDecoder()
       let encoder = JSONEncoder()
@@ -166,9 +172,12 @@ struct OttodCommand {
   }
 
   private static func loadToken(_ url: URL) throws -> String {
-    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-    let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
-    guard permissions & 0o077 == 0 else { throw OttodError.insecureTokenFile }
+    #if !os(Windows)
+      // Windows has no POSIX mode bits; the token lives in the user's profile, guarded by its ACL.
+      let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+      let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777
+      guard permissions & 0o077 == 0 else { throw OttodError.insecureTokenFile }
+    #endif
     let token = try String(contentsOf: url, encoding: .utf8)
       .trimmingCharacters(in: .whitespacesAndNewlines)
     guard token.utf8.count >= 32 else { throw OttodError.invalidToken }
@@ -191,12 +200,14 @@ private enum OttodError: Error, LocalizedError {
   case usage
   case insecureTokenFile
   case invalidToken
+  case serveUnsupported
 
   var errorDescription: String? {
     switch self {
     case .usage: "Invalid ottod arguments."
     case .insecureTokenFile: "The ottod token file must not be accessible by group or others."
     case .invalidToken: "The ottod token must contain at least 32 bytes."
+    case .serveUnsupported: "ottod serve needs Unix sockets; on Windows use ottod stdio."
     }
   }
 }

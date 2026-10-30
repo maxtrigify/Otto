@@ -1,0 +1,31 @@
+{
+  "name": "otto-desktop",
+  "productName": "Otto",
+  "version": "0.1.0",
+  "description": "Otto for Windows and Linux: a web UI over the ottod engine.",
+  "private": true,
+  "main": "src/main.js",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist:win": "electron-builder --win --x64 --arm64",
+    "dist:linux": "electron-builder --linux AppImage deb"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "io.openotto.desktop",
+    "productName": "Otto",
+    "files": ["src/**", "renderer/**", "node_modules/@xterm/**", "package.json"],
+    "extraResources": [{ "from": "bin/${platform}-${arch}", "to": "bin", "filter": ["**/*"] }],
+    "win": { "target": ["nsis"], "artifactName": "Otto-Setup-${version}-${arch}.${ext}" },
+    "linux": { "category": "Development", "maintainer": "Otto <hello@openotto.io>" }
+  }
+}

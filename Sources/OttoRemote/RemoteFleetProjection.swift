@@ -79,6 +79,7 @@ public actor RemoteFleetCoordinator {
     return value
   }
 
+#if !os(Windows)
   @discardableResult
   public func refresh(using client: RemoteSocketClient) async throws -> RemoteFleetSnapshot {
     if value.status != .remote { value.status = .reconnecting }
@@ -117,6 +118,7 @@ public actor RemoteFleetCoordinator {
     value.status = .remote
     return value
   }
+#endif
 
   private func retryReadOnly<T: Sendable>(
     _ operation: @Sendable () async throws -> T
