@@ -25,6 +25,7 @@
       <nav class="nav" aria-label="Places">
         <button class="nav-item" id="nav-home" data-place="home"><span class="nav-icon" aria-hidden="true">⌂</span> Home</button>
         <button class="nav-item" id="nav-documents" data-place="documents"><span class="nav-icon" aria-hidden="true">▤</span> Documents</button>
+        <button class="nav-item" id="nav-memory" data-place="memory"><span class="nav-icon" aria-hidden="true">◎</span> Memory</button>
       </nav>
 
       <button class="new-chat" id="new-chat"><span class="plus" aria-hidden="true">+</span> New chat</button>
@@ -78,6 +79,17 @@
           </div>
         </header>
         <div class="documents-body" id="documents-body"></div>
+      </section>
+
+      <!-- Memory: about you, workspace habits and the project brain -->
+      <section class="memory" id="memory" hidden>
+        <header class="page-header drag">
+          <div>
+            <h1>Memory</h1>
+            <p class="page-sub">What Otto and your bots remember. Remove anything that is wrong.</p>
+          </div>
+        </header>
+        <div class="memory-body" id="memory-body"></div>
       </section>
 
       <!-- One open document -->
@@ -154,6 +166,7 @@
     <script src="terminals.js"></script>
     <script src="home.js"></script>
     <script src="documents.js"></script>
+    <script src="memory.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

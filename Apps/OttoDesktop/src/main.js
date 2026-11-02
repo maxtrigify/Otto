@@ -48,6 +48,10 @@ const DESKTOP_METHODS = new Set([
   'documents.create',
   'documents.read',
   'documents.saveText',
+  'memory.snapshot',
+  'memory.addPersonal',
+  'memory.removePersonal',
+  'memory.removeOperating',
 ]);
 
 /** Desktop agent IDs to the engine's provider names. */

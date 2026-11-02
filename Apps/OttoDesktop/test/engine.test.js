@@ -87,3 +87,15 @@ test('the desktop API rejects unknown methods', { skip: !binary }, async (t) => 
   await client.start();
   await assert.rejects(client.desktop('home.delete-everything'), (error) => error.code === 'unknown_method');
 });
+
+test('Memory: About me entries can be added and forgotten', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const empty = await client.desktop('memory.snapshot');
+  for (const key of ['personal', 'operating', 'brain']) assert.ok(Array.isArray(empty[key]), key);
+  const added = await client.desktop('memory.addPersonal', { text: 'Prefers short answers' });
+  const entry = added.personal.find((item) => item.text === 'Prefers short answers');
+  assert.ok(entry, JSON.stringify(added.personal));
+  const removed = await client.desktop('memory.removePersonal', { id: entry.id });
+  assert.ok(!removed.personal.some((item) => item.id === entry.id));
+});

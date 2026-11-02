@@ -1,4 +1,5 @@
 import Foundation
+import OttoMemory
 import OttoModels
 import OttoRPCContracts
 import OttoServices
@@ -95,6 +96,25 @@ struct DesktopAPI {
       try await services.commentOnReview(id: try uuid(input.id), text: input.text ?? "")
       return try reply(homeSnapshot())
 
+    // ---- Memory --------------------------------------------------------------------------
+    case "memory.snapshot":
+      return try reply(await memorySnapshot())
+    case "memory.addPersonal":
+      let input = try params(TextInput.self)
+      let text = input.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !text.isEmpty else { throw APIError.notFound("Memory text") }
+      _ = try await services.personalMemory.add(
+        CompactMemoryEntry(id: "desktop-\(UUID().uuidString.prefix(8).lowercased())", text: text, source: "user"))
+      return try reply(await memorySnapshot())
+    case "memory.removePersonal":
+      let input = try params(IDInput.self)
+      _ = try await services.personalMemory.remove(id: input.id)
+      return try reply(await memorySnapshot())
+    case "memory.removeOperating":
+      let input = try params(IDInput.self)
+      _ = try await services.operatingMemory.remove(id: input.id)
+      return try reply(await memorySnapshot())
+
     // ---- Documents -----------------------------------------------------------------------
     case "documents.list":
       services.office.refresh()
@@ -151,6 +171,18 @@ struct DesktopAPI {
       reviews: services.homeReviews.open)
   }
 
+  /// What Otto remembers: the person (About me), workspace habits, and the project brain.
+  private func memorySnapshot() async -> MemorySnapshot {
+    let records = ((try? await services.brain?.allRecords()) ?? [])
+      .filter { $0.status == .active }
+      .sorted { $0.updatedAt > $1.updatedAt }
+      .prefix(300)
+    return MemorySnapshot(
+      personal: await services.personalMemory.entries(),
+      operating: await services.operatingMemory.entries(),
+      brain: records.map(BrainRecordSummary.init))
+  }
+
   private func uuid(_ text: String) throws -> UUID {
     guard let id = UUID(uuidString: text) else { throw APIError.notFound(text) }
     return id
@@ -160,6 +192,7 @@ struct DesktopAPI {
 // MARK: - Payloads
 
 struct TitleInput: Decodable { var title: String }
+struct TextInput: Decodable { var text: String }
 struct IDInput: Decodable { var id: String }
 struct PathInput: Decodable { var path: String }
 struct BriefCompleteInput: Decodable {
@@ -209,4 +242,28 @@ struct DocumentContent: Encodable {
   var text: String?
   var sheet: Spreadsheet?
   var deck: Presentation?
+}
+
+struct MemorySnapshot: Encodable {
+  var personal: [CompactMemoryEntry]
+  var operating: [CompactMemoryEntry]
+  var brain: [BrainRecordSummary]
+}
+
+struct BrainRecordSummary: Encodable {
+  var id: String
+  var type: String
+  var title: String
+  var body: String
+  var updatedAt: Date
+  var tags: [String]
+
+  init(_ record: MemoryRecord) {
+    id = record.id
+    type = record.type.rawValue
+    title = record.title
+    body = record.body
+    updatedAt = record.updatedAt
+    tags = record.tags
+  }
 }

@@ -142,11 +142,13 @@ function showView(type) {
     ['home', 'home'],
     ['documents', 'documents'],
     ['editor', 'editor'],
+    ['memory', 'memory'],
   ]) {
     $(id).hidden = type !== place;
   }
   $('nav-home').classList.toggle('active', type === 'home');
   $('nav-documents').classList.toggle('active', type === 'documents' || type === 'editor');
+  $('nav-memory').classList.toggle('active', type === 'memory');
 }
 
 /** Home and Documents need the engine; without it the start screen is the bot/terminal picker. */
@@ -160,6 +162,7 @@ async function showPlace(place) {
   renderSidebar();
   if (place === 'home') await Home.load();
   if (place === 'documents') await Documents.list();
+  if (place === 'memory') await Memory.load();
 }
 
 function renderWelcome() {
@@ -531,6 +534,8 @@ async function chooseWorkspace() {
 $('new-chat').addEventListener('click', goHome);
 $('nav-home').addEventListener('click', () => showPlace('home'));
 $('nav-documents').addEventListener('click', () => showPlace('documents'));
+$('nav-memory').addEventListener('click', () => showPlace('memory'));
+Memory.onError = (error) => toast(cleanError(error));
 $('new-document').addEventListener('click', () => Documents.create('document'));
 $('new-sheet').addEventListener('click', () => Documents.create('spreadsheet'));
 $('editor-back').addEventListener('click', () => showPlace('documents'));
