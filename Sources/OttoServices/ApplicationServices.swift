@@ -1158,8 +1158,14 @@ public final class ApplicationServices: ObservableObject {
   }
 
   private static func ottoMCPExecutablePath() -> String? {
+    #if os(Windows)
+      let name = "otto-mcp.exe"
+    #else
+      let name = "otto-mcp"
+    #endif
+    // Beside the app's executable, or beside otto-engine in Otto Desktop's bin folder.
     let bundled = Bundle.main.executableURL?.deletingLastPathComponent()
-      .appending(path: "otto-mcp").path
+      .appending(path: name).path
     if let bundled, FileManager.default.isExecutableFile(atPath: bundled) { return bundled }
     return ExecutableLocator.find("otto-mcp")
   }

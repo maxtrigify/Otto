@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('otto', {
   chooseWorkspace: () => ipcRenderer.invoke('workspace:choose'),
   // Chats: the engine's host RPC (allowlisted in the main process).
   engine: (method, parameters) => ipcRenderer.invoke('engine:call', { method, parameters }),
+  // Home and Documents: owner-only methods on the same engine.
+  desktop: (method, params) => ipcRenderer.invoke('engine:desktop', { method, params }),
   onEngineExit: (listener) => ipcRenderer.on('engine:exit', (_event, payload) => listener(payload)),
   // Terminals: raw sessions through ottod.
   launch: (agentID, columns, rows) => ipcRenderer.invoke('session:launch', { agentID, columns, rows }),

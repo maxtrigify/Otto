@@ -50,8 +50,11 @@ jobs:
         run: |
           swift build --build-system native -c release --product otto-engine 2>&1 | Tee-Object -FilePath engine-build.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          swift build --build-system native -c release --product otto-mcp 2>&1 | Tee-Object -Append -FilePath engine-build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $bin = swift build --build-system native -c release --show-bin-path
-          Copy-Item "$bin/otto-engine.exe" Apps/OttoDesktop/bin/win32-x64/
+          # otto-mcp sits beside otto-engine: it is how agents reach Otto's tools.
+          Copy-Item "$bin/otto-engine.exe", "$bin/otto-mcp.exe" Apps/OttoDesktop/bin/win32-x64/
           Get-ChildItem "$bin" -Filter *.dll | Copy-Item -Destination Apps/OttoDesktop/bin/win32-x64/ -Force
 
       - name: Build engine modules one by one (diagnostics)
@@ -144,9 +147,11 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/src -w /src swift:6.2-noble bash -c '
             swift build -c release --product ottod --static-swift-stdlib -Xswiftc -warnings-as-errors &&
-            swift build -c release --product otto-engine --static-swift-stdlib -Xswiftc -warnings-as-errors'
+            swift build -c release --product otto-engine --static-swift-stdlib -Xswiftc -warnings-as-errors &&
+            swift build -c release --product otto-mcp --static-swift-stdlib -Xswiftc -warnings-as-errors'
           mkdir -p Apps/OttoDesktop/bin/linux-x64
-          cp .build/release/ottod .build/release/otto-engine Apps/OttoDesktop/bin/linux-x64/
+          # otto-mcp sits beside otto-engine: it is how agents reach Otto's tools.
+          cp .build/release/ottod .build/release/otto-engine .build/release/otto-mcp Apps/OttoDesktop/bin/linux-x64/
           sudo chown -R "$USER" .build Apps/OttoDesktop/bin
 
       - uses: actions/setup-node@v4

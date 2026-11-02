@@ -22,6 +22,11 @@
         <span class="workspace-name" id="workspace-name">Choose a folder</span>
       </button>
 
+      <nav class="nav" aria-label="Places">
+        <button class="nav-item" id="nav-home" data-place="home"><span class="nav-icon" aria-hidden="true">⌂</span> Home</button>
+        <button class="nav-item" id="nav-documents" data-place="documents"><span class="nav-icon" aria-hidden="true">▤</span> Documents</button>
+      </nav>
+
       <button class="new-chat" id="new-chat"><span class="plus" aria-hidden="true">+</span> New chat</button>
 
       <div class="lists">
@@ -47,6 +52,44 @@
         <p class="chat-note" id="chat-note" hidden></p>
         <div class="terminal-row" id="terminal-row"></div>
         <button class="primary" id="choose-workspace" hidden>Choose a workspace folder</button>
+      </section>
+
+      <!-- Home: brief, reviews and cards -->
+      <section class="home" id="home" hidden>
+        <header class="page-header drag">
+          <div>
+            <h1 id="home-greeting">Good morning</h1>
+            <p class="page-sub" id="home-sub"></p>
+          </div>
+        </header>
+        <div class="home-body" id="home-body"></div>
+      </section>
+
+      <!-- Documents: Word documents, sheets and slides in the workspace -->
+      <section class="documents" id="documents" hidden>
+        <header class="page-header drag">
+          <div>
+            <h1>Documents</h1>
+            <p class="page-sub">Word documents, sheets and slides your bots write with you.</p>
+          </div>
+          <div class="page-actions no-drag">
+            <button class="ghost" id="new-sheet">New sheet</button>
+            <button class="primary" id="new-document">New document</button>
+          </div>
+        </header>
+        <div class="documents-body" id="documents-body"></div>
+      </section>
+
+      <!-- One open document -->
+      <section class="editor" id="editor" hidden>
+        <header class="stage-header drag">
+          <div class="stage-title no-drag">
+            <button class="ghost back" id="editor-back">← Documents</button>
+            <span id="editor-title"></span>
+            <span class="stage-meta" id="editor-status"></span>
+          </div>
+        </header>
+        <div class="editor-body" id="editor-body"></div>
       </section>
 
       <!-- A chat with a bot -->
@@ -109,6 +152,8 @@
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
     <script src="markdown.js"></script>
     <script src="terminals.js"></script>
+    <script src="home.js"></script>
+    <script src="documents.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

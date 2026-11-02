@@ -4,6 +4,22 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.13 — 2026-10-30
+
+### New
+
+- **Approve, comment on or reject an automation's draft on Home.** An automation can stop and put its draft, such as a post or a reply, under For your review on Home. Approve it and the next step runs; comment and the agent revises it; reject it and nothing happens. Turn it on for a step in the automation editor, including steps in advanced flows.
+- **Send photos and videos to your bots from Telegram.** Photos, videos, round video notes, GIFs and image or video files sent to Otto's Telegram bot now reach the chat's bot, with your caption as the message. An album arrives as one message. Videos are kept on your Mac, the bot gets still frames from them, and when on-device speech is set up it also gets what is said. Start a caption with `/bot @handle` to send it to one bot. Files over Telegram's 20 MB bot limit are refused with a note (issue #27).
+- **Telegram voice notes and approvals from your phone.** Voice notes are transcribed on your Mac and sent to the bot. Connectors → Telegram → Approvals (off by default) sends tool approvals to Telegram with Approve and Deny buttons; website account approvals still stay on the Mac. Contributed by onlinegill (issue #29).
+- **Talk to several bots from one Telegram bot.** Allow them in Connectors → Telegram, then pick one with `/use @handle` or message one with `/bot @handle …`. Contributed by onlinegill (issue #28).
+- **A Connectors page with per-bot access, Email (SMTP) and Google Calendar.** Settings → Connectors shows each connector as a tile, and each has its own list of bots allowed to use it. Bots can send email through your SMTP server and read or add Calendar events; sending and creating always ask you first. Otto Harness also runs DeepSeek, Mistral, Groq, Google Gemini and OpenRouter models, and there's a new light theme, Daylight. Contributed by onlinegill.
+- **Reply to email in its thread, approving the exact message.** The approval card shows the recipient, subject and whole body, and says when a reply isn't going to the original sender. Contributed by onlinegill.
+- **Whistle on-device speech.** A 17 MB speech engine by Cactus Compute you can download in Voice settings after agreeing to its license. Command and Dictate become hold-to-talk in Push to Talk mode. Contributed by onlinegill.
+- **Back up and restore Otto's setup.** Settings → Backup saves your bots, automations, connector choices and preferences to one file, without passwords or sign-ins. Restoring pauses automations and never raises a bot's permissions. Contributed by onlinegill.
+- **Time and tokens for each reply, and Clear chat.** Hover a reply to see how long the turn took and its tokens. Right-click a session or bot and choose Clear chat… to start its conversation afresh. Contributed by onlinegill.
+- **Sessions in a project start in its repository.** Claude Code and Codex sessions in a project with a source folder start there, so the repo's `CLAUDE.md`, `.claude/` skills and `AGENTS.md` apply. Contributed by onlinegill (issue #24).
+- **Faster local models, and Fetch models.** Otto Harness requests are encoded the same way every time, so local servers reuse the prompt instead of re-reading it on every tool step. Settings → Models → Local can list the server's models. Contributed by onlinegill.
+
 ## 0.2.12 — 2026-10-29
 
 ### New

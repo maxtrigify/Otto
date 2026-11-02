@@ -87,6 +87,7 @@ function sessionButton({ active, dot, name, time, onClick }) {
 }
 
 function renderSidebar() {
+  document.querySelector('.nav').hidden = !chatAvailable();
   $('workspace-name').textContent = appState?.workspaceName || 'Choose a folder';
   $('workspace-button').title = appState?.workspace || 'Choose a workspace folder';
   const engine = appState?.daemon;
@@ -134,9 +135,31 @@ function renderSidebar() {
 // ---- Views ---------------------------------------------------------------------------------
 
 function showView(type) {
-  $('welcome').hidden = type !== 'welcome';
-  $('chat').hidden = type !== 'chat';
-  $('terminal-view').hidden = type !== 'terminal';
+  for (const [id, place] of [
+    ['welcome', 'welcome'],
+    ['chat', 'chat'],
+    ['terminal-view', 'terminal'],
+    ['home', 'home'],
+    ['documents', 'documents'],
+    ['editor', 'editor'],
+  ]) {
+    $(id).hidden = type !== place;
+  }
+  $('nav-home').classList.toggle('active', type === 'home');
+  $('nav-documents').classList.toggle('active', type === 'documents' || type === 'editor');
+}
+
+/** Home and Documents need the engine; without it the start screen is the bot/terminal picker. */
+async function showPlace(place) {
+  if (!chatAvailable()) return goHome();
+  stopPolling();
+  chat = null;
+  await Documents.close();
+  view = { type: place };
+  showView(place);
+  renderSidebar();
+  if (place === 'home') await Home.load();
+  if (place === 'documents') await Documents.list();
 }
 
 function renderWelcome() {
@@ -190,6 +213,7 @@ function renderWelcome() {
 function goHome() {
   stopPolling();
   chat = null;
+  Documents.close();
   view = { type: 'welcome' };
   showView('welcome');
   renderWelcome();
@@ -505,6 +529,17 @@ async function chooseWorkspace() {
 }
 
 $('new-chat').addEventListener('click', goHome);
+$('nav-home').addEventListener('click', () => showPlace('home'));
+$('nav-documents').addEventListener('click', () => showPlace('documents'));
+$('new-document').addEventListener('click', () => Documents.create('document'));
+$('new-sheet').addEventListener('click', () => Documents.create('spreadsheet'));
+$('editor-back').addEventListener('click', () => showPlace('documents'));
+Home.onError = (error) => toast(cleanError(error));
+Documents.onError = (error) => toast(cleanError(error));
+Documents.onOpen = () => {
+  view = { type: 'editor' };
+  showView('editor');
+};
 $('new-terminal').addEventListener('click', () => {
   const agent = appState?.agents.find((candidate) => candidate.id === 'shell' && candidate.available);
   if (agent) openTerminal(agent.id);
@@ -547,6 +582,7 @@ setInterval(async () => {
   await refreshRoster();
   renderSidebar();
   if (view.type === 'welcome') renderWelcome();
+  if (view.type === 'home') await Home.load();
 }, 4000);
 
 window.otto.onEvent((event) => Terminals.handleEvent(event));
@@ -567,7 +603,8 @@ window.otto
   .then(async (state) => {
     appState = state;
     await refreshRoster();
-    goHome();
+    if (chatAvailable()) await showPlace('home');
+    else goHome();
   })
   .catch((error) => {
     appState = { agents: [], providers: [], workspace: null, chat: { available: false } };

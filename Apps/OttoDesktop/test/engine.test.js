@@ -49,3 +49,41 @@ test('the engine rejects requests with the wrong token', { skip: !binary }, asyn
   client.token = 'f'.repeat(64);
   await assert.rejects(client.threads(), (error) => error.code === 'unauthorized');
 });
+
+test('Home: the brief, to-dos and reviews come through the desktop API', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const home = await client.desktop('home.snapshot');
+  assert.equal(typeof home.profile, 'string');
+  for (const key of ['todos', 'updates', 'events', 'cards', 'reviews']) assert.ok(Array.isArray(home[key]), key);
+
+  const added = await client.desktop('brief.addTodo', { title: 'Ship Otto Desktop' });
+  const todo = added.todos.find((item) => item.title === 'Ship Otto Desktop');
+  assert.ok(todo, JSON.stringify(added.todos));
+  const done = await client.desktop('brief.complete', { id: todo.id, completed: true });
+  const completed = done.todos.find((item) => item.id === todo.id);
+  assert.ok(!completed || completed.completedAt, 'completed to-do should be marked or leave the list');
+});
+
+test('Documents: create, save and read back a Word document and a sheet', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const doc = await client.desktop('documents.create', { kind: 'document', title: 'Launch notes' });
+  assert.equal(doc.kind, 'document');
+  await client.desktop('documents.saveText', { path: doc.path, text: 'Otto on Windows\nand Linux' });
+  const read = await client.desktop('documents.read', { path: doc.path });
+  assert.equal(read.text.trim(), 'Otto on Windows\nand Linux');
+
+  const sheet = await client.desktop('documents.create', { kind: 'spreadsheet', title: 'Budget' });
+  const sheetContent = await client.desktop('documents.read', { path: sheet.path });
+  assert.ok(sheetContent.sheet, JSON.stringify(sheetContent));
+
+  const list = await client.desktop('documents.list');
+  assert.deepEqual(new Set(list.map((file) => file.title)), new Set(['Launch notes', 'Budget']));
+});
+
+test('the desktop API rejects unknown methods', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  await assert.rejects(client.desktop('home.delete-everything'), (error) => error.code === 'unknown_method');
+});

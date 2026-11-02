@@ -326,3 +326,101 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .dialog input:focus, .dialog textarea:focus, .dialog select:focus { outline: none; border-color: #f2c87988; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* ---- Places nav --------------------------------------------------------------------- */
+
+.nav { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 2px; }
+.nav[hidden] { display: none; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: var(--muted); text-align: left; }
+.nav-item:hover { background: var(--panel); color: var(--text); }
+.nav-item.active { background: #23252b; color: var(--text); }
+.nav-icon { width: 16px; text-align: center; color: var(--faint); }
+.nav-item.active .nav-icon { color: var(--accent); }
+
+/* ---- Pages (Home, Documents) ---------------------------------------------------------- */
+
+.home, .documents, .editor { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.home[hidden], .documents[hidden], .editor[hidden] { display: none; }
+.page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px max(28px, calc((100% - 860px) / 2)) 14px;
+}
+.page-header h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.page-sub { margin: 4px 0 0; color: var(--muted); }
+.page-actions { display: flex; gap: 8px; }
+.home-body, .documents-body { flex: 1; overflow-y: auto; padding: 4px max(28px, calc((100% - 860px) / 2)) 32px; }
+.empty-state { color: var(--faint); padding: 24px 0; }
+.small { font-size: 12px; }
+.muted { color: var(--muted); }
+.error { color: var(--red); }
+
+.home-section { margin-bottom: 26px; }
+.home-section-title { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 12px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; }
+.count { padding: 1px 7px; border-radius: 999px; background: #f2c87926; color: var(--accent); font-size: 11px; letter-spacing: 0; }
+
+.review { padding: 14px 16px; margin-bottom: 10px; border: 1px solid #f2c87955; border-radius: 12px; background: #f2c8790a; }
+.review-top { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.review-draft { margin: 0 0 10px; padding: 10px 12px; max-height: 220px; overflow: auto; white-space: pre-wrap; font: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.review-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.todo { display: grid; grid-template-columns: 18px 1fr auto; align-items: start; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.todo input { margin-top: 3px; accent-color: var(--accent); }
+.todo-text { display: flex; flex-direction: column; gap: 2px; }
+.todo.done .todo-title { color: var(--faint); text-decoration: line-through; }
+.todo .dismiss { opacity: 0; }
+.todo:hover .dismiss { opacity: 1; }
+.add-todo input { width: 100%; margin-top: 8px; padding: 8px 4px; border: 0; border-bottom: 1px dashed var(--line); background: transparent; color: var(--text); font: inherit; outline: none; }
+.add-todo input:focus { border-bottom-color: #f2c87988; }
+
+.event, .update { display: flex; gap: 12px; align-items: baseline; padding: 7px 4px; border-bottom: 1px solid var(--line); }
+.event-time { min-width: 110px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.update { flex-direction: column; gap: 2px; }
+
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.home-card { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.home-card.wide { grid-column: span 2; }
+.home-card.full { grid-column: 1 / -1; }
+.home-card h3 { margin: 0; font-size: 14px; }
+.card-text { margin: 0; color: var(--muted); white-space: pre-wrap; }
+.card-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.card-rows li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
+.row-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.row-detail { grid-column: 1 / -1; }
+.card-updated { margin-top: auto; }
+.home-card.green { border-top: 2px solid var(--green); }
+.home-card.blue { border-top: 2px solid #7fa8e8; }
+.home-card.purple { border-top: 2px solid #c49be8; }
+.home-card.orange, .home-card.yellow { border-top: 2px solid var(--accent); }
+.home-card.red, .home-card.pink { border-top: 2px solid var(--red); }
+
+/* ---- Documents ------------------------------------------------------------------------ */
+
+.doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.doc-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: left; }
+.doc-card:hover { border-color: #f2c87988; }
+.doc-icon { font-size: 22px; color: var(--accent); }
+.doc-card.spreadsheet .doc-icon { color: var(--green); }
+.doc-card.presentation .doc-icon { color: #c49be8; }
+.doc-title { font-weight: 600; }
+.back { padding: 4px 10px; }
+.editor-body { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; padding: 24px; }
+.doc-editor {
+  width: min(760px, 100%);
+  min-height: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: 15px/1.7 "Iowan Old Style", Georgia, "Segoe UI", serif;
+}
+.sheet-wrap { overflow: auto; width: 100%; }
+.sheet { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.sheet th, .sheet td { border: 1px solid var(--line); padding: 5px 9px; min-width: 90px; height: 26px; text-align: left; white-space: nowrap; }
+.sheet th { background: var(--panel); color: var(--faint); font-weight: 500; min-width: 40px; }
+.deck { display: flex; flex-direction: column; gap: 14px; width: min(760px, 100%); }
+.slide { padding: 20px 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); aspect-ratio: 16 / 9; display: flex; flex-direction: column; gap: 6px; }
+.slide h3 { margin: 0; font-size: 20px; }

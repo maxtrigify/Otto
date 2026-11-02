@@ -29,9 +29,11 @@ enum OttoEngine {
     Runs Otto's engine for one workspace and serves the host RPC over standard input/output.
     """
 
+  /// Exactly one of `request` (shared host RPC) or `desktop` (owner-only DesktopAPI).
   struct Request: Decodable {
     var token: String
-    var request: OttoRPCRequest
+    var request: OttoRPCRequest?
+    var desktop: DesktopAPI.Call?
   }
 
   struct Failure: Encodable {
@@ -96,6 +98,7 @@ enum OttoEngine {
         deviceID: UUID(uuidString: "00000000-0000-0000-0000-00000000D35C")!,
         scopes: Set(OttoRPCScope.allCases))
       let output = ResponseWriter()
+      let desktop = DesktopAPI(services: services)
       let expected = Array(token.utf8)
       for await line in standardInputLines() {
         let request: Request
@@ -106,15 +109,28 @@ enum OttoEngine {
           continue
         }
         guard constantTimeEqual(Array(request.token.utf8), expected) else {
-          await output.write(
-            Failure(
-              id: request.request.id, error: .init(code: "unauthorized", message: "Unauthorized.")))
+          if let call = request.desktop {
+            await output.write(
+              DesktopAPI.Failure(
+                id: call.id, error: .init(code: "unauthorized", message: "Unauthorized.")))
+          } else {
+            await output.write(
+              Failure(
+                id: request.request?.id,
+                error: .init(code: "unauthorized", message: "Unauthorized.")))
+          }
           continue
         }
         // Long calls (sending a message, starting a thread) must not hold up event polling.
-        Task {
-          let response = await host.handle(request.request, client: client)
-          await output.write(response)
+        if let call = request.desktop {
+          Task { await output.writeLine(await desktop.handle(call)) }
+        } else if let rpc = request.request {
+          Task {
+            let response = await host.handle(rpc, client: client)
+            await output.write(response)
+          }
+        } else {
+          await output.write(Failure(error: .init(code: "invalid_request", message: "Invalid request.")))
         }
       }
       bridge.stop()
@@ -215,7 +231,12 @@ actor ResponseWriter {
   private let encoder = OttoRPCCodec.encoder
 
   func write<Value: Encodable>(_ value: Value) {
-    guard var data = try? encoder.encode(value) else { return }
+    guard let data = try? encoder.encode(value) else { return }
+    writeLine(data)
+  }
+
+  func writeLine(_ encoded: Data) {
+    var data = encoded
     data.append(0x0A)
     FileHandle.standardOutput.write(data)
   }

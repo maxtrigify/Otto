@@ -36,6 +36,28 @@ The Telegram integration is independent of the existing Photon/iMessage connecto
    text. In BotFather, use `/setprivacy` → **Disable** and remove/re-add the
    bot to that group if you want normal messages like `Test` to reach Otto.
 
+## Photos and videos
+
+Photos, videos, round video notes, GIFs (Telegram sends them as video) and
+files Telegram labels as an image or video go to the chat's bot, with the
+caption as the message. Start a caption with `/bot @handle` to send it to one
+allowed bot; `/bot @handle` alone sends just the media.
+
+- Only the paired person's media is downloaded, into
+  `<workspace>/.otto/chat-attachments/telegram/`, the same place as images
+  pasted into Chat. The bot's prompt lists the files with Otto's usual
+  attached-images note, so any harness opens them with its own tools and the
+  chat shows them as images.
+- The photos and videos of one album arrive as separate Telegram messages.
+  Otto waits until no more arrive for 1.5 seconds (at most ten items) and
+  sends them as one message.
+- Agents can't watch video, so Otto takes up to four still frames from each
+  video and attaches them. When on-device speech is set up for voice notes,
+  videos up to five minutes also have their sound transcribed. The video file
+  itself is kept and its path is in the prompt.
+- The Bot API serves files up to 20 MB. Larger items are refused with a note;
+  the rest of an album is still sent.
+
 ## Security and limitations
 
 - Only a Mac-approved private chat or a Mac-approved **group plus its named

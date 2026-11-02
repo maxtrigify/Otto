@@ -2556,15 +2556,7 @@ struct AgentConversationBody: View {
   }
 
   static func promptText(_ text: String, referencing imagePaths: [String]) -> String {
-    guard !imagePaths.isEmpty else { return text }
-    let listing = imagePaths.map { "- \($0)" }.joined(separator: "\n")
-    return """
-      \(text)
-
-      [The user attached \(imagePaths.count) image\(imagePaths.count == 1 ? "" : "s"). View each \
-      one with your image or file reading tool before answering:
-      \(listing)]
-      """
+    ChatAttachmentPrompt.text(text, referencing: imagePaths)
   }
 
   private var transcript: [AgentTranscriptEntry] { snapshot?.transcript ?? [] }

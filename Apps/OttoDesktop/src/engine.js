@@ -46,18 +46,29 @@ class EngineClient extends EventEmitter {
     return this.call('environment.getCapabilities');
   }
 
+  /** The shared host RPC (OttoRPCContracts), the same surface paired phones use. */
   call(method, parameters) {
-    if (!this.running) return Promise.reject(new Error('The Otto engine is not running'));
     const id = crypto.randomUUID().toUpperCase();
     const request = { id, protocolVersion: PROTOCOL_VERSION, method };
     if (parameters !== undefined) request.parameters = parameters;
+    return this.transmit(id, method, { token: this.token, request });
+  }
+
+  /** Owner-only desktop surfaces (Home, Documents) served by otto-engine's DesktopAPI. */
+  desktop(method, params) {
+    const id = crypto.randomUUID().toUpperCase();
+    return this.transmit(id, method, { token: this.token, desktop: { id, method, params: params ?? {} } });
+  }
+
+  transmit(id, method, envelope) {
+    if (!this.running) return Promise.reject(new Error('The Otto engine is not running'));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`The Otto engine did not answer ${method}`));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
-      this.child.stdin.write(JSON.stringify({ token: this.token, request }) + '\n');
+      this.child.stdin.write(JSON.stringify(envelope) + '\n');
     });
   }
 

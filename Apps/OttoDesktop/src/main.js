@@ -35,6 +35,21 @@ const ENGINE_METHODS = new Set([
   'approval.respond',
 ]);
 
+/** Owner-only desktop methods (otto-engine DesktopAPI) the window may call. */
+const DESKTOP_METHODS = new Set([
+  'home.snapshot',
+  'brief.addTodo',
+  'brief.complete',
+  'brief.dismiss',
+  'review.approve',
+  'review.reject',
+  'review.comment',
+  'documents.list',
+  'documents.create',
+  'documents.read',
+  'documents.saveText',
+]);
+
 /** Desktop agent IDs to the engine's provider names. */
 const PROVIDERS = { claude: 'Claude Code', codex: 'Codex', pi: 'Pi' };
 
@@ -122,10 +137,15 @@ async function startEngine() {
   }
 }
 
+/** Terminals and chats start independently: either one missing must not take down the other. */
 async function startWorkspace() {
   if (!settings.workspace) return { hello: null };
-  const [hello] = await Promise.all([startTerminals(), startEngine()]);
-  return { hello };
+  const [terminalResult] = await Promise.allSettled([startTerminals(), startEngine()]);
+  if (terminalResult.status === 'rejected') {
+    console.error('[ottod]', terminalResult.reason?.message ?? terminalResult.reason);
+    return { hello: null };
+  }
+  return { hello: terminalResult.value };
 }
 
 /** Windows batch shims (npm installs `claude.cmd`) cannot be started directly in a console. */
@@ -155,7 +175,7 @@ function state(hello) {
 function registerIPC() {
   ipcMain.handle('app:state', async () => {
     let hello = null;
-    if (settings.workspace && !terminals) hello = (await startWorkspace()).hello;
+    if (settings.workspace && !terminals && !engine) hello = (await startWorkspace()).hello;
     else if (terminals) hello = await terminals.request('hello', { afterSequence: 0, limit: 1 });
     return state(hello);
   });
@@ -176,6 +196,12 @@ function registerIPC() {
     if (!ENGINE_METHODS.has(method)) throw new Error(`Not allowed: ${method}`);
     if (!engine) throw new Error(engineError || 'Choose a workspace first.');
     return engine.call(method, parameters);
+  });
+
+  ipcMain.handle('engine:desktop', async (_event, { method, params }) => {
+    if (!DESKTOP_METHODS.has(method)) throw new Error(`Not allowed: ${method}`);
+    if (!engine) throw new Error(engineError || 'Choose a workspace first.');
+    return engine.desktop(method, params);
   });
 
   ipcMain.handle('session:launch', async (_event, { agentID, columns, rows }) => {
