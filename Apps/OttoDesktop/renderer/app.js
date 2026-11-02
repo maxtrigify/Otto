@@ -98,6 +98,10 @@ function showView(type) {
     ['documents', 'documents'],
     ['editor', 'editor'],
     ['memory', 'memory'],
+    ['automations', 'automations'],
+    ['activity', 'activity'],
+    ['files', 'files'],
+    ['note', 'note'],
     ['settings', 'settings'],
   ]) {
     $(id).hidden = type !== place;
@@ -109,6 +113,7 @@ async function go(place) {
   stopPolling();
   chat = null;
   await Documents.close();
+  await Places.closeNote();
   if (place === 'terminal') {
     const shell = appState?.agents.find((agent) => agent.id === 'shell' && agent.available);
     if (shell) return openTerminal(shell.id);
@@ -121,6 +126,9 @@ async function go(place) {
   renderSidebar();
   if (place === 'documents') await Documents.list();
   if (place === 'memory') await Memory.load();
+  if (place === 'automations') await Places.loadAutomations();
+  if (place === 'activity') await Places.loadActivity();
+  if (place === 'files') await Places.loadFiles();
   if (place === 'settings') renderSettings();
 }
 
@@ -143,6 +151,9 @@ function renderSidebar() {
   if (chatAvailable()) {
     places.append(
       railRow({ icon: 'doc.richtext', label: 'Documents', active: ['documents', 'editor'].includes(view.type), onClick: () => go('documents') }),
+      railRow({ icon: 'clock', label: 'Automations', active: view.type === 'automations', onClick: () => go('automations') }),
+      railRow({ icon: 'tray', label: 'Activity', active: view.type === 'activity', onClick: () => go('activity') }),
+      railRow({ icon: 'doc.text', label: 'Files & notes', active: ['files', 'note'].includes(view.type), onClick: () => go('files') }),
       railRow({ icon: 'brain', label: 'Memory', active: view.type === 'memory', onClick: () => go('memory') }),
     );
   }
@@ -664,6 +675,8 @@ function decorate() {
   $('composer-send').append(Icons.icon('arrow.up', 15));
   $('new-document').append(Icons.icon('plus', 14), el('span', '', 'New'));
   $('editor-back').append(Icons.icon('chevron.left', 13), el('span', '', 'Documents'));
+  $('new-automation').append(Icons.icon('plus', 14), el('span', '', 'New'));
+  $('note-back').append(Icons.icon('chevron.left', 13), el('span', '', 'Files & notes'));
   document.querySelector('.otto-face').append(Icons.face('Otto', 52));
 }
 
@@ -684,6 +697,22 @@ Documents.onOpen = () => {
   renderSidebar();
 };
 Memory.onError = (error) => toast(cleanError(error));
+Places.onError = (error) => toast(cleanError(error));
+Places.onOpenActivity = (item) => {
+  const link = item.deepLink || {};
+  const profileID = link.bot?.profileID || item.profileID;
+  const bot = profileID && bots.find((candidate) => candidate.id === profileID);
+  if (bot) return openBot(bot);
+  if (link.routine) return go('automations');
+  if (link.memory) return go('memory');
+};
+Places.onOpenNote = () => {
+  view = { type: 'note' };
+  showView('note');
+  renderSidebar();
+};
+Places.wire();
+$('note-back').addEventListener('click', () => go('files'));
 
 $('surface-home').addEventListener('click', () => setSurface('home'));
 $('surface-chat').addEventListener('click', () => setSurface('chat'));

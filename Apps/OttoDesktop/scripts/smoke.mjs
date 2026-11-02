@@ -11,6 +11,9 @@ const electron = require('electron');
 const [workspace, outputDirectory] = process.argv.slice(2);
 const port = 9333;
 fs.mkdirSync(outputDirectory, { recursive: true });
+// A note for Files & notes to find.
+fs.mkdirSync(path.join(workspace, 'Notes'), { recursive: true });
+fs.writeFileSync(path.join(workspace, 'Notes', 'Smoke note.md'), '# Smoke note\n\nWritten by the desktop smoke test.\n');
 
 // CI Linux runners cannot set up Chromium's user-namespace sandbox; the app itself keeps it.
 const linuxCI = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : [];
@@ -35,8 +38,13 @@ await new Promise((resolve) => socket.addEventListener('open', resolve));
 
 let nextID = 1;
 const waiting = new Map();
+const pageErrors = [];
 socket.addEventListener('message', ({ data }) => {
   const message = JSON.parse(data);
+  if (message.method === 'Runtime.exceptionThrown') {
+    const details = message.params.exceptionDetails;
+    pageErrors.push(details.exception?.description || details.text);
+  }
   waiting.get(message.id)?.(message);
   waiting.delete(message.id);
 });
@@ -63,6 +71,27 @@ const type = async (text) => {
 };
 
 let failure = null;
+await call('Runtime.enable');
+// Opens a rail place by its label and waits for its page to render without errors.
+const visit = async (label, pageID, ready) => {
+  const clicked = await evaluate(`(() => {
+    const row = [...document.querySelectorAll('#places .rail-row')].find((candidate) => candidate.textContent.trim() === ${JSON.stringify(label)});
+    if (!row) return false;
+    row.click();
+    return true;
+  })()`);
+  if (!clicked) throw new Error(`no rail row for ${label}`);
+  let ok = false;
+  for (let attempt = 0; attempt < 20 && !ok; attempt += 1) {
+    await sleep(300);
+    ok = await evaluate(`!document.getElementById(${JSON.stringify(pageID)}).hidden && (${ready})`);
+  }
+  const toast = await evaluate(`document.getElementById('toast').hidden ? '' : document.getElementById('toast').textContent`);
+  await shot(`place-${pageID}.png`);
+  console.log(`${label}: ${ok ? 'ok' : 'NOT RENDERED'}${toast ? ` (toast: ${toast})` : ''}`);
+  if (!ok) throw new Error(`${label} did not render`);
+  if (toast) throw new Error(`${label} showed an error: ${toast}`);
+};
 try {
   const engineLine = `appState && appState.daemon ? 'Engine ' + appState.daemon.version + ' · ' + appState.platform : 'offline'`;
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -87,6 +116,46 @@ try {
     const composer = await evaluate(`!document.getElementById('welcome-composer').hidden`);
     console.log(`chat engine: ${composer ? 'available' : 'missing'}`);
     if (!composer) throw new Error('the chat engine did not come up');
+
+    // Every place in the rail opens and renders.
+    await visit('Documents', 'documents', `document.getElementById('documents-body').childElementCount > 0`);
+    await visit('Automations', 'automations', `document.querySelector('#automations-body .overline')`);
+    await evaluate(`(() => {
+      document.getElementById('new-automation').click();
+      document.getElementById('automation-name').value = 'Smoke digest';
+      document.getElementById('automation-instruction').value = 'Say hello';
+      document.querySelector('#automation-form button[value=create]').click();
+    })()`);
+    let automation = null;
+    for (let attempt = 0; attempt < 20 && !automation; attempt += 1) {
+      await sleep(300);
+      automation = await evaluate(`document.querySelector('.automation-row strong')?.textContent ?? null`);
+    }
+    await shot('place-automations-created.png');
+    console.log(`automation created: ${automation}`);
+    if (automation !== 'Smoke digest') throw new Error('creating an automation did not show it');
+    await evaluate(`document.querySelector('.automation-row .switch').click()`);
+    await sleep(800);
+    const paused = await evaluate(`document.querySelector('.automation-row .switch').getAttribute('aria-checked')`);
+    if (paused !== 'false') throw new Error(`pausing the automation failed: ${paused}`);
+
+    await visit('Activity', 'activity', `document.querySelector('#activity-body .overline')`);
+    await visit('Files & notes', 'files', `document.querySelector('#files-body .file-row')`);
+    await evaluate(`document.querySelector('#files-body .file-row').click()`);
+    let heading = null;
+    for (let attempt = 0; attempt < 20 && !heading; attempt += 1) {
+      await sleep(300);
+      heading = await evaluate(`document.getElementById('note').hidden ? null : document.querySelector('#note-preview :is(h1,h2,h3)')?.textContent ?? null`);
+    }
+    await shot('place-note.png');
+    console.log(`note: ${heading}`);
+    if (heading !== 'Smoke note') throw new Error('the note did not open');
+    await visit('Memory', 'memory', `document.querySelector('#memory-body .overline')`);
+    await evaluate(`document.getElementById('nav-settings').click()`);
+    await sleep(500);
+    if (await evaluate(`document.getElementById('settings').hidden`)) throw new Error('Settings did not open');
+    await shot('place-settings.png');
+    if (pageErrors.length) throw new Error(`page errors:\n${pageErrors.join('\n')}`);
   }
 
   await evaluate(`document.getElementById('surface-chat').click(); document.getElementById('add-terminal').click()`);
@@ -116,6 +185,7 @@ try {
   await shot('3-stopped.png');
   console.log(`after stop: ${meta}`);
   if (meta !== 'Stopped' && !/^(Finished|Exited)/.test(meta)) throw new Error(`session did not stop: ${meta}`);
+  if (pageErrors.length) throw new Error(`page errors:\n${pageErrors.join('\n')}`);
 } catch (error) {
   failure = error;
 } finally {

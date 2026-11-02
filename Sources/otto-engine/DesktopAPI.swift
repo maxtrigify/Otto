@@ -1,5 +1,6 @@
 import Foundation
 import OttoCore
+import OttoDocuments
 import OttoMemory
 import OttoModels
 import OttoRPCContracts
@@ -99,6 +100,60 @@ struct DesktopAPI {
       try await services.commentOnReview(id: try uuid(input.id), text: input.text ?? "")
       return try reply(homeSnapshot())
 
+    // ---- Automations ---------------------------------------------------------------------
+    case "automations.list":
+      return try reply(automations())
+    case "automations.setEnabled":
+      let input = try params(EnableInput.self)
+      guard var routine = services.routines.routine(id: try uuid(input.id)) else {
+        throw APIError.notFound("Automation")
+      }
+      routine.enabled = input.enabled
+      _ = try await services.saveRoutine(routine)
+      return try reply(automations())
+    case "automations.create":
+      let input = try params(AutomationCreateInput.self)
+      let trigger: RoutineTrigger =
+        if let cron = input.cron, !cron.isEmpty {
+          .schedule(cron: cron, intervalSeconds: nil)
+        } else {
+          .schedule(cron: nil, intervalSeconds: max(60, (input.everyMinutes ?? 60) * 60))
+        }
+      let target: RoutineTarget =
+        if let botID = input.botID { .spawnProfile(profileID: try uuid(botID)) } else {
+          .spawnProvider(provider: input.provider ?? "Claude Code")
+        }
+      _ = try await services.saveRoutine(
+        Routine(
+          name: input.name, instruction: input.instruction, trigger: trigger, target: target,
+          enabled: input.enabled ?? false))
+      return try reply(automations())
+    case "automations.delete":
+      let input = try params(IDInput.self)
+      try services.deleteRoutine(id: try uuid(input.id))
+      return try reply(automations())
+    case "automations.runNow":
+      let input = try params(IDInput.self)
+      _ = try await services.testRoutine(id: try uuid(input.id))
+      return try reply(automations())
+
+    // ---- Activity ------------------------------------------------------------------------
+    case "activity.snapshot":
+      return try reply(
+        ActivitySnapshot(
+          needsYou: services.botActivity.needsUser, active: services.botActivity.active))
+
+    // ---- Files & notes -------------------------------------------------------------------
+    case "files.list":
+      return try reply(noteFiles())
+    case "files.read":
+      let input = try params(PathInput.self)
+      return try reply(NoteContent(path: input.path, text: try await services.documents.read(relativePath: input.path)))
+    case "files.save":
+      let input = try params(DocumentSaveInput.self)
+      try await services.documents.replace(relativePath: input.path, text: input.text)
+      return try reply(NoteContent(path: input.path, text: input.text))
+
     // ---- Appearance ----------------------------------------------------------------------
     // The workspace's theme, shared with the Mac app (the active canvas's themeID).
     case "appearance.get":
@@ -195,6 +250,45 @@ struct DesktopAPI {
       brain: records.map(BrainRecordSummary.init))
   }
 
+  private func automations() -> AutomationsSnapshot {
+    let routines = services.routines.routines.sorted {
+      $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+    }
+    return AutomationsSnapshot(
+      automations: routines.map(AutomationSummary.init),
+      runs: services.routines.recentRuns(limit: 40))
+  }
+
+  /// Markdown and text notes in the workspace (what the Mac lists under Files & notes), skipping
+  /// Otto's own state, version control and dependency folders.
+  private func noteFiles() -> [NoteSummary] {
+    let root = URL(fileURLWithPath: services.defaultWorkspacePath, isDirectory: true)
+    let skipped: Set<String> = [".otto", ".muse", ".git", "node_modules", ".build", ".trash"]
+    guard
+      let walker = FileManager.default.enumerator(
+        at: root, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+        options: [.skipsHiddenFiles, .skipsPackageDescendants])
+    else { return [] }
+    var notes: [NoteSummary] = []
+    for case let url as URL in walker {
+      if skipped.contains(url.lastPathComponent) {
+        walker.skipDescendants()
+        continue
+      }
+      guard ["md", "markdown", "txt"].contains(url.pathExtension.lowercased()) else { continue }
+      let relative = String(url.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count))
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/\\"))
+      let modified =
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+        ?? .distantPast
+      notes.append(
+        NoteSummary(
+          path: relative, title: url.deletingPathExtension().lastPathComponent, modifiedAt: modified))
+      if notes.count >= 500 { break }
+    }
+    return notes.sorted { $0.modifiedAt > $1.modifiedAt }
+  }
+
   private func appearance() -> Appearance {
     let theme = OttoThemeCatalog.theme(id: store.activeCanvas.themeID)
     return Appearance(
@@ -218,6 +312,97 @@ struct DesktopAPI {
 struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
+struct AutomationCreateInput: Decodable {
+  var name: String
+  var instruction: String
+  var everyMinutes: Int?
+  var cron: String?
+  var botID: String?
+  var provider: String?
+  var enabled: Bool?
+}
+struct EnableInput: Decodable {
+  var id: String
+  var enabled: Bool
+}
+
+struct AutomationSummary: Encodable {
+  var id: UUID
+  var name: String
+  var instruction: String
+  var trigger: String
+  var enabled: Bool
+  var lastFiredAt: Date?
+  var fireCount: Int
+  var lastError: String?
+
+  init(_ routine: Routine) {
+    id = routine.id
+    name = routine.name
+    instruction = routine.instruction
+    trigger = Self.scheduleLabel(routine)
+    enabled = routine.enabled
+    lastFiredAt = routine.lastFiredAt
+    fireCount = routine.fireCount
+    lastError = routine.lastError
+  }
+}
+
+extension AutomationSummary {
+  /// The Mac's wording (AutomationsView.scheduleLabel), so both apps describe a schedule alike.
+  static func scheduleLabel(_ routine: Routine) -> String {
+    if routine.runAfter != nil { return "After another automation" }
+    switch routine.trigger {
+    case .schedule(let cron?, _): return cronLabel(cron) ?? "Custom schedule"
+    case .schedule(nil, let seconds?):
+      return seconds % 3600 == 0 ? "Every \(seconds / 3600)h" : "Every \(max(1, seconds / 60)) min"
+    case .schedule: return "On a schedule"
+    case .webhook: return "When a webhook arrives"
+    case .agentEvent: return "When an agent event happens"
+    case .slackMessage: return "On a Slack message"
+    case .discordMessage: return "On a Discord message"
+    case .gitEvent: return "On a git change"
+    }
+  }
+
+  static func cronLabel(_ cron: String) -> String? {
+    let parts = cron.split(separator: " ").map(String.init)
+    guard parts.count == 5, parts[2] == "*", parts[3] == "*", let minute = Int(parts[0]) else {
+      return nil
+    }
+    if parts[1] == "*" { return "Every hour" }
+    guard let hour = Int(parts[1]) else { return nil }
+    let clock = String(format: "%02d:%02d", hour, minute)
+    switch parts[4] {
+    case "*": return "Every day at \(clock)"
+    case "1-5": return "Weekdays at \(clock)"
+    default:
+      guard let day = Int(parts[4]), (0...6).contains(day) else { return nil }
+      return "\(Calendar.current.weekdaySymbols[day])s at \(clock)"
+    }
+  }
+}
+
+struct AutomationsSnapshot: Encodable {
+  var automations: [AutomationSummary]
+  var runs: [RoutineRunRecord]
+}
+
+struct ActivitySnapshot: Encodable {
+  var needsYou: [BotActivityItem]
+  var active: [BotActivityItem]
+}
+
+struct NoteSummary: Encodable {
+  var path: String
+  var title: String
+  var modifiedAt: Date
+}
+
+struct NoteContent: Encodable {
+  var path: String
+  var text: String
+}
 
 struct ThemeChoice: Encodable {
   var id: String

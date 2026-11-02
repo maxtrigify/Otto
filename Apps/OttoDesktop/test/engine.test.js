@@ -99,3 +99,68 @@ test('Memory: About me entries can be added and forgotten', { skip: !binary }, a
   const removed = await client.desktop('memory.removePersonal', { id: entry.id });
   assert.ok(!removed.personal.some((item) => item.id === entry.id));
 });
+
+test('Automations: create, pause, resume and delete', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const empty = await client.desktop('automations.list');
+  assert.deepEqual(empty.automations, []);
+  assert.ok(Array.isArray(empty.runs));
+
+  const created = await client.desktop('automations.create', {
+    name: 'Morning digest',
+    instruction: 'Summarise what changed overnight',
+    everyMinutes: 120,
+  });
+  const automation = created.automations.find((item) => item.name === 'Morning digest');
+  assert.ok(automation, JSON.stringify(created));
+  assert.equal(automation.enabled, false);
+  assert.equal(automation.trigger, 'Every 2h');
+
+  const weekday = await client.desktop('automations.create', {
+    name: 'Inbox triage',
+    instruction: 'List what needs a reply',
+    cron: '0 8 * * 1-5',
+  });
+  const triage = weekday.automations.find((item) => item.name === 'Inbox triage');
+  assert.equal(triage.trigger, 'Weekdays at 08:00');
+  await client.desktop('automations.delete', { id: triage.id });
+
+  const enabled = await client.desktop('automations.setEnabled', { id: automation.id, enabled: true });
+  assert.equal(enabled.automations.find((item) => item.id === automation.id).enabled, true);
+  const paused = await client.desktop('automations.setEnabled', { id: automation.id, enabled: false });
+  assert.equal(paused.automations.find((item) => item.id === automation.id).enabled, false);
+
+  await assert.rejects(client.desktop('automations.create', { name: '', instruction: 'x' }));
+  const deleted = await client.desktop('automations.delete', { id: automation.id });
+  assert.deepEqual(deleted.automations, []);
+});
+
+test('Activity: the snapshot lists what needs you and what is running', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const activity = await client.desktop('activity.snapshot');
+  assert.ok(Array.isArray(activity.needsYou));
+  assert.ok(Array.isArray(activity.active));
+});
+
+test('Files & notes: Markdown notes list, read and save; Otto state stays hidden', { skip: !binary }, async (t) => {
+  const { client, workspace } = await engine(t);
+  fs.mkdirSync(path.join(workspace, 'Notes'));
+  fs.writeFileSync(path.join(workspace, 'Notes', 'Plan.md'), '# Plan\n\nShip it');
+  fs.mkdirSync(path.join(workspace, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'node_modules', 'pkg', 'README.md'), 'hidden');
+  await client.start();
+
+  const notes = await client.desktop('files.list');
+  const paths = notes.map((note) => note.path.replaceAll('\\', '/'));
+  assert.ok(paths.includes('Notes/Plan.md'), JSON.stringify(paths));
+  assert.ok(!paths.some((item) => item.includes('node_modules') || item.startsWith('.otto')), JSON.stringify(paths));
+  assert.equal(notes.find((note) => note.path.replaceAll('\\', '/') === 'Notes/Plan.md').title, 'Plan');
+
+  const read = await client.desktop('files.read', { path: 'Notes/Plan.md' });
+  assert.equal(read.text, '# Plan\n\nShip it');
+  await client.desktop('files.save', { path: 'Notes/Plan.md', text: '# Plan\n\nShipped' });
+  assert.equal(fs.readFileSync(path.join(workspace, 'Notes', 'Plan.md'), 'utf8'), '# Plan\n\nShipped');
+  await assert.rejects(client.desktop('files.read', { path: '../outside.md' }));
+});

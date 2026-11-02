@@ -132,6 +132,60 @@
           <div class="editor-body" id="editor-body"></div>
         </section>
 
+        <!-- Automations -->
+        <section class="page" id="automations" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Automations</h1>
+              <p class="page-sub">Tasks that run on a schedule. Turn one off to pause it.</p>
+            </div>
+            <div class="page-actions">
+              <button class="text-button" id="new-automation"></button>
+            </div>
+          </header>
+          <div class="page-body" id="automations-body"></div>
+        </section>
+
+        <!-- Activity -->
+        <section class="page" id="activity" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Activity</h1>
+              <p class="page-sub">What your agents did and need.</p>
+            </div>
+          </header>
+          <div class="page-body" id="activity-body"></div>
+        </section>
+
+        <!-- Files & notes -->
+        <section class="page" id="files" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Files &amp; notes</h1>
+              <p class="page-sub">Notes in this workspace folder.</p>
+            </div>
+          </header>
+          <div class="page-body" id="files-body"></div>
+        </section>
+
+        <!-- One open note -->
+        <section class="page editor" id="note" hidden>
+          <header class="page-header compact">
+            <div class="editor-title">
+              <button class="text-button" id="note-back"></button>
+              <span id="note-title"></span>
+              <span class="stage-meta" id="note-status"></span>
+            </div>
+            <div class="page-actions">
+              <button class="soft-button" id="note-edit">Edit</button>
+            </div>
+          </header>
+          <div class="editor-body">
+            <div class="note-preview message assistant" id="note-preview"></div>
+            <textarea class="doc-editor" id="note-input" aria-label="Note" spellcheck="true" hidden></textarea>
+          </div>
+        </section>
+
         <!-- Memory -->
         <section class="page" id="memory" hidden>
           <header class="page-header">
@@ -184,6 +238,31 @@
       </form>
     </dialog>
 
+    <dialog class="dialog" id="automation-dialog">
+      <form method="dialog" id="automation-form">
+        <h2>New automation</h2>
+        <label>Name<input id="automation-name" required maxlength="120" placeholder="e.g. Morning digest" /></label>
+        <label>What it does<textarea id="automation-instruction" required rows="3" placeholder="e.g. Summarise what changed in my inbox overnight"></textarea></label>
+        <div class="dialog-row">
+          <label>Runs<select id="automation-frequency">
+            <option value="daily">Every day</option>
+            <option value="weekdays" selected>Weekdays</option>
+            <option value="weekly">Once a week</option>
+            <option value="hourly">Every hour</option>
+          </select></label>
+          <label id="automation-weekday-label" hidden>On<select id="automation-weekday">
+            <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+            <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+          </select></label>
+          <label>At<input id="automation-time" type="time" value="09:00" required /></label>
+        </div>
+        <div class="dialog-actions">
+          <button class="ghost small-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary small-button" value="create">Create</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
     <script src="icons.js"></script>
@@ -193,6 +272,7 @@
     <script src="home.js"></script>
     <script src="documents.js"></script>
     <script src="memory.js"></script>
+    <script src="places.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

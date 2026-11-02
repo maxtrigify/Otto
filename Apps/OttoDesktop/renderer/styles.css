@@ -559,3 +559,30 @@ body.darwin .chrome { padding-left: 80px; }
 .dialog input, .dialog textarea, .dialog select { color: var(--paper); background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 8px 10px; outline: none; }
 .dialog input:focus, .dialog textarea:focus, .dialog select:focus { border-color: rgba(var(--signal-rgb), 0.6); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+
+/* Automations, Activity, Files & notes */
+.place-list { padding: 4px 0; }
+.place-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 18px; text-align: left; border-bottom: 1px solid var(--hairline); }
+.place-row:last-child { border-bottom: 0; }
+button.place-row:hover { background: var(--hover); }
+.place-row > .icon { color: var(--signal); }
+.place-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.place-text strong { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-text .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-actions { display: flex; align-items: center; gap: 10px; }
+.place-empty { padding: 28px 2px; display: flex; flex-direction: column; gap: 4px; }
+.place-empty strong { font-size: 14px; }
+.place-empty span { font-size: 12.5px; color: var(--text-faint); }
+.error.small { color: var(--red); font-size: 11.5px; }
+.switch { position: relative; width: 30px; height: 18px; border-radius: 9px; background: rgba(var(--paper-rgb), 0.18); transition: background 0.15s; flex: none; }
+.switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--paper); transition: transform 0.15s; }
+.switch.on { background: var(--signal); }
+.switch.on::after { transform: translateX(12px); }
+.run-outcome { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); }
+.run-outcome.completed { color: var(--green); }
+.run-outcome.failed { color: var(--red); }
+.note-preview { width: min(760px, 100%); font-size: 15px; line-height: 1.7; }
+.switch::after { background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.note-preview h3 { font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 30px; margin: 0 0 12px; }
+.dialog-row { display: flex; gap: 10px; }
+.dialog-row label { flex: 1; }
