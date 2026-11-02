@@ -1,10 +1,13 @@
 import Foundation
+import OttoApplicationTools
+import OttoBrowser
 import OttoCore
 import OttoDocuments
 import OttoMemory
 import OttoModels
 import OttoRPCContracts
 import OttoServices
+import OttoTools
 
 /// Desktop-only surfaces (Home and Documents) for the owner's own Otto Desktop. These are kept
 /// out of the shared host RPC so paired phones can never reach them. Each stdin line of the form
@@ -187,6 +190,77 @@ struct DesktopAPI {
       _ = try services.homeCards.remove(id: try uuid(input.id))
       return try reply(dashboards())
 
+    // ---- Browser -------------------------------------------------------------------------
+    // The same browser nodes bots use (browser.* tools); the desktop renders them through
+    // DesktopBrowserBridge and reports page loads back here.
+    case "browser.list":
+      return try reply(await browsers())
+    case "browser.open":
+      let input = try params(BrowserURLInput.self)
+      if let nodeID = input.nodeID.flatMap(UUID.init(uuidString:)) ?? browserNodes().last?.id {
+        try await tool("browser.open_tab", BrowserOpenTabInput(url: input.url, nodeID: nodeID))
+      } else {
+        try await tool("browser.open", BrowserOpenInput(url: input.url, x: 0, y: 0))
+      }
+      return try reply(await browsers())
+    case "browser.navigate":
+      let input = try params(BrowserURLInput.self)
+      guard let nodeID = input.nodeID else { throw APIError.invalid("nodeID is required") }
+      try await tool("browser.navigate", BrowserNavigateInput(nodeID: try uuid(nodeID), url: input.url))
+      return try reply(await browsers())
+    case "browser.back", "browser.forward", "browser.refresh":
+      let input = try params(IDInput.self)
+      try await tool(call.method, BrowserNodeInput(nodeID: try uuid(input.id)))
+      return try reply(await browsers())
+    case "browser.selectTab":
+      let input = try params(BrowserTabInput.self)
+      try await selectTab(nodeID: try uuid(input.nodeID), tabID: try uuid(input.tabID))
+      return try reply(await browsers())
+    case "browser.closeTab":
+      let input = try params(BrowserTabInput.self)
+      try await closeTab(nodeID: try uuid(input.nodeID), tabID: try uuid(input.tabID))
+      return try reply(await browsers())
+    case "browser.close":
+      let input = try params(IDInput.self)
+      try await services.closeNode(nodeID: try uuid(input.id))
+      return try reply(await browsers())
+    case "browser.inspect":
+      // What a bot sees with browser.inspect, for the desktop's own checks.
+      let input = try params(IDInput.self)
+      return try reply(
+        try await services.registry.call(
+          name: "browser.inspect", input: try JSONValue.encode(BrowserNodeInput(nodeID: try uuid(input.id))),
+          context: desktopContext))
+    // The bot tools themselves, so the desktop's checks drive a page exactly as a bot does.
+    case "browser.click":
+      let input = try params(BrowserElementCall.self)
+      return try reply(
+        try await services.registry.call(
+          name: "browser.click",
+          input: try JSONValue.encode(
+            BrowserElementInput(nodeID: try uuid(input.id), elementID: input.element)),
+          context: desktopContext))
+    case "browser.type":
+      let input = try params(BrowserElementCall.self)
+      return try reply(
+        try await services.registry.call(
+          name: "browser.type",
+          input: try JSONValue.encode(
+            BrowserTypeInput(
+              nodeID: try uuid(input.id), elementID: input.element, text: input.text ?? "")),
+          context: desktopContext))
+    case "browser.screenshot":
+      let input = try params(IDInput.self)
+      return try reply(
+        try await services.registry.call(
+          name: "browser.screenshot",
+          input: try JSONValue.encode(BrowserNodeInput(nodeID: try uuid(input.id))),
+          context: desktopContext))
+    case "browser.reportLoaded":
+      let input = try params(BrowserLoadReport.self)
+      try await reportLoaded(input)
+      return try reply(true)
+
     // ---- Activity ------------------------------------------------------------------------
     case "activity.snapshot":
       return try reply(
@@ -300,6 +374,103 @@ struct DesktopAPI {
       brain: records.map(BrainRecordSummary.init))
   }
 
+  private var desktopContext: ToolContext {
+    ToolContext(
+      actorID: "otto-desktop", scopes: Set(ToolScope.allCases), confirmed: true,
+      source: .userInterface)
+  }
+
+  private func tool<Input: Encodable & Sendable>(_ name: String, _ input: Input) async throws {
+    _ = try await services.registry.call(
+      name: name, input: try JSONValue.encode(input), context: desktopContext)
+  }
+
+  private func browserNodes() -> [OttoNode] {
+    store.snapshot.canvases.flatMap(\.nodes).filter { $0.kind == .browser }
+  }
+
+  private func browsers() async -> [BrowserSummary] {
+    var summaries: [BrowserSummary] = []
+    for node in browserNodes() {
+      let session = node.browserSession ?? BrowserSession(url: BrowserDefaults.blankURL)
+      let state =
+        await services.browserRuntime.state(nodeID: node.id)
+        ?? BrowserRuntimeState(
+          nodeID: node.id, url: session.activeTab?.url ?? BrowserDefaults.blankURL,
+          title: session.activeTab?.title,
+          tabs: session.tabs.map { BrowserRuntimeTab(id: $0.id, url: $0.url, title: $0.title) },
+          activeTabID: session.activeTabID)
+      summaries.append(BrowserSummary(nodeID: node.id, name: node.displayName, state: state))
+    }
+    return summaries
+  }
+
+  private func session(of nodeID: UUID) throws -> (BrowserSession, UUID) {
+    guard let node = browserNodes().first(where: { $0.id == nodeID }),
+      let canvasID = store.canvasID(containing: nodeID)
+    else { throw APIError.notFound("Browser") }
+    return (node.browserSession ?? BrowserSession(url: BrowserDefaults.blankURL), canvasID)
+  }
+
+  /// As the Mac's tab strip does: the session records the choice, the runtime shows the tab.
+  private func selectTab(nodeID: UUID, tabID: UUID) async throws {
+    var (session, canvasID) = try session(of: nodeID)
+    guard let tab = session.tabs.first(where: { $0.id == tabID }) else {
+      throw APIError.notFound("Tab")
+    }
+    session.activeTabID = tabID
+    store.dispatch(.setBrowserSession(id: nodeID, session: session), targetCanvasID: canvasID)
+    try await services.browserRuntime.activateTab(
+      nodeID: nodeID, tab: BrowserRuntimeTab(id: tab.id, url: tab.url, title: tab.title))
+  }
+
+  private func closeTab(nodeID: UUID, tabID: UUID) async throws {
+    var (session, canvasID) = try session(of: nodeID)
+    guard let index = session.tabs.firstIndex(where: { $0.id == tabID }) else {
+      throw APIError.notFound("Tab")
+    }
+    let wasActive = session.activeTabID == tabID
+    session.tabs.remove(at: index)
+    if session.tabs.isEmpty {
+      let replacement = BrowserTab()
+      session.tabs = [replacement]
+      session.activeTabID = replacement.id
+    } else if wasActive {
+      session.activeTabID = session.tabs[min(index, session.tabs.count - 1)].id
+    }
+    store.dispatch(.setBrowserSession(id: nodeID, session: session), targetCanvasID: canvasID)
+    let active = session.activeTab
+    try await services.browserRuntime.closeTab(
+      nodeID: nodeID, tabID: tabID,
+      activating: wasActive
+        ? active.map { BrowserRuntimeTab(id: $0.id, url: $0.url, title: $0.title) } : nil)
+  }
+
+  /// A tab finished (or failed) loading in the desktop: keep the runtime and the saved session
+  /// in step so bots see the real URL and tabs reopen where they were.
+  private func reportLoaded(_ report: BrowserLoadReport) async throws {
+    let nodeID = try uuid(report.nodeID)
+    let tabID = try uuid(report.tabID)
+    let runtime = services.browserRuntime
+    if let state = await runtime.state(nodeID: nodeID), state.activeTabID == tabID {
+      try await runtime.reportLoaded(
+        nodeID: nodeID, url: report.url, title: report.title, canGoBack: report.canGoBack,
+        canGoForward: report.canGoForward, isLoading: report.isLoading,
+        errorMessage: report.error, expectedRevision: report.revision)
+    }
+    guard !report.isLoading, let (saved, canvasID) = try? session(of: nodeID),
+      let index = saved.tabs.firstIndex(where: { $0.id == tabID })
+    else { return }
+    var session = saved
+    let title = report.title?.isEmpty == false ? report.title! : session.tabs[index].title
+    guard session.tabs[index].url != report.url || session.tabs[index].title != title else {
+      return
+    }
+    session.tabs[index].url = report.url
+    session.tabs[index].title = title
+    store.dispatch(.setBrowserSession(id: nodeID, session: session), targetCanvasID: canvasID)
+  }
+
   private func dashboards() -> DashboardsSnapshot {
     DashboardsSnapshot(
       dashboards: services.homeCards.dashboards,
@@ -369,6 +540,35 @@ struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
 struct NameInput: Decodable { var name: String }
+struct BrowserURLInput: Decodable {
+  var url: String
+  var nodeID: String?
+}
+struct BrowserElementCall: Decodable {
+  var id: String
+  var element: String
+  var text: String?
+}
+struct BrowserTabInput: Decodable {
+  var nodeID: String
+  var tabID: String
+}
+struct BrowserLoadReport: Decodable {
+  var nodeID: String
+  var tabID: String
+  var url: String
+  var title: String?
+  var canGoBack: Bool
+  var canGoForward: Bool
+  var isLoading: Bool
+  var error: String?
+  var revision: Int?
+}
+struct BrowserSummary: Encodable {
+  var nodeID: UUID
+  var name: String
+  var state: BrowserRuntimeState
+}
 struct RenameInput: Decodable {
   var id: String
   var name: String

@@ -83,14 +83,18 @@ function setSurface(next) {
   $('surface-chat').classList.toggle('active', next === 'chat');
   if (next === 'home') {
     stopPolling();
+    BrowserPlace.hide();
     Home.load();
   } else {
     renderSidebar();
     if (view.type === 'terminal') Terminals.fitActive(view.sessionID);
+    if (view.type === 'browser') BrowserPlace.show();
   }
 }
 
 function showView(type) {
+  // The browser page is a native view over the window; it must not linger over other places.
+  if (type !== 'browser') BrowserPlace.hide();
   for (const [id, place] of [
     ['welcome', 'welcome'],
     ['chat', 'chat'],
@@ -99,6 +103,7 @@ function showView(type) {
     ['editor', 'editor'],
     ['memory', 'memory'],
     ['dashboards', 'dashboards'],
+    ['browser', 'browser'],
     ['automations', 'automations'],
     ['activity', 'activity'],
     ['files', 'files'],
@@ -128,6 +133,7 @@ async function go(place) {
   if (place === 'documents') await Documents.list();
   if (place === 'memory') await Memory.load();
   if (place === 'dashboards') await Dashboards.load();
+  if (place === 'browser') await BrowserPlace.show();
   if (place === 'automations') await Places.loadAutomations();
   if (place === 'activity') await Places.loadActivity();
   if (place === 'files') await Places.loadFiles();
@@ -154,6 +160,7 @@ function renderSidebar() {
     places.append(
       railRow({ icon: 'doc.richtext', label: 'Documents', active: ['documents', 'editor'].includes(view.type), onClick: () => go('documents') }),
       railRow({ icon: 'chart.bar', label: 'Dashboards', active: view.type === 'dashboards', onClick: () => go('dashboards') }),
+      railRow({ icon: 'globe', label: 'Browser', active: view.type === 'browser', onClick: () => go('browser') }),
       railRow({ icon: 'clock', label: 'Automations', active: view.type === 'automations', onClick: () => go('automations') }),
       railRow({ icon: 'tray', label: 'Activity', active: view.type === 'activity', onClick: () => go('activity') }),
       railRow({ icon: 'doc.text', label: 'Files & notes', active: ['files', 'note'].includes(view.type), onClick: () => go('files') }),
@@ -737,6 +744,18 @@ Dashboards.configure({
   ask: askBot,
 });
 $('new-dashboard').addEventListener('click', () => Dashboards.newDashboard());
+BrowserPlace.configure({
+  onError: (error) => toast(cleanError(error)),
+  toast,
+  bots: () => bots,
+  // Native pages sit above the window's HTML, so step the page aside for the dialog.
+  hire: () => {
+    BrowserPlace.hide();
+    openBotDialog();
+  },
+  ask: askBot,
+});
+BrowserPlace.wire();
 $('note-back').addEventListener('click', () => go('files'));
 
 $('surface-home').addEventListener('click', () => setSurface('home'));

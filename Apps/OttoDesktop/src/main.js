@@ -7,10 +7,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { OttodClient } = require('./ottod');
 const { EngineClient } = require('./engine');
+const { BrowserHost } = require('./browser');
 const { loginEnvironment, discoverAgents } = require('./agents');
 
 const isWindows = process.platform === 'win32';
 let window = null;
+/** Renders the engine's browsers (see browser.js). */
+let browserHost = null;
 let terminals = null; // ottod: raw terminal sessions
 let engine = null; // otto-engine: bots, threads, runs and approvals
 let engineError = null;
@@ -61,6 +64,19 @@ const DESKTOP_METHODS = new Set([
   'cards.setLook',
   'cards.move',
   'cards.remove',
+  'browser.list',
+  'browser.open',
+  'browser.navigate',
+  'browser.back',
+  'browser.forward',
+  'browser.refresh',
+  'browser.selectTab',
+  'browser.closeTab',
+  'browser.close',
+  'browser.inspect',
+  'browser.click',
+  'browser.type',
+  'browser.screenshot',
   'automations.list',
   'automations.create',
   'automations.setEnabled',
@@ -131,6 +147,7 @@ async function startTerminals() {
 
 /** One engine per workspace, with its state kept beside the desktop app's own data. */
 async function startEngine() {
+  browserHost?.dispose();
   engine?.dispose();
   engine = null;
   engineError = null;
@@ -147,6 +164,19 @@ async function startEngine() {
     env,
   });
   next.on('log', (text) => console.error('[otto-engine]', text.trim()));
+  // The engine asks the desktop to render its browsers and act on their pages.
+  next.on('host', async ({ id, method, params }) => {
+    try {
+      if (!browserHost) throw new Error('The window is not open');
+      next.reply(id, await browserHost.handle(method, params));
+    } catch (error) {
+      next.reply(id, null, error.message || String(error));
+    }
+  });
+  next.on('event', ({ kind, payload }) => {
+    if (kind === 'browser.state') browserHost?.apply(payload);
+    else if (kind === 'browser.closed') browserHost?.closed(payload);
+  });
   next.on('exit', (status) => {
     if (engine === next) send('engine:exit', status);
   });
@@ -267,6 +297,16 @@ function registerIPC() {
     terminals?.resize(sessionID, columns, rows),
   );
   ipcMain.handle('session:stop', (_event, { sessionID }) => terminals?.stop(sessionID));
+  // The Browser place tells the main process where its page area is, or that it closed.
+  ipcMain.handle('browser:show', (_event, { nodeID, bounds }) => browserHost?.show(nodeID, bounds));
+  ipcMain.handle('browser:hide', () => browserHost?.show(null));
+  ipcMain.handle('browser:list', () => browserHost?.list() ?? []);
+  // Catch up with browsers the engine opened before the window could render them.
+  ipcMain.handle('browser:sync', async () => {
+    if (!engine || !browserHost) return [];
+    for (const browser of await engine.desktop('browser.list')) browserHost.apply(browser);
+    return browserHost.list();
+  });
   ipcMain.handle('link:open', (_event, url) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
   });
@@ -295,6 +335,7 @@ function createWindow() {
     return { action: 'deny' };
   });
   window.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  browserHost = new BrowserHost({ window, engine: () => engine, notify: send });
 }
 
 app.whenReady().then(() => {

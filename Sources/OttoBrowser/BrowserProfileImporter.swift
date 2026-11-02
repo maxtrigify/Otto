@@ -3,7 +3,7 @@ import OttoModels
 #if canImport(SQLite3)
   import SQLite3
 #else
-  import SwiftToolchainCSQLite
+  import OttoCSQLite
 #endif
 
 public struct BrowserImportSource: Identifiable, Equatable, Sendable {

@@ -3,7 +3,7 @@ import OttoTools
 #if canImport(SQLite3)
   import SQLite3
 #else
-  import SwiftToolchainCSQLite
+  import OttoCSQLite
 #endif
 
 /// One row of the append-only audit chain. Every tool action by every actor — agents, voice,

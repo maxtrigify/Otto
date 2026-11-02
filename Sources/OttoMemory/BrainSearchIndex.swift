@@ -2,7 +2,7 @@ import Foundation
 #if canImport(SQLite3)
   import SQLite3
 #else
-  import SwiftToolchainCSQLite
+  import OttoCSQLite
 #endif
 
 /// Derived full-text index over Project Brain records. It accelerates `memory.search`; it is

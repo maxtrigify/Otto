@@ -72,12 +72,28 @@ class EngineClient extends EventEmitter {
     });
   }
 
+  /** Answers a host call from the engine with a result, or an error message. */
+  reply(id, result, error) {
+    if (!this.running) return;
+    const hostReply = error ? { id, error: String(error) } : { id, result: result ?? null };
+    this.child.stdin.write(JSON.stringify({ token: this.token, hostReply }) + '\n');
+  }
+
   receive(line) {
     let message;
     try {
       message = JSON.parse(line);
     } catch {
       this.emit('log', `unparseable engine output: ${line.slice(0, 200)}`);
+      return;
+    }
+    // The engine asking the desktop to act (run a page script, take a screenshot), and events.
+    if (message.host) {
+      this.emit('host', message.host);
+      return;
+    }
+    if (message.event) {
+      this.emit('event', message.event);
       return;
     }
     if (!message.id) {

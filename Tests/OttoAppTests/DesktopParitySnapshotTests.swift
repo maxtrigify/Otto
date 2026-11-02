@@ -52,7 +52,7 @@ struct DesktopParitySnapshotTests {
     let chat = window(
       ChatWorkspaceView(
         store: store, services: services, voice: voice, navigation: navigation,
-        launchAgent: {}, quickLaunchAgent: { _, _ in nil }))
+        launchAgent: {}))
     try render(chat, size: size, to: "\(output)/mac-chat-\(themeID).png", light: theme.isLightAppearance)
   }
 

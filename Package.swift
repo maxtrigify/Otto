@@ -5,9 +5,9 @@ import PackageDescription
 
 /// Platforms without Apple's SDK frameworks (SQLite3, CryptoKit, Combine, Security).
 let nonApple: [Platform] = [.linux, .windows]
-let portableSQLite: Target.Dependency = .product(
-  name: "SwiftToolchainCSQLite", package: "swift-toolchain-sqlite",
-  condition: .when(platforms: nonApple))
+/// SQLite with FTS5 for Linux and Windows (see Sources/OttoCSQLite/README.md).
+let portableSQLite: Target.Dependency = .target(
+  name: "OttoCSQLite", condition: .when(platforms: nonApple))
 let systemSQLite: LinkerSetting = .linkedLibrary("sqlite3", .when(platforms: [.macOS, .iOS]))
 
 let package = Package(
@@ -55,8 +55,7 @@ let package = Package(
   ],
   dependencies: [
     .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.5.1"),
-    // Linux and Windows: Apple's SQLite3 and Combine modules are Darwin-only.
-    .package(url: "https://github.com/swiftlang/swift-toolchain-sqlite.git", exact: "1.0.13"),
+    // Linux and Windows: Apple's Combine module is Darwin-only.
     .package(url: "https://github.com/OpenCombine/OpenCombine.git", exact: "0.14.0"),
     .package(url: "https://github.com/hummingbird-project/hummingbird.git", exact: "2.26.0"),
     .package(
@@ -73,6 +72,25 @@ let package = Package(
   ],
   targets: [
     .target(name: "OttoModels"),
+    // Apple's SQLite has these; Otto's project brain search relies on FTS5.
+    .target(
+      name: "OttoCSQLite",
+      exclude: ["README.md"],
+      cSettings: [
+        .define("SQLITE_ENABLE_FTS5"),
+        .define("SQLITE_ENABLE_FTS3"),
+        .define("SQLITE_ENABLE_FTS3_PARENTHESIS"),
+        .define("SQLITE_ENABLE_RTREE"),
+        .define("SQLITE_ENABLE_COLUMN_METADATA"),
+        .define("SQLITE_OMIT_LOAD_EXTENSION"),
+        .define("SQLITE_THREADSAFE", to: "1"),
+      ],
+      linkerSettings: [
+        .linkedLibrary("m", .when(platforms: [.linux])),
+        // swift-toolchain-sqlite's workaround for an undefined swift_addNewDSOImage on Windows.
+        .linkedLibrary("swiftCore", .when(platforms: [.windows])),
+      ]
+    ),
     .target(name: "OttoObjCSupport"),
     .target(
       name: "OttoMemory",
@@ -244,7 +262,7 @@ let package = Package(
     .executableTarget(
       name: "otto-engine",
       dependencies: [
-        "OttoCore", "OttoDocuments", "OttoHostRuntime", "OttoMemory", "OttoModels", "OttoPersistence",
+        "OttoApplicationTools", "OttoBrowser", "OttoCore", "OttoDocuments", "OttoHostRuntime", "OttoMemory", "OttoModels", "OttoPersistence",
         "OttoRPCContracts", "OttoSecurity", "OttoServices", "OttoTools",
       ]
     ),

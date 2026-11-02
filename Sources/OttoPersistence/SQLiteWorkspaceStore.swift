@@ -4,7 +4,7 @@ import OttoTools
 #if canImport(SQLite3)
   import SQLite3
 #else
-  import SwiftToolchainCSQLite
+  import OttoCSQLite
 #endif
 
 public enum PersistenceError: Error, LocalizedError {

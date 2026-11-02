@@ -34,6 +34,7 @@ enum OttoEngine {
     var token: String
     var request: OttoRPCRequest?
     var desktop: DesktopAPI.Call?
+    var hostReply: DesktopHost.Reply?
   }
 
   struct Failure: Encodable {
@@ -78,6 +79,10 @@ enum OttoEngine {
         setenv(OttoEnvironment.key("MOBILE_HOST"), "off", 1)
       #endif
       await services.start()
+      if let problem = services.errorMessage {
+        // Startup carries on with what did load; say what did not.
+        FileHandle.standardError.write(Data("otto-engine startup problem: \(problem)\n".utf8))
+      }
 
       let adapter = ApplicationServicesMobileHostAdapter(
         services: services,
@@ -98,6 +103,10 @@ enum OttoEngine {
         deviceID: UUID(uuidString: "00000000-0000-0000-0000-00000000D35C")!,
         scopes: Set(OttoRPCScope.allCases))
       let output = ResponseWriter()
+      let desktopHost = DesktopHost(output: output)
+      let browsers = DesktopBrowserBridge(
+        store: store, runtime: services.browserRuntime, host: desktopHost)
+      await browsers.start()
       let desktop = DesktopAPI(services: services, store: store)
       let expected = Array(token.utf8)
       for await line in standardInputLines() {
@@ -122,7 +131,9 @@ enum OttoEngine {
           continue
         }
         // Long calls (sending a message, starting a thread) must not hold up event polling.
-        if let call = request.desktop {
+        if let reply = request.hostReply {
+          await desktopHost.receive(reply)
+        } else if let call = request.desktop {
           Task { await output.writeLine(await desktop.handle(call)) }
         } else if let rpc = request.request {
           Task {

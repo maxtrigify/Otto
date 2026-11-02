@@ -210,3 +210,68 @@ test('Dashboards: pages of cards can be made, styled, filled and removed', { ski
   const gone = await client.desktop('dashboards.delete', { id: revenue.id });
   assert.deepEqual(gone, { dashboards: [], cards: [] });
 });
+
+test('Browser: the desktop renders engine browsers and answers page reads for bots', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  const events = [];
+  const calls = [];
+  client.on('event', (event) => events.push(event));
+  // Play the renderer: answer the engine's host calls the way Otto Desktop's browser host does.
+  client.on('host', (call) => {
+    calls.push(call.method);
+    if (call.method === 'browser.prepare') return client.reply(call.id, true);
+    if (call.method === 'browser.eval') {
+      assert.match(call.params.script, /__ottoAgentPage/);
+      return client.reply(
+        call.id,
+        JSON.stringify({
+          url: 'https://example.com/',
+          title: 'Example Domain',
+          revision: 'r1',
+          elements: [{ id: 'e1', role: 'link', name: 'More information', placeholder: null, bounds: { x: 1, y: 2, width: 3, height: 4 }, actions: ['click'], isDisabled: false, isSensitive: false }],
+        }),
+      );
+    }
+    client.reply(call.id, null, `unexpected ${call.method}`);
+  });
+  await client.start();
+  assert.deepEqual(await client.desktop('browser.list'), []);
+
+  const opened = await client.desktop('browser.open', { url: 'https://example.com/' });
+  assert.equal(opened.length, 1);
+  const browser = opened[0];
+  assert.equal(browser.state.tabs.length, 1);
+  assert.equal(browser.state.url, 'https://example.com/');
+
+  // The engine tells the desktop about the new browser so it can load the page.
+  for (let attempt = 0; attempt < 20 && !events.some((event) => event.kind === 'browser.state'); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const state = events.find((event) => event.kind === 'browser.state');
+  assert.ok(state, JSON.stringify(events));
+  assert.equal(state.payload.nodeID, browser.nodeID);
+
+  await client.desktop('browser.reportLoaded', {
+    nodeID: browser.nodeID,
+    tabID: browser.state.activeTabID,
+    url: 'https://example.com/',
+    title: 'Example Domain',
+    canGoBack: false,
+    canGoForward: false,
+    isLoading: false,
+    revision: state.payload.state.revision,
+  });
+  const loaded = await client.desktop('browser.list');
+  assert.equal(loaded[0].state.title, 'Example Domain');
+
+  const page = await client.desktop('browser.inspect', { id: browser.nodeID });
+  assert.equal(page.pageRevision, 'r1');
+  assert.equal(page.elements[0].name, 'More information');
+  assert.ok(calls.includes('browser.prepare') && calls.includes('browser.eval'), calls.join(','));
+
+  const tabbed = await client.desktop('browser.open', { url: 'https://example.org/', nodeID: browser.nodeID });
+  assert.equal(tabbed[0].state.tabs.length, 2);
+  const closed = await client.desktop('browser.closeTab', { nodeID: browser.nodeID, tabID: tabbed[0].state.activeTabID });
+  assert.equal(closed[0].state.tabs.length, 1);
+  assert.deepEqual(await client.desktop('browser.close', { id: browser.nodeID }), []);
+});

@@ -1,6 +1,7 @@
 // Launches the real desktop app, starts a Terminal chat, runs a command and screenshots it.
 // usage: OTTOD_PATH=... node scripts/smoke.mjs <workspace> <output-directory>
 import { spawn } from 'node:child_process';
+import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,6 +23,18 @@ const app = spawn(electron, ['.', `--remote-debugging-port=${port}`, ...linuxCI]
   env: { ...process.env, OTTO_DESKTOP_WORKSPACE: workspace },
   stdio: 'inherit',
 });
+
+// A page for the Browser checks, served locally so CI needs no internet.
+const page = `<!doctype html><title>Otto smoke page</title>
+<h1 id="heading">Smoke page</h1>
+<button id="press" onclick="this.textContent = 'Pressed'; document.title = 'Pressed'">Press me</button>
+<input id="name" aria-label="Your name" oninput="document.getElementById('heading').textContent = this.value">`;
+const server = http.createServer((_request, response) => {
+  response.writeHead(200, { 'content-type': 'text/html' });
+  response.end(page);
+});
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const pageURL = `http://127.0.0.1:${server.address().port}/`;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let socket;
@@ -69,6 +82,24 @@ const type = async (text) => {
   await call('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r', unmodifiedText: '\r' });
   await call('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
 };
+
+/** Reads the browser tab directly through its own DevTools target (for diagnosing failures). */
+async function pageProbe(url) {
+  try {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+    const target = targets.find((candidate) => candidate.url.startsWith(url));
+    if (!target) return `no target (${targets.map((candidate) => candidate.url).join(', ')})`;
+    const tab = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise((resolve) => tab.addEventListener('open', resolve));
+    const reply = new Promise((resolve) => tab.addEventListener('message', ({ data }) => resolve(JSON.parse(data))));
+    tab.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { returnByValue: true, expression: "[document.title, document.getElementById('press')?.textContent, document.visibilityState, document.hasFocus(), innerWidth + 'x' + innerHeight, JSON.stringify(document.getElementById('press')?.getBoundingClientRect())].join(' | ')" } }));
+    const value = (await reply).result?.result?.value;
+    tab.close();
+    return value;
+  } catch (error) {
+    return `probe failed: ${error.message}`;
+  }
+}
 
 let failure = null;
 await call('Runtime.enable');
@@ -167,6 +198,45 @@ try {
     await sleep(300);
     await shot('place-dashboards.png');
 
+    // Browser: open a page from the start screen, then read and act on it through the bot
+    // tools (browser.inspect / click / type / screenshot), which run in this app's Chromium.
+    await visit('Browser', 'browser', `document.getElementById('browser-tabs') && !document.getElementById('browser').hidden`);
+    await evaluate(`(() => {
+      document.getElementById('browser-start-input').value = ${JSON.stringify(pageURL)};
+      document.getElementById('browser-start-form').requestSubmit();
+    })()`);
+    let browserState = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await sleep(300);
+      browserState = (await evaluate(`window.otto.desktop('browser.list')`))?.[0];
+      if (browserState?.state?.title === 'Otto smoke page' && !browserState.state.isLoading) break;
+    }
+    console.log(`browser: ${browserState?.state?.title} · ${browserState?.state?.url}`);
+    if (browserState?.state?.title !== 'Otto smoke page') throw new Error('the browser did not load the page');
+    const nodeID = browserState.nodeID;
+    const inspected = await evaluate(`window.otto.desktop('browser.inspect', { id: ${JSON.stringify(nodeID)} })`);
+    const names = (inspected?.elements ?? []).map((element) => element.name);
+    console.log(`bot sees: ${names.join(' | ')}`);
+    if (!names.includes('Press me') || !names.includes('Your name')) throw new Error('browser.inspect did not see the page');
+    const clickResult = await evaluate(`window.otto.desktop('browser.click', { id: ${JSON.stringify(nodeID)}, element: 'Press me' }).then((value) => JSON.stringify(value), (error) => 'ERROR ' + error.message)`);
+    console.log(`click: ${clickResult}`);
+    await evaluate(`window.otto.desktop('browser.type', { id: ${JSON.stringify(nodeID)}, element: 'Your name', text: 'Otto on ${process.platform}' })`);
+    let after = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await sleep(250);
+      after = await evaluate(`window.otto.desktop('browser.inspect', { id: ${JSON.stringify(nodeID)} })`);
+      if (after?.elements?.some((element) => element.name === 'Pressed')) break;
+    }
+    console.log(`after click: ${after?.title}`);
+    if (!after?.elements?.some((element) => element.name === 'Pressed')) {
+      console.log(`page itself: ${await pageProbe(pageURL)}`);
+      throw new Error('browser.click did not press the button');
+    }
+    const captured = await evaluate(`window.otto.desktop('browser.screenshot', { id: ${JSON.stringify(nodeID)} })`);
+    console.log(`screenshot: ${captured?.pixelWidth}×${captured?.pixelHeight}`);
+    if (!(captured?.pixelWidth > 0)) throw new Error('browser.screenshot captured nothing');
+    await shot('place-browser.png');
+
     await visit('Automations', 'automations', `document.querySelector('#automations-body .overline')`);
     await evaluate(`(() => {
       document.getElementById('new-automation').click();
@@ -238,6 +308,7 @@ try {
   failure = error;
 } finally {
   socket.close();
+  server.close();
   app.kill();
 }
 if (failure) {

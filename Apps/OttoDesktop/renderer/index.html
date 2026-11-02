@@ -146,6 +146,47 @@
           <div class="page-body" id="dashboards-body"></div>
         </section>
 
+        <!-- Browser: the engine's browser; the main process draws pages over #browser-page -->
+        <section class="browser-place" id="browser" hidden>
+          <div class="browser-tabs" id="browser-tabs" role="tablist" aria-label="Tabs"></div>
+          <div class="browser-toolbar">
+            <button class="browser-tool" id="browser-back"></button>
+            <button class="browser-tool" id="browser-forward"></button>
+            <button class="browser-tool" id="browser-reload"></button>
+            <form class="browser-address-form" id="browser-address-form">
+              <input id="browser-address" placeholder="Search or enter address" aria-label="Address" autocomplete="off" spellcheck="false" />
+            </form>
+            <span class="browser-agent" id="browser-agent" hidden></span>
+            <button class="pill-button" id="browser-ask-button"></button>
+          </div>
+          <div class="browser-body">
+            <div class="browser-page" id="browser-page">
+              <div class="browser-start" id="browser-start">
+                <h1 class="serif">Where to?</h1>
+                <form class="composer browser-start-form" id="browser-start-form">
+                  <input id="browser-start-input" placeholder="Search or enter address" aria-label="Search or enter address" autocomplete="off" />
+                </form>
+                <div class="browser-shortcuts" id="browser-shortcuts"></div>
+                <p class="browser-note">Sites you sign in to here are signed in for your bots too.</p>
+              </div>
+              <div class="browser-error" id="browser-error" hidden></div>
+            </div>
+            <aside class="browser-ask" id="browser-ask" hidden>
+              <h3>Ask about this page</h3>
+              <form id="browser-ask-form" class="browser-ask-form">
+                <textarea id="browser-ask-input" rows="3" placeholder="Ask Otto about this page…" aria-label="Ask about this page"></textarea>
+                <div class="browser-ask-row">
+                  <select id="browser-ask-bot" class="ask-bot" aria-label="Which bot"></select>
+                  <button class="primary small-button" type="submit">Ask</button>
+                </div>
+              </form>
+              <button class="text-button" id="browser-ask-hire" hidden>Hire a bot to help with pages</button>
+              <div class="overline">Ideas</div>
+              <div id="browser-ask-ideas" class="browser-ideas"></div>
+            </aside>
+          </div>
+        </section>
+
         <!-- Automations -->
         <section class="page" id="automations" hidden>
           <header class="page-header">
@@ -300,6 +341,7 @@
     <script src="memory.js"></script>
     <script src="places.js"></script>
     <script src="dashboards.js"></script>
+    <script src="browser.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
