@@ -39,11 +39,13 @@ struct DesktopAPI {
   enum APIError: Error, LocalizedError {
     case unknownMethod(String)
     case notFound(String)
+    case invalid(String)
 
     var errorDescription: String? {
       switch self {
       case .unknownMethod(let method): "Unknown desktop method \(method)."
       case .notFound(let what): "\(what) was not found."
+      case .invalid(let reason): reason
       }
     }
   }
@@ -136,6 +138,54 @@ struct DesktopAPI {
       let input = try params(IDInput.self)
       _ = try await services.testRoutine(id: try uuid(input.id))
       return try reply(automations())
+
+    // ---- Dashboards and cards --------------------------------------------------------------
+    case "dashboards.snapshot":
+      return try reply(dashboards())
+    case "dashboards.create":
+      let input = try params(NameInput.self)
+      _ = try services.homeCards.createDashboard(name: input.name)
+      return try reply(dashboards())
+    case "dashboards.rename":
+      let input = try params(RenameInput.self)
+      try services.homeCards.renameDashboard(id: try uuid(input.id), to: input.name)
+      return try reply(dashboards())
+    case "dashboards.delete":
+      let input = try params(IDInput.self)
+      _ = try services.homeCards.deleteDashboard(id: try uuid(input.id))
+      return try reply(dashboards())
+    case "dashboards.setLook":
+      let input = try params(DashboardLookInput.self)
+      try services.homeCards.updateDashboard(id: try uuid(input.id)) { dashboard in
+        if let accent = input.accent { dashboard.accent = HomeCardColor(rawValue: accent) }
+        if let style = input.cardStyle { dashboard.cardStyle = Dashboard.CardStyle(rawValue: style) }
+      }
+      return try reply(dashboards())
+    case "cards.add":
+      let input = try params(CardAddInput.self)
+      guard let style = HomeCard.Style(rawValue: input.style ?? "list") else {
+        throw APIError.invalid("Unknown card style")
+      }
+      _ = try services.homeCards.add(
+        HomeCard(
+          title: input.title, style: style, rows: (input.rows ?? []).map(\.row), text: input.text,
+          updatedBy: "You", dashboardID: try input.dashboardID.map(uuid)))
+      return try reply(dashboards())
+    case "cards.setLook":
+      let input = try params(CardLookInput.self)
+      _ = try services.homeCards.update(id: try uuid(input.id)) { card in
+        if let width = input.width { card.width = HomeCard.Width(rawValue: width) }
+        if let color = input.color { card.color = HomeCardColor(rawValue: color) }
+      }
+      return try reply(dashboards())
+    case "cards.move":
+      let input = try params(CardMoveInput.self)
+      try services.homeCards.move(id: try uuid(input.id), by: input.offset)
+      return try reply(dashboards())
+    case "cards.remove":
+      let input = try params(IDInput.self)
+      _ = try services.homeCards.remove(id: try uuid(input.id))
+      return try reply(dashboards())
 
     // ---- Activity ------------------------------------------------------------------------
     case "activity.snapshot":
@@ -250,6 +300,12 @@ struct DesktopAPI {
       brain: records.map(BrainRecordSummary.init))
   }
 
+  private func dashboards() -> DashboardsSnapshot {
+    DashboardsSnapshot(
+      dashboards: services.homeCards.dashboards,
+      cards: services.homeCards.allCards.filter { $0.dashboardID != nil })
+  }
+
   private func automations() -> AutomationsSnapshot {
     let routines = services.routines.routines.sorted {
       $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
@@ -312,6 +368,49 @@ struct DesktopAPI {
 struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
+struct NameInput: Decodable { var name: String }
+struct RenameInput: Decodable {
+  var id: String
+  var name: String
+}
+/// Empty strings clear a colour or style back to the default.
+struct DashboardLookInput: Decodable {
+  var id: String
+  var accent: String?
+  var cardStyle: String?
+}
+struct CardAddInput: Decodable {
+  var dashboardID: String?
+  var title: String
+  var style: String?
+  var rows: [CardRowInput]?
+  var text: String?
+}
+struct CardRowInput: Decodable {
+  var label: String
+  var value: String?
+  var detail: String?
+  var url: String?
+  var history: [Double]?
+
+  var row: HomeCardRow {
+    HomeCardRow(label: label, value: value, detail: detail, url: url, history: history ?? [])
+  }
+}
+struct CardLookInput: Decodable {
+  var id: String
+  var width: String?
+  var color: String?
+}
+struct CardMoveInput: Decodable {
+  var id: String
+  var offset: Int
+}
+struct DashboardsSnapshot: Encodable {
+  var dashboards: [Dashboard]
+  var cards: [HomeCard]
+}
+
 struct AutomationCreateInput: Decodable {
   var name: String
   var instruction: String

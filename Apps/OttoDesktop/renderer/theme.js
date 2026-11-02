@@ -33,6 +33,12 @@ const Theme = (() => {
     'nightscreen', 'nightspire', 'ringfall', 'shorelight', 'silverbough',
   ]);
   let current = fallback;
+  /** OttoThemeCatalog.aurora: the card palette on light themes. */
+  const aurora = {
+    signal: { red: 0.45, green: 0.94, blue: 0.7 },
+    cyan: { red: 0.4, green: 0.85, blue: 0.95 },
+    red: { red: 0.96, green: 0.4, blue: 0.44 },
+  };
 
   const rgb = (color) =>
     `${Math.round(color.red * 255)}, ${Math.round(color.green * 255)}, ${Math.round(color.blue * 255)}`;
@@ -44,6 +50,9 @@ const Theme = (() => {
     for (const key of ['ink', 'surface', 'raised', 'paper', 'muted', 'signal', 'amber', 'red', 'cyan']) {
       root.setProperty(`--${key}-rgb`, rgb(theme[key]));
     }
+    // Live cards are dark smoked glass; on light themes the Mac draws them with Aurora's colours.
+    const cardTheme = isLight ? aurora : theme;
+    for (const key of ['signal', 'cyan', 'red']) root.setProperty(`--card-${key}-rgb`, rgb(cardTheme[key]));
     // Home and Chat keep the photo nearly clear: the contract scrim at a quarter strength.
     const scale = 0.25;
     const windowGlass = material === 'window-glass';

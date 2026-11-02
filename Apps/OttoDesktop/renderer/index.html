@@ -132,6 +132,20 @@
           <div class="editor-body" id="editor-body"></div>
         </section>
 
+        <!-- Dashboards -->
+        <section class="page" id="dashboards" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Dashboards</h1>
+              <p class="page-sub">Live numbers and charts your agents build and keep up to date.</p>
+            </div>
+            <div class="page-actions">
+              <button class="primary small-button" id="new-dashboard"></button>
+            </div>
+          </header>
+          <div class="page-body" id="dashboards-body"></div>
+        </section>
+
         <!-- Automations -->
         <section class="page" id="automations" hidden>
           <header class="page-header">
@@ -238,6 +252,17 @@
       </form>
     </dialog>
 
+    <dialog class="dialog" id="name-dialog">
+      <form method="dialog">
+        <h2 id="name-dialog-title">Name</h2>
+        <label>Name<input id="name-dialog-input" required maxlength="60" /></label>
+        <div class="dialog-actions">
+          <button class="ghost small-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary small-button" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="dialog" id="automation-dialog">
       <form method="dialog" id="automation-form">
         <h2>New automation</h2>
@@ -269,10 +294,12 @@
     <script src="theme.js"></script>
     <script src="markdown.js"></script>
     <script src="terminals.js"></script>
+    <script src="cards.js"></script>
     <script src="home.js"></script>
     <script src="documents.js"></script>
     <script src="memory.js"></script>
     <script src="places.js"></script>
+    <script src="dashboards.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

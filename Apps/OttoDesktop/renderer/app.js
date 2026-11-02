@@ -98,6 +98,7 @@ function showView(type) {
     ['documents', 'documents'],
     ['editor', 'editor'],
     ['memory', 'memory'],
+    ['dashboards', 'dashboards'],
     ['automations', 'automations'],
     ['activity', 'activity'],
     ['files', 'files'],
@@ -126,6 +127,7 @@ async function go(place) {
   renderSidebar();
   if (place === 'documents') await Documents.list();
   if (place === 'memory') await Memory.load();
+  if (place === 'dashboards') await Dashboards.load();
   if (place === 'automations') await Places.loadAutomations();
   if (place === 'activity') await Places.loadActivity();
   if (place === 'files') await Places.loadFiles();
@@ -151,6 +153,7 @@ function renderSidebar() {
   if (chatAvailable()) {
     places.append(
       railRow({ icon: 'doc.richtext', label: 'Documents', active: ['documents', 'editor'].includes(view.type), onClick: () => go('documents') }),
+      railRow({ icon: 'chart.bar', label: 'Dashboards', active: view.type === 'dashboards', onClick: () => go('dashboards') }),
       railRow({ icon: 'clock', label: 'Automations', active: view.type === 'automations', onClick: () => go('automations') }),
       railRow({ icon: 'tray', label: 'Activity', active: view.type === 'activity', onClick: () => go('activity') }),
       railRow({ icon: 'doc.text', label: 'Files & notes', active: ['files', 'note'].includes(view.type), onClick: () => go('files') }),
@@ -294,6 +297,19 @@ function openBot(bot) {
   renderChat();
   renderSidebar();
   $('composer-input').focus();
+}
+
+/** Sends a message to a bot's chat without leaving the current page (Dashboards' prompt bar). */
+async function askBot(botID, text) {
+  const bot = bots.find((candidate) => candidate.id === botID);
+  if (!bot) throw new Error('That bot is no longer here');
+  const existing = threadFor(bot);
+  if (existing) {
+    await window.otto.engine('message.send', { threadID: existing.id, clientMessageID: crypto.randomUUID().toUpperCase(), body: text });
+  } else {
+    await window.otto.engine('thread.start', { botProfileID: bot.id, initialMessage: text });
+    await refreshRoster();
+  }
 }
 
 async function startChat(botID, text) {
@@ -675,6 +691,7 @@ function decorate() {
   $('composer-send').append(Icons.icon('arrow.up', 15));
   $('new-document').append(Icons.icon('plus', 14), el('span', '', 'New'));
   $('editor-back').append(Icons.icon('chevron.left', 13), el('span', '', 'Documents'));
+  $('new-dashboard').append(Icons.icon('plus', 13), el('span', '', 'New dashboard'));
   $('new-automation').append(Icons.icon('plus', 14), el('span', '', 'New'));
   $('note-back').append(Icons.icon('chevron.left', 13), el('span', '', 'Files & notes'));
   document.querySelector('.otto-face').append(Icons.face('Otto', 52));
@@ -712,6 +729,14 @@ Places.onOpenNote = () => {
   renderSidebar();
 };
 Places.wire();
+Dashboards.configure({
+  onError: (error) => toast(cleanError(error)),
+  toast,
+  bots: () => bots,
+  hire: openBotDialog,
+  ask: askBot,
+});
+$('new-dashboard').addEventListener('click', () => Dashboards.newDashboard());
 $('note-back').addEventListener('click', () => go('files'));
 
 $('surface-home').addEventListener('click', () => setSurface('home'));

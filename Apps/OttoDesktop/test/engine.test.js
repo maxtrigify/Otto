@@ -164,3 +164,49 @@ test('Files & notes: Markdown notes list, read and save; Otto state stays hidden
   assert.equal(fs.readFileSync(path.join(workspace, 'Notes', 'Plan.md'), 'utf8'), '# Plan\n\nShipped');
   await assert.rejects(client.desktop('files.read', { path: '../outside.md' }));
 });
+
+test('Dashboards: pages of cards can be made, styled, filled and removed', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const empty = await client.desktop('dashboards.snapshot');
+  assert.deepEqual(empty, { dashboards: [], cards: [] });
+
+  const created = await client.desktop('dashboards.create', { name: 'Revenue' });
+  const revenue = created.dashboards.find((item) => item.name === 'Revenue');
+  assert.ok(revenue, JSON.stringify(created));
+
+  const renamed = await client.desktop('dashboards.rename', { id: revenue.id, name: 'Money' });
+  assert.equal(renamed.dashboards[0].name, 'Money');
+  const styled = await client.desktop('dashboards.setLook', { id: revenue.id, accent: 'purple', cardStyle: 'solid' });
+  assert.equal(styled.dashboards[0].accent, 'purple');
+  assert.equal(styled.dashboards[0].cardStyle, 'solid');
+
+  await client.desktop('cards.add', {
+    dashboardID: revenue.id,
+    title: 'MRR',
+    style: 'metrics',
+    rows: [{ label: 'MRR', value: '$12,400', history: [11000, 11800, 12400] }],
+  });
+  const filled = await client.desktop('cards.add', {
+    dashboardID: revenue.id,
+    title: 'Signups',
+    style: 'line',
+    rows: [{ label: 'Mon', value: '4' }, { label: 'Tue', value: '9' }],
+  });
+  assert.deepEqual(filled.cards.map((card) => card.title), ['MRR', 'Signups']);
+  const signups = filled.cards.find((card) => card.title === 'Signups');
+  assert.equal(signups.dashboardID, revenue.id);
+
+  const moved = await client.desktop('cards.move', { id: signups.id, offset: -1 });
+  assert.deepEqual(moved.cards.map((card) => card.title), ['Signups', 'MRR']);
+  const wide = await client.desktop('cards.setLook', { id: signups.id, width: 'wide', color: 'green' });
+  const wideCard = wide.cards.find((card) => card.id === signups.id);
+  assert.equal(wideCard.width, 'wide');
+  assert.equal(wideCard.color, 'green');
+  await assert.rejects(client.desktop('cards.add', { dashboardID: revenue.id, title: 'x', style: 'pie' }));
+
+  const removed = await client.desktop('cards.remove', { id: signups.id });
+  assert.deepEqual(removed.cards.map((card) => card.title), ['MRR']);
+  const gone = await client.desktop('dashboards.delete', { id: revenue.id });
+  assert.deepEqual(gone, { dashboards: [], cards: [] });
+});

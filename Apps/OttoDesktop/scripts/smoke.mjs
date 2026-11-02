@@ -119,6 +119,54 @@ try {
 
     // Every place in the rail opens and renders.
     await visit('Documents', 'documents', `document.getElementById('documents-body').childElementCount > 0`);
+    await visit('Dashboards', 'dashboards', `document.querySelector('#dashboards-body .ask-bar')`);
+    await evaluate(`(() => {
+      document.getElementById('new-dashboard').click();
+      document.getElementById('name-dialog-input').value = 'Smoke metrics';
+      document.querySelector('#name-dialog button[value=save]').click();
+    })()`);
+    let dashboard = null;
+    for (let attempt = 0; attempt < 20 && !dashboard; attempt += 1) {
+      await sleep(300);
+      dashboard = await evaluate(`document.querySelector('.dashboard-head h2')?.textContent ?? null`);
+    }
+    console.log(`dashboard created: ${dashboard}`);
+    if (dashboard !== 'Smoke metrics') throw new Error('creating a dashboard did not show it');
+    // Cards normally come from a bot through otto-mcp; add one of each kind directly.
+    await evaluate(`(async () => {
+      const { dashboards } = await window.otto.desktop('dashboards.snapshot');
+      const dashboardID = dashboards[0].id;
+      await window.otto.desktop('cards.add', { dashboardID, title: 'Followers', style: 'metrics', rows: [{ label: 'LinkedIn', value: '12,480', history: [12000, 12200, 12480] }, { label: 'Substack', value: '3.1k' }] });
+      await window.otto.desktop('cards.add', { dashboardID, title: 'Signups', style: 'line', rows: [{ label: 'Mon', value: '4' }, { label: 'Tue', value: '9' }, { label: 'Wed', value: '7' }, { label: 'Thu', value: '12' }] });
+      await window.otto.desktop('cards.add', { dashboardID, title: 'Revenue by plan', style: 'bar', rows: [{ label: 'Pro', value: '$4,200' }, { label: 'Team', value: '$8,900' }] });
+      await window.otto.desktop('cards.add', { dashboardID, title: 'Next up', style: 'list', rows: [{ label: 'Ship Otto Desktop', detail: 'Windows and Linux', value: 'Fri' }] });
+    })()`);
+    await visit('Dashboards', 'dashboards', `document.querySelectorAll('#dashboards-body .data-card').length === 4`);
+    const drawn = await evaluate(`({
+      metrics: document.querySelectorAll('.metric').length,
+      sparklines: document.querySelectorAll('.sparkline').length,
+      lines: document.querySelectorAll('.card-chart path').length,
+      bars: document.querySelectorAll('.card-chart rect.bar').length,
+      rows: document.querySelectorAll('.card-list-row').length,
+    })`);
+    console.log(`dashboard cards: ${JSON.stringify(drawn)}`);
+    if (drawn.metrics !== 2 || drawn.sparklines !== 1 || drawn.lines < 2 || drawn.bars !== 2 || drawn.rows !== 1) {
+      throw new Error(`dashboard cards did not draw: ${JSON.stringify(drawn)}`);
+    }
+    await evaluate(`document.getElementById('dashboard-edit').click()`);
+    await sleep(300);
+    await evaluate(`document.querySelector('.data-card .segmented button:nth-child(2)').click()`);
+    let widened = false;
+    for (let attempt = 0; attempt < 20 && !widened; attempt += 1) {
+      await sleep(300);
+      widened = await evaluate(`Boolean(document.querySelector('.data-card.width-wide'))`);
+    }
+    await shot('place-dashboards-editing.png');
+    if (!widened) throw new Error('making a card wide did not apply');
+    await evaluate(`document.getElementById('dashboard-edit').click()`);
+    await sleep(300);
+    await shot('place-dashboards.png');
+
     await visit('Automations', 'automations', `document.querySelector('#automations-body .overline')`);
     await evaluate(`(() => {
       document.getElementById('new-automation').click();

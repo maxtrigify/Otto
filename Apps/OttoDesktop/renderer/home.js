@@ -305,22 +305,7 @@ const Home = (() => {
       const section = el('section', 'home-section');
       section.append(el('h2', 'home-section-title', 'Make it yours'));
       const grid = el('div', 'home-cards');
-      for (const card of snapshot.cards) {
-        const { card: box, body: content } = cardShell(null, card.title);
-        if (card.text) content.append(el('p', 'muted small', card.text));
-        if (card.rows?.length) {
-          const list = el('ul', 'home-card-rows');
-          for (const row of card.rows) {
-            const item = el('li');
-            item.append(el('span', '', row.label));
-            if (row.value) item.append(el('span', 'row-value', row.value));
-            if (row.detail) item.append(el('span', 'row-detail', row.detail));
-            list.append(item);
-          }
-          content.append(list);
-        }
-        grid.append(box);
-      }
+      for (const card of snapshot.cards) grid.append(Cards.render(card));
       section.append(grid);
       body.append(section);
     }
