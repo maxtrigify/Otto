@@ -108,6 +108,33 @@ struct ProviderSessionStoreTests {
     )
   }
 
+  @Test("A workspace reached through a symlink restores from Claude's resolved project folder")
+  func symlinkedWorkspaceRestores() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: "otto-symlink-\(UUID())")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let real = root.appending(path: "real/Launch Plan")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    let link = root.appending(path: "link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appending(path: "real"))
+    let home = root.appending(path: "home")
+    // Claude files the session under the kernel-resolved path of the folder it ran in
+    // (on macOS that keeps the /private prefix Foundation's resolver strips).
+    let directory = ProviderSessionStore.claudeProjectDirectory(
+      workingDirectory: ProviderSessionStore.realPath(real.path), home: home)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try [
+      #"{"type":"user","timestamp":"2026-11-02T10:00:00Z","message":{"role":"user","content":"Hello"}}"#,
+      #"{"type":"assistant","timestamp":"2026-11-02T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi there"}]}}"#,
+    ].joined(separator: "\n").write(
+      to: directory.appending(path: "session-1.jsonl"), atomically: true, encoding: .utf8)
+
+    // Otto recorded the workspace through the link (and, on macOS, without /private).
+    let history = ProviderSessionStore.restore(
+      provider: .claudeCode, workingDirectory: link.appending(path: "Launch Plan").path,
+      sessionID: "session-1", home: home)
+    #expect(history.turns.map(\.text) == ["Hello", "Hi there"])
+  }
+
   @Test("Missing directories harvest empty rather than throwing")
   func missingDirectories() {
     let harvest = ProviderSessionStore.harvest(

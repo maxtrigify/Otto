@@ -6,10 +6,18 @@
 const Documents = (() => {
   const $ = (id) => document.getElementById(id);
   const KIND = {
-    document: { icon: '▤', label: 'Document' },
-    spreadsheet: { icon: '▦', label: 'Sheet' },
-    presentation: { icon: '▭', label: 'Slides' },
+    document: { icon: 'doc.richtext', label: 'Document' },
+    spreadsheet: { icon: 'tablecells', label: 'Spreadsheet' },
+    presentation: { icon: 'rectangles', label: 'Presentation' },
   };
+
+  function when(value) {
+    const seconds = Math.round((Date.now() - new Date(value)) / 1000);
+    if (seconds < 120) return 'now';
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+    return new Date(value).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  }
   let onError = () => {};
   let onOpen = () => {};
   let open = null; // { path, kind, timer, saved }
@@ -31,14 +39,13 @@ const Documents = (() => {
         return;
       }
       files.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+      body.append(el('div', 'overline', `All files · ${files.length}`));
       const grid = el('div', 'doc-grid');
       for (const file of files) {
         const card = el('button', `doc-card ${file.kind}`);
-        card.append(el('span', 'doc-icon', KIND[file.kind]?.icon ?? '▤'));
+        card.append(Icons.icon(KIND[file.kind]?.icon ?? 'doc.richtext', 20));
         card.append(el('span', 'doc-title', file.title));
-        card.append(
-          el('span', 'muted small', `${KIND[file.kind]?.label ?? file.kind} · ${new Date(file.modifiedAt).toLocaleString()}`),
-        );
+        card.append(el('span', 'doc-meta', `${KIND[file.kind]?.label ?? file.kind} · ${when(file.modifiedAt)}`));
         card.addEventListener('click', () => openFile(file.path));
         grid.append(card);
       }

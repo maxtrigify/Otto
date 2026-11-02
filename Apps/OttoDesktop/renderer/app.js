@@ -4,11 +4,15 @@ const $ = (id) => document.getElementById(id);
 let appState = null;
 let bots = [];
 let threads = [];
-/** { type: 'welcome' } | { type: 'chat', threadID, bot } | { type: 'terminal', sessionID } */
+/** 'home' | 'chat' — the window chrome's Home | Chat switch. */
+let surface = 'home';
+/** Inside Chat: { type: 'welcome' | 'chat' | 'documents' | 'editor' | 'memory' | 'settings' | 'terminal', ... } */
 let view = { type: 'welcome' };
-/** The open chat: transcript, event cursor, run and pending approval. */
+/** The open conversation: transcript, event cursor, run and pending approval. */
 let chat = null;
 let pollTimer = null;
+let welcomeTarget = null;
+let railQuery = '';
 
 const STATE_LABELS = {
   idle: '',
@@ -22,6 +26,13 @@ const STATE_LABELS = {
   host_offline: 'Engine offline',
 };
 
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
 function toast(message) {
   const element = $('toast');
   element.textContent = message;
@@ -33,15 +44,6 @@ function toast(message) {
 const cleanError = (error) =>
   String(error?.message || error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
-function relativeTime(value) {
-  const date = new Date(value);
-  const seconds = Math.round((Date.now() - date) / 1000);
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-  if (seconds < 86400) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return date.toLocaleDateString([], { day: 'numeric', month: 'short' });
-}
-
 function dotClass(state) {
   if (state === 'working') return 'running';
   if (state === 'approval_required' || state === 'waiting_for_user') return 'attention';
@@ -50,6 +52,9 @@ function dotClass(state) {
 }
 
 const chatAvailable = () => Boolean(appState?.chat?.available);
+// A bot's own chat: its one-member channel (kind `bot_channel`), not a team room it joins.
+const threadFor = (bot) =>
+  threads.find((thread) => thread.botProfileIDs.length === 1 && thread.botProfileIDs[0] === bot.id);
 
 // ---- Engine data ---------------------------------------------------------------------------
 
@@ -60,10 +65,7 @@ async function refreshRoster() {
     return;
   }
   try {
-    const [roster, list] = await Promise.all([
-      window.otto.engine('bot.list'),
-      window.otto.engine('thread.list'),
-    ]);
+    const [roster, list] = await Promise.all([window.otto.engine('bot.list'), window.otto.engine('thread.list')]);
     bots = roster.bots;
     threads = list.threads;
   } catch (error) {
@@ -71,75 +73,28 @@ async function refreshRoster() {
   }
 }
 
-// ---- Sidebar -------------------------------------------------------------------------------
+// ---- Surfaces ------------------------------------------------------------------------------
 
-function sessionButton({ active, dot, name, time, onClick }) {
-  const item = document.createElement('li');
-  const button = document.createElement('button');
-  button.className = 'session' + (active ? ' active' : '');
-  button.innerHTML = '<span class="dot"></span><span class="session-name"></span><span class="session-time"></span>';
-  button.querySelector('.dot').className = `dot ${dot}`;
-  button.querySelector('.session-name').textContent = name;
-  button.querySelector('.session-time').textContent = time;
-  button.addEventListener('click', onClick);
-  item.append(button);
-  return item;
-}
-
-function renderSidebar() {
-  document.querySelector('.nav').hidden = !chatAvailable();
-  $('workspace-name').textContent = appState?.workspaceName || 'Choose a folder';
-  $('workspace-button').title = appState?.workspace || 'Choose a workspace folder';
-  const engine = appState?.daemon;
-  $('engine-status').textContent = engine
-    ? `Engine ${engine.version} · ${appState.platform}${chatAvailable() ? '' : ' · terminals only'}`
-    : appState?.workspace ? 'Engine offline' : 'Choose a workspace to start';
-  $('engine-status').classList.toggle('offline', !engine);
-
-  const threadList = $('threads');
-  threadList.replaceChildren();
-  if (!threads.length) {
-    const empty = document.createElement('li');
-    empty.className = 'sessions-empty';
-    empty.textContent = chatAvailable() ? 'No chats yet' : 'Not available here yet';
-    threadList.append(empty);
-  }
-  for (const thread of threads) {
-    threadList.append(
-      sessionButton({
-        active: view.type === 'chat' && view.threadID === thread.id,
-        dot: dotClass(thread.state),
-        name: thread.title,
-        time: relativeTime(thread.updatedAt),
-        onClick: () => openThread(thread.id),
-      }),
-    );
-  }
-
-  const terminalList = $('terminals-list');
-  terminalList.replaceChildren();
-  const sessions = [...Terminals.sessions.entries()].sort((a, b) => b[1].startedAt - a[1].startedAt);
-  for (const [id, session] of sessions) {
-    terminalList.append(
-      sessionButton({
-        active: view.type === 'terminal' && view.sessionID === id,
-        dot: session.status === 'running' ? 'running' : 'idle',
-        name: session.name,
-        time: relativeTime(session.startedAt),
-        onClick: () => showTerminal(id),
-      }),
-    );
+function setSurface(next) {
+  surface = next;
+  $('home-surface').hidden = next !== 'home';
+  $('chat-surface').hidden = next !== 'chat';
+  $('surface-home').classList.toggle('active', next === 'home');
+  $('surface-chat').classList.toggle('active', next === 'chat');
+  if (next === 'home') {
+    stopPolling();
+    Home.load();
+  } else {
+    renderSidebar();
+    if (view.type === 'terminal') Terminals.fitActive(view.sessionID);
   }
 }
-
-// ---- Views ---------------------------------------------------------------------------------
 
 function showView(type) {
   for (const [id, place] of [
     ['welcome', 'welcome'],
     ['chat', 'chat'],
     ['terminal-view', 'terminal'],
-    ['home', 'home'],
     ['documents', 'documents'],
     ['editor', 'editor'],
     ['memory', 'memory'],
@@ -147,158 +102,168 @@ function showView(type) {
   ]) {
     $(id).hidden = type !== place;
   }
-  $('nav-home').classList.toggle('active', type === 'home');
-  $('nav-documents').classList.toggle('active', type === 'documents' || type === 'editor');
-  $('nav-memory').classList.toggle('active', type === 'memory');
-  $('nav-settings').classList.toggle('active', type === 'settings');
 }
 
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined && text !== null) node.textContent = text;
-  return node;
-}
-
-/** Settings works without the chat engine: it is where agents get installed and signed in. */
-function renderSettings() {
-  const body = $('settings-body');
-  body.replaceChildren();
-
-  const agents = el('section', 'home-section');
-  agents.append(el('h2', 'home-section-title', 'Agents'));
-  for (const agent of appState.agents.filter((candidate) => candidate.id !== 'shell')) {
-    const row = el('div', 'setting-row');
-    const text = el('div', 'setting-text');
-    text.append(el('strong', '', agent.name));
-    text.append(el('span', 'muted small', agent.available ? agent.path : 'Not installed'));
-    const actions = el('div', 'setting-actions');
-    if (agent.available && agent.canSignIn) {
-      const signIn = el('button', 'ghost', 'Sign in');
-      signIn.title = `Opens ${agent.name}'s own sign-in in a terminal`;
-      signIn.addEventListener('click', () => openTerminal(agent.id, true));
-      actions.append(signIn);
-    }
-    if (!agent.available && agent.install) {
-      const install = el('button', 'primary', 'How to install');
-      install.addEventListener('click', () => window.otto.openLink(agent.install));
-      actions.append(install);
-    }
-    row.append(text, actions);
-    agents.append(row);
-  }
-  agents.append(el('p', 'muted small', 'Sign-in runs in the agent itself, so your keys and passwords never pass through Otto. Restart Otto after installing an agent.'));
-  body.append(agents);
-
-  const workspace = el('section', 'home-section');
-  workspace.append(el('h2', 'home-section-title', 'Workspace'));
-  const row = el('div', 'setting-row');
-  const text = el('div', 'setting-text');
-  text.append(el('strong', '', appState.workspaceName || 'None chosen'));
-  text.append(el('span', 'muted small', appState.workspace || 'Pick the folder your bots and agents work in.'));
-  const change = el('button', 'ghost', appState.workspace ? 'Change folder' : 'Choose folder');
-  change.addEventListener('click', chooseWorkspace);
-  row.append(text, change);
-  workspace.append(row);
-  body.append(workspace);
-
-  const about = el('section', 'home-section');
-  about.append(el('h2', 'home-section-title', 'About'));
-  about.append(
-    el(
-      'p',
-      'muted',
-      [
-        `Otto Desktop ${appState.version || ''}`.trim(),
-        appState.daemon ? `engine ${appState.daemon.version}` : 'terminal engine offline',
-        chatAvailable() ? 'chats on' : 'chats unavailable',
-        appState.platform,
-      ].join(' · '),
-    ),
-  );
-  body.append(about);
-}
-
-/** Home and Documents need the engine; without it the start screen is the bot/terminal picker. */
-async function showPlace(place) {
-  if (place === 'settings') {
-    stopPolling();
-    chat = null;
-    await Documents.close();
-    view = { type: 'settings' };
-    showView('settings');
-    renderSettings();
-    renderSidebar();
-    return;
-  }
-  if (!chatAvailable()) return goHome();
+async function go(place) {
+  if (surface !== 'chat') setSurface('chat');
   stopPolling();
   chat = null;
   await Documents.close();
+  if (place === 'terminal') {
+    const shell = appState?.agents.find((agent) => agent.id === 'shell' && agent.available);
+    if (shell) return openTerminal(shell.id);
+    return;
+  }
+  if (place === 'welcome') return goWelcome();
+  if (place !== 'settings' && !chatAvailable()) return goWelcome();
   view = { type: place };
   showView(place);
   renderSidebar();
-  if (place === 'home') await Home.load();
   if (place === 'documents') await Documents.list();
   if (place === 'memory') await Memory.load();
+  if (place === 'settings') renderSettings();
 }
 
-function renderWelcome() {
-  const hasWorkspace = Boolean(appState?.workspace);
-  $('choose-workspace').hidden = hasWorkspace;
-  $('welcome-title').textContent = hasWorkspace ? 'What should we work on?' : 'Welcome to Otto';
-  $('welcome-sub').textContent = !hasWorkspace
-    ? 'Pick the folder your bots and agents work in. You can change it any time.'
-    : chatAvailable()
-      ? `Chat with a bot in ${appState.workspaceName}, or open a terminal.`
-      : `Open an agent in a terminal in ${appState.workspaceName}.`;
+// ---- Rail ----------------------------------------------------------------------------------
 
-  const container = $('bots');
-  container.replaceChildren();
-  $('chat-note').hidden = !hasWorkspace || chatAvailable();
-  $('chat-note').textContent = appState?.chat?.error || '';
-  if (hasWorkspace && chatAvailable()) {
-    for (const bot of bots) {
-      const card = document.createElement('button');
-      card.className = 'agent-card';
-      card.innerHTML = '<span class="agent-name"></span><span class="agent-blurb"></span>';
-      card.querySelector('.agent-name').textContent = bot.name;
-      card.querySelector('.agent-blurb').textContent = bot.jobTitle || bot.provider;
-      card.addEventListener('click', () => openBot(bot));
-      container.append(card);
-    }
-    const create = document.createElement('button');
-    create.className = 'agent-card new-bot';
-    create.innerHTML = '<span class="agent-name">+ New bot</span><span class="agent-blurb">Give it a job</span>';
-    create.addEventListener('click', openBotDialog);
-    container.append(create);
-  }
-
-  const row = $('terminal-row');
-  row.replaceChildren();
-  if (!hasWorkspace) return;
-  const label = document.createElement('span');
-  label.className = 'terminal-row-label';
-  label.textContent = 'Or open in a terminal:';
-  row.append(label);
-  for (const agent of appState.agents) {
-    const button = document.createElement('button');
-    button.className = 'chip';
-    button.disabled = !agent.available;
-    button.textContent = agent.available ? agent.name : `${agent.name} (not installed)`;
-    button.addEventListener('click', () => openTerminal(agent.id));
-    row.append(button);
-  }
+function railRow({ icon, face, label, active, count, dot, onClick, className = '' }) {
+  const button = el('button', `rail-row ${className} ${active ? 'active' : ''}`.trim());
+  if (face) button.append(Icons.face(face, 24));
+  else if (icon) button.append(Icons.icon(icon, 15));
+  button.append(el('span', 'rail-label', label));
+  if (dot && dot !== 'idle') button.append(el('span', `dot ${dot}`));
+  else if (count) button.append(el('span', 'count', String(count)));
+  button.addEventListener('click', onClick);
+  return button;
 }
 
-function goHome() {
+function renderSidebar() {
+  const places = $('places');
+  places.replaceChildren();
+  if (chatAvailable()) {
+    places.append(
+      railRow({ icon: 'doc.richtext', label: 'Documents', active: ['documents', 'editor'].includes(view.type), onClick: () => go('documents') }),
+      railRow({ icon: 'brain', label: 'Memory', active: view.type === 'memory', onClick: () => go('memory') }),
+    );
+  }
+
+  const needle = railQuery.trim().toLowerCase();
+  const matches = (text) => !needle || text.toLowerCase().includes(needle);
+  const botsList = $('bots-list');
+  botsList.replaceChildren();
+  const visibleBots = bots.filter((bot) => matches(`${bot.name} ${bot.jobTitle || ''}`));
+  if (!bots.length) {
+    const empty = el('div', 'rail-empty');
+    empty.append(el('strong', '', chatAvailable() ? 'No bots yet' : 'Chats unavailable'));
+    empty.append(el('span', '', chatAvailable() ? 'Hire a durable teammate. Its chat stays pinned here.' : appState?.chat?.error || ''));
+    botsList.append(empty);
+  }
+  for (const bot of visibleBots) {
+    const thread = threadFor(bot);
+    botsList.append(
+      railRow({
+        face: bot.name,
+        label: bot.name,
+        className: 'bot-row',
+        active: view.type === 'chat' && chat?.bot?.id === bot.id,
+        dot: thread ? dotClass(thread.state) : null,
+        onClick: () => openBot(bot),
+      }),
+    );
+  }
+
+  const sessionsList = $('sessions-list');
+  sessionsList.replaceChildren();
+  const sessions = [...Terminals.sessions.entries()]
+    .filter(([, session]) => matches(session.name))
+    .sort((a, b) => b[1].startedAt - a[1].startedAt);
+  if (!sessions.length && !needle) {
+    const empty = el('div', 'rail-empty');
+    empty.append(el('strong', '', 'No sessions loaded'), el('span', '', 'One-off terminals with an agent land here. They are not hired bots.'));
+    sessionsList.append(empty);
+  }
+  for (const [id, session] of sessions) {
+    sessionsList.append(
+      railRow({
+        icon: 'terminal',
+        label: session.name,
+        active: view.type === 'terminal' && view.sessionID === id,
+        dot: session.status === 'running' ? 'running' : null,
+        onClick: () => showTerminal(id),
+      }),
+    );
+  }
+
+  $('nav-settings').classList.toggle('active', view.type === 'settings');
+  const active = threads.filter((thread) => thread.state === 'working').length + [...Terminals.sessions.values()].filter((session) => session.status === 'running').length;
+  const status = $('engine-status');
+  status.textContent = appState?.workspace ? (appState?.daemon || chatAvailable() ? `${active} active` : 'offline') : 'no workspace';
+  status.classList.toggle('offline', !(appState?.daemon || chatAvailable()));
+
+  $('workspace-name').textContent = appState?.workspaceName || 'Choose a folder';
+  $('activity-badge').hidden = !Home.reviewCount && !threads.some((thread) => thread.state === 'approval_required');
+}
+
+// ---- Chat welcome --------------------------------------------------------------------------
+
+function goWelcome() {
   stopPolling();
   chat = null;
-  Documents.close();
   view = { type: 'welcome' };
   showView('welcome');
   renderWelcome();
   renderSidebar();
+}
+
+function renderWelcome() {
+  const hasWorkspace = Boolean(appState?.workspace);
+  const hour = new Date().getHours();
+  const part = hour < 5 ? 'Evening' : hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+  $('welcome-title').textContent = appState?.userName ? `${part}, ${appState.userName}.` : `${part}.`;
+  $('welcome-sub').textContent = hasWorkspace ? 'What are we getting into?' : 'Pick the folder your bots and agents work in.';
+  $('choose-workspace').hidden = hasWorkspace;
+  $('chat-note').hidden = !hasWorkspace || chatAvailable();
+  $('chat-note').textContent = appState?.chat?.error || '';
+  $('welcome-composer').hidden = !hasWorkspace || !chatAvailable();
+
+  if (!bots.some((bot) => bot.id === welcomeTarget)) welcomeTarget = bots[0]?.id ?? null;
+  const target = bots.find((bot) => bot.id === welcomeTarget);
+  $('welcome-input').placeholder = target ? `Message ${target.name}…` : 'Hire a bot to start a chat…';
+
+  const suggestions = $('suggestions');
+  suggestions.replaceChildren();
+  if (hasWorkspace && chatAvailable()) {
+    const ideas = ['Brief me on today', 'Draft a doc', 'Research a website', 'Plan my week'];
+    ideas.forEach((idea, index) => {
+      if (index) suggestions.append(el('span', 'sep', '·'));
+      const button = el('button', '', idea);
+      button.type = 'button';
+      button.addEventListener('click', () => {
+        $('welcome-input').value = idea;
+        $('welcome-input').focus();
+        $('welcome-send').classList.add('ready');
+      });
+      suggestions.append(button);
+    });
+  }
+
+  const bring = $('bring-in');
+  bring.replaceChildren();
+  if (bots.length) {
+    bring.append(el('span', 'label', 'Bring in'));
+    for (const bot of bots.slice(0, 8)) {
+      const button = el('button');
+      button.type = 'button';
+      button.title = bot.name;
+      button.append(Icons.face(bot.name, 22));
+      button.addEventListener('click', () => {
+        welcomeTarget = bot.id;
+        renderWelcome();
+        $('welcome-input').focus();
+      });
+      bring.append(button);
+    }
+  }
 }
 
 // ---- Chats ---------------------------------------------------------------------------------
@@ -308,7 +273,8 @@ function newChatState(threadID, bot) {
 }
 
 function openBot(bot) {
-  const existing = threads.find((thread) => thread.kind === 'bot' && thread.botProfileIDs.includes(bot.id));
+  if (surface !== 'chat') setSurface('chat');
+  const existing = threadFor(bot);
   if (existing) return openThread(existing.id);
   stopPolling();
   chat = newChatState(null, bot);
@@ -317,6 +283,26 @@ function openBot(bot) {
   renderChat();
   renderSidebar();
   $('composer-input').focus();
+}
+
+async function startChat(botID, text) {
+  const bot = bots.find((candidate) => candidate.id === botID);
+  if (!bot) return;
+  try {
+    const existing = threadFor(bot);
+    if (existing) {
+      await window.otto.engine('message.send', { threadID: existing.id, clientMessageID: crypto.randomUUID().toUpperCase(), body: text });
+      setSurface('chat');
+      await openThread(existing.id);
+    } else {
+      const started = await window.otto.engine('thread.start', { botProfileID: bot.id, initialMessage: text });
+      await refreshRoster();
+      setSurface('chat');
+      await openThread(started.thread.id);
+    }
+  } catch (error) {
+    toast(cleanError(error));
+  }
 }
 
 async function openThread(threadID) {
@@ -358,9 +344,7 @@ async function applyEvents(page) {
       upsertMessage(content.message);
       changed = true;
     }
-    if (content.runID && (event.kind === 'run.started' || event.kind === 'run.state_changed')) {
-      chat.activeRunID = content.runID;
-    }
+    if (content.runID && (event.kind === 'run.started' || event.kind === 'run.state_changed')) chat.activeRunID = content.runID;
     if (content.state) {
       chat.state = content.state;
       changed = true;
@@ -412,29 +396,17 @@ async function loadApproval() {
 }
 
 function messageElement(message) {
-  const element = document.createElement('div');
-  element.className = `message ${message.role} ${message.kind}`;
+  const element = el('div', `message ${message.role} ${message.kind}`);
   if (message.role === 'user') {
     element.textContent = message.text;
   } else if (message.kind === 'reasoning') {
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = 'Thinking';
-    const body = document.createElement('div');
-    body.className = 'reasoning-body';
-    body.textContent = message.text;
-    details.append(summary, body);
+    const details = el('details');
+    details.append(el('summary', '', 'Thinking'), el('div', 'reasoning-body', message.text));
     element.append(details);
   } else if (message.kind === 'tool_call' || message.role === 'activity') {
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = message.text.split('\n')[0].slice(0, 140) || 'Tool';
-    details.append(summary);
-    if (message.detail || message.text.includes('\n')) {
-      const pre = document.createElement('pre');
-      pre.textContent = message.detail || message.text;
-      details.append(pre);
-    }
+    const details = el('details');
+    details.append(el('summary', '', message.text.split('\n')[0].slice(0, 140) || 'Tool'));
+    if (message.detail || message.text.includes('\n')) details.append(el('pre', '', message.detail || message.text));
     element.append(details);
   } else if (message.kind === 'notice' || message.role === 'system') {
     element.textContent = message.text;
@@ -447,8 +419,8 @@ function messageElement(message) {
 function renderChat(scrollToEnd = false) {
   if (!chat) return;
   const name = chat.bot?.name || chat.title || 'Chat';
+  $('chat-face').replaceChildren(Icons.face(name, 22));
   $('chat-name').textContent = name;
-  $('chat-dot').className = `dot ${dotClass(chat.state)}`;
   $('chat-meta').textContent = STATE_LABELS[chat.state] ?? '';
   $('chat-stop').hidden = !(chat.state === 'working' && chat.activeRunID);
   $('composer-input').placeholder = `Message ${name}…`;
@@ -457,20 +429,15 @@ function renderChat(scrollToEnd = false) {
   const nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 80;
   transcript.replaceChildren();
   if (!chat.messages.length) {
-    const empty = document.createElement('div');
-    empty.className = 'transcript-empty';
-    empty.textContent = chat.bot?.jobTitle ? `${name} · ${chat.bot.jobTitle}` : `Say hello to ${name}.`;
-    transcript.append(empty);
+    transcript.append(el('div', 'transcript-empty', chat.bot?.jobTitle ? `${name} · ${chat.bot.jobTitle}` : `Say hello to ${name}.`));
   }
   for (const message of chat.messages) transcript.append(messageElement(message));
   if (chat.state === 'working') {
-    const typing = document.createElement('div');
-    typing.className = 'typing';
+    const typing = el('div', 'typing');
     typing.innerHTML = '<span></span><span></span><span></span>';
     transcript.append(typing);
   }
   if (scrollToEnd || nearBottom) transcript.scrollTop = transcript.scrollHeight;
-
   $('approval').hidden = !chat.approval;
   if (chat.approval) $('approval-reason').textContent = chat.approval.reason;
 }
@@ -491,11 +458,7 @@ async function sendMessage(event) {
     } else {
       chat.state = 'working';
       renderChat(true);
-      await window.otto.engine('message.send', {
-        threadID: chat.threadID,
-        clientMessageID: crypto.randomUUID().toUpperCase(),
-        body,
-      });
+      await window.otto.engine('message.send', { threadID: chat.threadID, clientMessageID: crypto.randomUUID().toUpperCase(), body });
       await poll();
     }
   } catch (error) {
@@ -510,12 +473,7 @@ async function respond(decision) {
   if (!chat?.approval) return;
   const request = chat.approval;
   try {
-    await window.otto.engine('approval.respond', {
-      threadID: chat.threadID,
-      requestID: request.requestID,
-      nonce: request.nonce,
-      decision,
-    });
+    await window.otto.engine('approval.respond', { threadID: chat.threadID, requestID: request.requestID, nonce: request.nonce, decision });
     chat.approval = null;
     renderChat();
   } catch (error) {
@@ -535,9 +493,8 @@ function openBotDialog() {
   const select = $('bot-provider');
   select.replaceChildren();
   for (const provider of appState.providers) {
-    const option = document.createElement('option');
+    const option = el('option', '', provider.available ? provider.name : `${provider.name} (not installed)`);
     option.value = provider.id;
-    option.textContent = provider.available ? provider.name : `${provider.name} (not installed)`;
     option.disabled = !provider.available;
     select.append(option);
   }
@@ -560,15 +517,96 @@ async function createBot(event) {
     const bot = await window.otto.engine('bot.create', { name, responsibility, provider });
     $('bot-dialog').close();
     await refreshRoster();
+    if (surface === 'home') Home.render();
     openBot(bot);
   } catch (error) {
     toast(cleanError(error));
   }
 }
 
+// ---- Settings ------------------------------------------------------------------------------
+
+function renderSettings() {
+  const body = $('settings-body');
+  body.replaceChildren();
+  body.append(el('div', 'overline', 'Agents'));
+  for (const agent of appState.agents.filter((candidate) => candidate.id !== 'shell')) {
+    const row = el('div', 'setting-row');
+    const text = el('div', 'setting-text');
+    text.append(el('strong', '', agent.name), el('span', 'muted small', agent.available ? agent.path : 'Not installed'));
+    const actions = el('div', 'setting-actions');
+    if (agent.available && agent.canSignIn) {
+      const signIn = el('button', 'ghost small-button', 'Sign in');
+      signIn.title = `Opens ${agent.name}'s own sign-in in a terminal`;
+      signIn.addEventListener('click', () => openTerminal(agent.id, true));
+      actions.append(signIn);
+    }
+    if (!agent.available && agent.install) {
+      const install = el('button', 'primary small-button', 'How to install');
+      install.addEventListener('click', () => window.otto.openLink(agent.install));
+      actions.append(install);
+    }
+    row.append(text, actions);
+    body.append(row);
+  }
+  body.append(el('p', 'muted small', 'Sign-in runs in the agent itself, so your keys and passwords never pass through Otto. Restart Otto after installing an agent.'));
+
+  body.append(el('div', 'overline', 'Appearance'));
+  const appearance = el('div', 'setting-row');
+  const themeText = el('div', 'setting-text');
+  themeText.append(el('strong', '', Theme.current.theme.displayName), el('span', 'muted small', 'Applies to this workspace.'));
+  const themeButton = el('button', 'ghost small-button', 'Change theme');
+  themeButton.addEventListener('click', toggleThemeMenu);
+  appearance.append(themeText, themeButton);
+  body.append(appearance);
+
+  body.append(el('div', 'overline', 'Workspace'));
+  const row = el('div', 'setting-row');
+  const text = el('div', 'setting-text');
+  text.append(el('strong', '', appState.workspaceName || 'None chosen'), el('span', 'muted small', appState.workspace || 'Pick the folder your bots and agents work in.'));
+  const change = el('button', 'ghost small-button', appState.workspace ? 'Change folder' : 'Choose folder');
+  change.addEventListener('click', chooseWorkspace);
+  row.append(text, change);
+  body.append(row);
+
+  body.append(el('div', 'overline', 'About'));
+  body.append(
+    el('p', 'muted', [`Otto Desktop ${appState.version || ''}`.trim(), appState.daemon ? `engine ${appState.daemon.version}` : 'terminal engine offline', chatAvailable() ? 'chats on' : 'chats unavailable', appState.platform].join(' · ')),
+  );
+}
+
+// ---- Theme menu ----------------------------------------------------------------------------
+
+function toggleThemeMenu() {
+  const menu = $('theme-menu');
+  if (!menu.hidden) {
+    menu.hidden = true;
+    return;
+  }
+  menu.replaceChildren();
+  for (const choice of Theme.current.themes) {
+    const button = el('button');
+    button.append(el('span', '', choice.name));
+    if (choice.id === Theme.current.theme.id) button.append(el('span', 'check', '✓'));
+    button.addEventListener('click', async () => {
+      menu.hidden = true;
+      try {
+        await Theme.choose(choice.id);
+        if (view.type === 'settings') renderSettings();
+      } catch (error) {
+        toast(cleanError(error));
+      }
+    });
+    menu.append(button);
+  }
+  if (!Theme.current.themes.length) menu.append(el('button', '', 'Themes need the Otto engine'));
+  menu.hidden = false;
+}
+
 // ---- Terminals -----------------------------------------------------------------------------
 
 async function openTerminal(agentID, signIn = false) {
+  if (surface !== 'chat') setSurface('chat');
   stopPolling();
   chat = null;
   showView('terminal');
@@ -577,7 +615,7 @@ async function openTerminal(agentID, signIn = false) {
     showTerminal(sessionID);
   } catch (error) {
     toast(cleanError(error));
-    goHome();
+    goWelcome();
   }
 }
 
@@ -602,34 +640,68 @@ async function chooseWorkspace() {
     const next = await window.otto.chooseWorkspace();
     if (next.workspace !== appState?.workspace) Terminals.clear();
     appState = next;
+    await Theme.load();
     await refreshRoster();
-    goHome();
+    if (surface === 'home') Home.load();
+    goWelcome();
   } catch (error) {
     toast(cleanError(error));
   }
 }
 
-$('new-chat').addEventListener('click', goHome);
-$('nav-home').addEventListener('click', () => showPlace('home'));
-$('nav-documents').addEventListener('click', () => showPlace('documents'));
-$('nav-memory').addEventListener('click', () => showPlace('memory'));
-$('nav-settings').addEventListener('click', () => showPlace('settings'));
-Memory.onError = (error) => toast(cleanError(error));
-$('new-document').addEventListener('click', () => Documents.create('document'));
-$('new-sheet').addEventListener('click', () => Documents.create('spreadsheet'));
-$('editor-back').addEventListener('click', () => showPlace('documents'));
-Home.onError = (error) => toast(cleanError(error));
+function decorate() {
+  document.body.classList.toggle('darwin', navigator.userAgent.includes('Mac'));
+  $('toggle-sidebar').append(Icons.icon('sidebar.left', 15));
+  $('theme-button').append(Icons.icon('paintpalette', 15));
+  $('activity-button').prepend(Icons.icon('tray', 15));
+  $('search-icon').append(Icons.icon('magnifyingglass', 14));
+  $('new-chat').append(Icons.icon('plus', 15), el('span', '', 'New'));
+  $('add-bot').append(Icons.icon('plus', 12));
+  $('add-terminal').append(Icons.icon('plus', 12));
+  $('nav-settings').append(Icons.icon('gearshape', 13), el('span', '', 'Settings'));
+  $('welcome-clip').append(Icons.icon('paperclip', 15));
+  $('welcome-send').append(Icons.icon('arrow.up', 14));
+  $('composer-send').append(Icons.icon('arrow.up', 15));
+  $('new-document').append(Icons.icon('plus', 14), el('span', '', 'New'));
+  $('editor-back').append(Icons.icon('chevron.left', 13), el('span', '', 'Documents'));
+  document.querySelector('.otto-face').append(Icons.face('Otto', 52));
+}
+
+decorate();
+Home.configure({
+  onError: (error) => toast(cleanError(error)),
+  bots: () => bots,
+  userName: () => appState?.userName || '',
+  startChat,
+  openBot,
+  hire: openBotDialog,
+  go,
+});
 Documents.onError = (error) => toast(cleanError(error));
 Documents.onOpen = () => {
   view = { type: 'editor' };
   showView('editor');
+  renderSidebar();
 };
-$('new-terminal').addEventListener('click', () => {
-  const agent = appState?.agents.find((candidate) => candidate.id === 'shell' && candidate.available);
-  if (agent) openTerminal(agent.id);
-});
+Memory.onError = (error) => toast(cleanError(error));
+
+$('surface-home').addEventListener('click', () => setSurface('home'));
+$('surface-chat').addEventListener('click', () => setSurface('chat'));
+$('activity-button').addEventListener('click', () => setSurface('home'));
+$('theme-button').addEventListener('click', toggleThemeMenu);
 $('workspace-button').addEventListener('click', chooseWorkspace);
 $('choose-workspace').addEventListener('click', chooseWorkspace);
+$('new-chat').addEventListener('click', () => go('welcome'));
+$('add-bot').addEventListener('click', openBotDialog);
+$('add-terminal').addEventListener('click', () => go('terminal'));
+$('nav-settings').addEventListener('click', () => go('settings'));
+$('sidebar-search').addEventListener('input', (event) => {
+  railQuery = event.target.value;
+  renderSidebar();
+});
+$('new-document').addEventListener('click', () => Documents.create('document'));
+$('new-sheet').addEventListener('click', () => Documents.create('spreadsheet'));
+$('editor-back').addEventListener('click', () => go('documents'));
 $('composer').addEventListener('submit', sendMessage);
 $('composer-input').addEventListener('input', autosize);
 $('composer-input').addEventListener('keydown', (event) => {
@@ -637,6 +709,15 @@ $('composer-input').addEventListener('keydown', (event) => {
     event.preventDefault();
     $('composer').requestSubmit();
   }
+});
+$('welcome-input').addEventListener('input', (event) => $('welcome-send').classList.toggle('ready', Boolean(event.target.value.trim())));
+$('welcome-composer').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = $('welcome-input').value.trim();
+  if (!welcomeTarget) return openBotDialog();
+  if (!text) return;
+  $('welcome-input').value = '';
+  startChat(welcomeTarget, text);
 });
 $('chat-stop').addEventListener('click', async () => {
   if (!chat?.threadID || !chat.activeRunID) return;
@@ -659,14 +740,17 @@ $('transcript').addEventListener('click', (event) => {
   event.preventDefault();
   window.otto.openLink(link.href);
 });
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('#theme-menu, #theme-button') && !$('theme-menu').hidden) $('theme-menu').hidden = true;
+});
 window.addEventListener('resize', () => {
   if (view.type === 'terminal') Terminals.fitActive(view.sessionID);
 });
 setInterval(async () => {
   await refreshRoster();
-  renderSidebar();
-  if (view.type === 'welcome') renderWelcome();
-  if (view.type === 'home') await Home.load();
+  if (surface === 'chat') renderSidebar();
+  if (surface === 'chat' && view.type === 'welcome') renderWelcome();
+  if (surface === 'home') await Home.load();
 }, 4000);
 
 window.otto.onEvent((event) => Terminals.handleEvent(event));
@@ -679,20 +763,21 @@ window.otto.onExit(() => {
 window.otto.onEngineExit(() => {
   if (appState) appState.chat = { available: false, error: 'The chat engine stopped. Restart Otto to reconnect.' };
   toast('The chat engine stopped. Restart Otto to reconnect.');
-  goHome();
+  goWelcome();
 });
 
 window.otto
   .state()
   .then(async (state) => {
     appState = state;
+    if (chatAvailable()) await Theme.load();
     await refreshRoster();
-    if (chatAvailable()) await showPlace('home');
-    else goHome();
+    goWelcome();
+    setSurface(chatAvailable() ? 'home' : 'chat');
   })
   .catch((error) => {
     appState = { agents: [], providers: [], workspace: null, chat: { available: false } };
-    goHome();
-    $('engine-status').textContent = 'Engine unavailable';
+    goWelcome();
+    setSurface('chat');
     toast(cleanError(error));
   });

@@ -4,176 +4,190 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
     />
     <title>Otto</title>
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <aside class="sidebar">
-      <div class="brand drag">
-        <span class="halo" aria-hidden="true"></span>
-        <span class="wordmark">Otto</span>
-      </div>
+    <!-- Theme artwork and its scrim, behind everything (ThemeBackgroundView) -->
+    <div class="backdrop" aria-hidden="true"></div>
 
-      <button class="workspace" id="workspace-button" title="Change workspace folder">
-        <span class="workspace-label">Workspace</span>
-        <span class="workspace-name" id="workspace-name">Choose a folder</span>
-      </button>
-
-      <nav class="nav" aria-label="Places">
-        <button class="nav-item" id="nav-home" data-place="home"><span class="nav-icon" aria-hidden="true">⌂</span> Home</button>
-        <button class="nav-item" id="nav-documents" data-place="documents"><span class="nav-icon" aria-hidden="true">▤</span> Documents</button>
-        <button class="nav-item" id="nav-memory" data-place="memory"><span class="nav-icon" aria-hidden="true">◎</span> Memory</button>
-      </nav>
-
-      <button class="new-chat" id="new-chat"><span class="plus" aria-hidden="true">+</span> New chat</button>
-
-      <div class="lists">
-        <div class="section-title">Chats</div>
-        <ul class="sessions" id="threads" aria-label="Chats"></ul>
-        <div class="section-title section-row">
-          <span>Terminals</span>
-          <button class="tiny" id="new-terminal" title="Open a terminal">+</button>
+    <!-- Window chrome: the Home | Chat switch, theme and activity -->
+    <header class="chrome drag">
+      <div class="chrome-left no-drag">
+        <button class="chrome-button" id="toggle-sidebar" title="Hide sidebar" hidden></button>
+        <div class="surface-switch" role="tablist" aria-label="Surface">
+          <button role="tab" id="surface-home" class="active">Home</button>
+          <button role="tab" id="surface-chat">Chat</button>
         </div>
-        <ul class="sessions" id="terminals-list" aria-label="Terminals"></ul>
       </div>
+      <div class="chrome-right no-drag">
+        <button class="chrome-pill" id="workspace-button" title="Change workspace folder">
+          <span id="workspace-name">Workspace</span>
+        </button>
+        <button class="chrome-button" id="theme-button" title="Theme"></button>
+        <button class="chrome-button" id="activity-button" title="Needs you"><span class="badge" id="activity-badge" hidden></span></button>
+      </div>
+    </header>
+    <div class="menu" id="theme-menu" role="menu" hidden></div>
 
-      <button class="nav-item settings-link" id="nav-settings"><span class="nav-icon" aria-hidden="true">⚙</span> Settings</button>
-      <footer class="engine" id="engine-status">Starting engine…</footer>
-    </aside>
+    <!-- Home: the brief, reviews and agents over the theme artwork -->
+    <section class="home-surface" id="home-surface">
+      <div class="home-column" id="home-body"></div>
+    </section>
 
-    <main class="stage">
-      <!-- Start: pick a bot, or open a terminal -->
-      <section class="welcome" id="welcome">
-        <div class="halo-large" aria-hidden="true"></div>
-        <h1 id="welcome-title">What should we work on?</h1>
-        <p class="welcome-sub" id="welcome-sub">Start a chat with one of your bots.</p>
-        <div class="agents" id="bots"></div>
-        <p class="chat-note" id="chat-note" hidden></p>
-        <div class="terminal-row" id="terminal-row"></div>
-        <button class="primary" id="choose-workspace" hidden>Choose a workspace folder</button>
-      </section>
-
-      <!-- Home: brief, reviews and cards -->
-      <section class="home" id="home" hidden>
-        <header class="page-header drag">
-          <div>
-            <h1 id="home-greeting">Good morning</h1>
-            <p class="page-sub" id="home-sub"></p>
-          </div>
-        </header>
-        <div class="home-body" id="home-body"></div>
-      </section>
-
-      <!-- Documents: Word documents, sheets and slides in the workspace -->
-      <section class="documents" id="documents" hidden>
-        <header class="page-header drag">
-          <div>
-            <h1>Documents</h1>
-            <p class="page-sub">Word documents, sheets and slides your bots write with you.</p>
-          </div>
-          <div class="page-actions no-drag">
-            <button class="ghost" id="new-sheet">New sheet</button>
-            <button class="primary" id="new-document">New document</button>
-          </div>
-        </header>
-        <div class="documents-body" id="documents-body"></div>
-      </section>
-
-      <!-- Memory: about you, workspace habits and the project brain -->
-      <section class="memory" id="memory" hidden>
-        <header class="page-header drag">
-          <div>
-            <h1>Memory</h1>
-            <p class="page-sub">What Otto and your bots remember. Remove anything that is wrong.</p>
-          </div>
-        </header>
-        <div class="memory-body" id="memory-body"></div>
-      </section>
-
-      <!-- Settings: agents, workspace, about -->
-      <section class="settings" id="settings" hidden>
-        <header class="page-header drag">
-          <div>
-            <h1>Settings</h1>
-            <p class="page-sub">Agents, your workspace and this install.</p>
-          </div>
-        </header>
-        <div class="settings-body" id="settings-body"></div>
-      </section>
-
-      <!-- One open document -->
-      <section class="editor" id="editor" hidden>
-        <header class="stage-header drag">
-          <div class="stage-title no-drag">
-            <button class="ghost back" id="editor-back">← Documents</button>
-            <span id="editor-title"></span>
-            <span class="stage-meta" id="editor-status"></span>
-          </div>
-        </header>
-        <div class="editor-body" id="editor-body"></div>
-      </section>
-
-      <!-- A chat with a bot -->
-      <section class="chat" id="chat" hidden>
-        <header class="stage-header drag">
-          <div class="stage-title">
-            <span class="dot" id="chat-dot"></span>
-            <span id="chat-name"></span>
-            <span class="stage-meta" id="chat-meta"></span>
-          </div>
-          <button class="ghost no-drag" id="chat-stop" hidden>Stop</button>
-        </header>
-        <div class="transcript" id="transcript" aria-live="polite"></div>
-        <div class="approval" id="approval" hidden>
-          <div class="approval-text">
-            <strong>Needs your approval</strong>
-            <span id="approval-reason"></span>
-          </div>
-          <div class="approval-actions">
-            <button class="ghost" id="approval-deny">Deny</button>
-            <button class="primary" id="approval-approve">Approve once</button>
-          </div>
+    <!-- Chat: the rail and the conversation -->
+    <section class="chat-surface" id="chat-surface" hidden>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-top">
+          <label class="sidebar-search">
+            <span id="search-icon"></span>
+            <input id="sidebar-search" placeholder="Search" aria-label="Search bots and sessions" />
+          </label>
+          <button class="rail-row" id="new-chat"></button>
+          <div class="places" id="places"></div>
         </div>
-        <form class="composer" id="composer">
-          <textarea id="composer-input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
-          <button class="send" id="composer-send" type="submit" aria-label="Send">↑</button>
-        </form>
-      </section>
+        <div class="rail-scroll">
+          <div class="rail-group-header"><span>bots</span><button class="rail-add" id="add-bot" title="Hire a bot"></button></div>
+          <div id="bots-list"></div>
+          <div class="rail-group-header"><span>sessions</span><button class="rail-add" id="add-terminal" title="Open a terminal"></button></div>
+          <div id="sessions-list"></div>
+        </div>
+        <footer class="rail-footer">
+          <button class="rail-footer-button" id="nav-settings"></button>
+          <span class="rail-status" id="engine-status"></span>
+        </footer>
+      </aside>
 
-      <!-- Raw terminals through ottod -->
-      <section class="terminal-view" id="terminal-view" hidden>
-        <header class="stage-header drag">
-          <div class="stage-title">
-            <span class="dot" id="stage-dot"></span>
-            <span id="stage-name"></span>
-            <span class="stage-meta" id="stage-meta"></span>
+      <main class="content" id="content">
+        <!-- New chat: the welcome with Otto's face -->
+        <section class="welcome" id="welcome">
+          <div class="otto-face" aria-hidden="true"></div>
+          <h1 class="serif" id="welcome-title">Morning.</h1>
+          <p class="welcome-sub" id="welcome-sub">What are we getting into?</p>
+          <form class="composer welcome-composer" id="welcome-composer">
+            <span class="composer-leading" id="welcome-clip"></span>
+            <input id="welcome-input" placeholder="Message…" aria-label="Message" autocomplete="off" />
+            <button class="send" type="submit" aria-label="Send" id="welcome-send"></button>
+          </form>
+          <div class="suggestions" id="suggestions"></div>
+          <div class="bring-in" id="bring-in"></div>
+          <p class="chat-note" id="chat-note" hidden></p>
+          <button class="primary" id="choose-workspace" hidden>Choose a workspace folder</button>
+        </section>
+
+        <!-- A chat with a bot -->
+        <section class="chat" id="chat" hidden>
+          <header class="conversation-header">
+            <div class="conversation-title">
+              <span id="chat-face"></span>
+              <span id="chat-name"></span>
+              <span class="stage-meta" id="chat-meta"></span>
+            </div>
+            <button class="ghost small-button" id="chat-stop" hidden>Stop</button>
+          </header>
+          <div class="transcript" id="transcript" aria-live="polite"></div>
+          <div class="approval" id="approval" hidden>
+            <div class="approval-text">
+              <strong>Needs your approval</strong>
+              <span id="approval-reason"></span>
+            </div>
+            <div class="approval-actions">
+              <button class="ghost small-button" id="approval-deny">Deny</button>
+              <button class="primary small-button" id="approval-approve">Approve once</button>
+            </div>
           </div>
-          <button class="ghost no-drag" id="stop-button">Stop</button>
-        </header>
-        <section class="terminals" id="terminals"></section>
-      </section>
+          <form class="composer conversation-composer" id="composer">
+            <textarea id="composer-input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
+            <button class="send" id="composer-send" type="submit" aria-label="Send"></button>
+          </form>
+        </section>
 
-      <div class="toast" id="toast" role="status" hidden></div>
-    </main>
+        <!-- Documents -->
+        <section class="page" id="documents" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Documents</h1>
+              <p class="page-sub">Docs, sheets and slides you write with your agents. Saved in this space's Documents folder.</p>
+            </div>
+            <div class="page-actions">
+              <button class="soft-button" id="new-sheet">New sheet</button>
+              <button class="text-button" id="new-document"></button>
+            </div>
+          </header>
+          <div class="page-body" id="documents-body"></div>
+        </section>
+
+        <!-- One open document -->
+        <section class="page editor" id="editor" hidden>
+          <header class="page-header compact">
+            <div class="editor-title">
+              <button class="text-button" id="editor-back"></button>
+              <span id="editor-title"></span>
+              <span class="stage-meta" id="editor-status"></span>
+            </div>
+          </header>
+          <div class="editor-body" id="editor-body"></div>
+        </section>
+
+        <!-- Memory -->
+        <section class="page" id="memory" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Memory</h1>
+              <p class="page-sub">What Otto and your bots remember. Remove anything that is wrong.</p>
+            </div>
+          </header>
+          <div class="page-body" id="memory-body"></div>
+        </section>
+
+        <!-- Settings -->
+        <section class="page" id="settings" hidden>
+          <header class="page-header">
+            <div>
+              <h1>Settings</h1>
+              <p class="page-sub">Agents, your workspace and this install.</p>
+            </div>
+          </header>
+          <div class="page-body" id="settings-body"></div>
+        </section>
+
+        <!-- Raw terminals through ottod -->
+        <section class="terminal-view" id="terminal-view" hidden>
+          <header class="conversation-header">
+            <div class="conversation-title">
+              <span class="dot" id="stage-dot"></span>
+              <span id="stage-name"></span>
+              <span class="stage-meta" id="stage-meta"></span>
+            </div>
+            <button class="ghost small-button" id="stop-button">Stop</button>
+          </header>
+          <section class="terminals" id="terminals"></section>
+        </section>
+      </main>
+    </section>
+
+    <div class="toast" id="toast" role="status" hidden></div>
 
     <dialog class="dialog" id="bot-dialog">
       <form method="dialog" id="bot-form">
-        <h2>New bot</h2>
+        <h2>Hire a bot</h2>
         <label>Name<input id="bot-name" required maxlength="60" placeholder="e.g. Scout" /></label>
         <label>What it does<textarea id="bot-job" required rows="3" placeholder="e.g. Research competitors and summarise what changed"></textarea></label>
         <label>Runs on<select id="bot-provider"></select></label>
         <div class="dialog-actions">
-          <button class="ghost" value="cancel" formnovalidate>Cancel</button>
-          <button class="primary" value="create" id="bot-create">Create bot</button>
+          <button class="ghost small-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary small-button" value="create" id="bot-create">Hire</button>
         </div>
       </form>
     </dialog>
 
     <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="icons.js"></script>
+    <script src="theme.js"></script>
     <script src="markdown.js"></script>
     <script src="terminals.js"></script>
     <script src="home.js"></script>

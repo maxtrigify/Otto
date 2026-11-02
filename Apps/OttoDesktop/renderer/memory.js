@@ -24,10 +24,10 @@ const Memory = (() => {
   }
 
   function entryList(entries, removeMethod, emptyText) {
-    const list = el('div', 'memory-list');
+    const list = el('div');
     if (!entries.length) list.append(el('p', 'muted small', emptyText));
     for (const entry of entries) {
-      const row = el('div', 'memory-entry');
+      const row = el('div', 'list-row');
       row.append(el('span', '', entry.text));
       const meta = el('span', 'muted small', entry.source === 'user' ? 'You' : entry.source);
       const forget = el('button', 'tiny dismiss', '×');
@@ -44,11 +44,11 @@ const Memory = (() => {
     const body = $('memory-body');
     body.replaceChildren();
 
-    const about = el('section', 'home-section');
-    about.append(el('h2', 'home-section-title', 'About me'));
+    const about = el('section');
+    about.append(el('div', 'overline', 'About me'));
     about.append(entryList(snapshot.personal, 'memory.removePersonal', 'Nothing yet. Tell Otto something about you.'));
-    const form = el('form', 'add-todo');
-    const input = el('input');
+    const form = el('form');
+    const input = el('input', 'inline-input');
     input.placeholder = 'Add something Otto should remember about you…';
     input.setAttribute('aria-label', 'Add to About me');
     form.append(input);
@@ -60,16 +60,15 @@ const Memory = (() => {
     about.append(form);
     body.append(about);
 
-    const habits = el('section', 'home-section');
-    habits.append(el('h2', 'home-section-title', 'Workspace habits'));
+    const habits = el('section');
+    habits.append(el('div', 'overline', 'Workspace habits'));
     habits.append(entryList(snapshot.operating, 'memory.removeOperating', 'No workspace habits yet.'));
     body.append(habits);
 
-    const brain = el('section', 'home-section');
-    const title = el('h2', 'home-section-title', 'Project brain');
-    if (snapshot.brain.length) title.append(el('span', 'count', String(snapshot.brain.length)));
+    const brain = el('section');
+    const title = el('div', 'overline', snapshot.brain.length ? `Project brain · ${snapshot.brain.length}` : 'Project brain');
     brain.append(title);
-    const search = el('input', 'memory-search');
+    const search = el('input', 'search-input');
     search.placeholder = 'Search the brain…';
     search.value = filter;
     search.addEventListener('input', () => {

@@ -1,4 +1,10 @@
 import Foundation
+
+#if canImport(Darwin)
+  import Darwin
+#elseif canImport(Glibc)
+  import Glibc
+#endif
 import OttoModels
 
 /// Reads provider CLIs' own on-disk session records. Interactive TUI sessions never emit
@@ -48,11 +54,11 @@ public enum ProviderSessionStore {
     let since = since.addingTimeInterval(-5)
     switch provider {
     case .claudeCode:
-      let file = claudeProjectDirectory(
-        workingDirectory: workingDirectory, home: home, providerHome: providerHome
-      )
-      .appending(path: "\(sessionID).jsonl")
-      guard FileManager.default.fileExists(atPath: file.path) else { return Harvest() }
+      guard
+        let file = claudeSessionFile(
+          workingDirectory: workingDirectory, sessionID: sessionID, home: home,
+          providerHome: providerHome)
+      else { return Harvest() }
       return parseClaudeSession(file, since: since)
     case .codex:
       let root = (providerHome ?? home.appending(path: ".codex")).appending(path: "sessions")
@@ -84,10 +90,11 @@ public enum ProviderSessionStore {
     guard !sessionID.isEmpty else { return Harvest() }
     switch provider {
     case .claudeCode:
-      let file = claudeProjectDirectory(
-        workingDirectory: workingDirectory, home: home, providerHome: providerHome
-      )
-      .appending(path: "\(sessionID).jsonl")
+      guard
+        let file = claudeSessionFile(
+          workingDirectory: workingDirectory, sessionID: sessionID, home: home,
+          providerHome: providerHome)
+      else { return Harvest() }
       return parseClaudeSession(file, since: .distantPast)
     case .codex:
       let root = (providerHome ?? home.appending(path: ".codex")).appending(path: "sessions")
@@ -107,6 +114,34 @@ public enum ProviderSessionStore {
   /// Claude Code stores sessions per workspace at ~/.claude/projects/<slug>/<sessionID>.jsonl,
   /// where the slug replaces every non-alphanumeric path character with '-'.
   /// `providerHome` is an account's relocated Claude config directory (`CLAUDE_CONFIG_DIR`).
+  /// The session file Claude Code wrote for this working directory. Claude files sessions under
+  /// the directory's resolved path, so a workspace reached through a symlink (macOS `/tmp`, a
+  /// linked folder) is looked up both as recorded and as resolved.
+  static func claudeSessionFile(
+    workingDirectory: String, sessionID: String, home: URL, providerHome: URL? = nil
+  ) -> URL? {
+    for directory in Set([workingDirectory, realPath(workingDirectory)]).sorted() {
+      let file = claudeProjectDirectory(
+        workingDirectory: directory, home: home, providerHome: providerHome
+      )
+      .appending(path: "\(sessionID).jsonl")
+      if FileManager.default.fileExists(atPath: file.path) { return file }
+    }
+    return nil
+  }
+
+  /// The path as the kernel resolves it (what `getcwd` reports to Claude). Foundation's
+  /// `resolvingSymlinksInPath` strips a leading `/private`, so it cannot be used here.
+  static func realPath(_ path: String) -> String {
+    #if canImport(Darwin) || canImport(Glibc)
+      guard let resolved = realpath(path, nil) else { return path }
+      defer { free(resolved) }
+      return String(cString: resolved)
+    #else
+      return path
+    #endif
+  }
+
   static func claudeProjectDirectory(
     workingDirectory: String, home: URL, providerHome: URL? = nil
   ) -> URL {

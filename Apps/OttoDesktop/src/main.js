@@ -52,6 +52,8 @@ const DESKTOP_METHODS = new Set([
   'memory.addPersonal',
   'memory.removePersonal',
   'memory.removeOperating',
+  'appearance.get',
+  'appearance.set',
 ]);
 
 /** Desktop agent IDs to the engine's provider names. */
@@ -161,6 +163,18 @@ function launchCommand(executable, args) {
   return { executable, args };
 }
 
+function firstName() {
+  let name = '';
+  try {
+    if (process.platform === 'darwin') {
+      name = require('node:child_process').execFileSync('id', ['-F'], { encoding: 'utf8' }).trim();
+    }
+  } catch {}
+  if (!name) name = os.userInfo().username || '';
+  const first = name.split(/[\s._-]+/)[0] || '';
+  return first ? first[0].toUpperCase() + first.slice(1) : '';
+}
+
 function state(hello) {
   const agents = discoverAgents(env);
   return {
@@ -177,6 +191,8 @@ function state(hello) {
       canSignIn: Array.isArray(login),
     })),
     version: app.getVersion(),
+    // Greetings use the first name, as the Mac app does with the account's full name.
+    userName: firstName(),
     providers: agents
       .filter((agent) => PROVIDERS[agent.id])
       .map((agent) => ({ id: PROVIDERS[agent.id], name: agent.name, available: agent.available })),
@@ -200,7 +216,7 @@ function registerIPC() {
       properties: ['openDirectory', 'createDirectory'],
     });
     if (result.canceled || !result.filePaths[0]) return state(null);
-    settings.workspace = result.filePaths[0];
+    settings.workspace = fs.realpathSync(result.filePaths[0]);
     saveSettings();
     return state((await startWorkspace()).hello);
   });
@@ -267,6 +283,12 @@ app.whenReady().then(() => {
   env = loginEnvironment();
   settings = loadSettings();
   if (process.env.OTTO_DESKTOP_WORKSPACE) settings.workspace = process.env.OTTO_DESKTOP_WORKSPACE;
+  // Agents record sessions under the resolved folder; resolve once so every path agrees.
+  if (settings.workspace) {
+    try {
+      settings.workspace = fs.realpathSync(settings.workspace);
+    } catch {}
+  }
   registerIPC();
   createWindow();
 });

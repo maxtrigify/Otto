@@ -149,12 +149,15 @@ class EngineClient extends EventEmitter {
     this.pending.clear();
   }
 
+  /** Closing stdin lets the engine save its state and exit; it is killed only if it lingers. */
   dispose() {
     if (!this.running) return;
     this.running = false;
     this.fail(new Error('The Otto engine was stopped'));
-    this.child.stdin.end();
-    this.child.kill();
+    const child = this.child;
+    child.stdin.end();
+    const timer = setTimeout(() => child.kill(), 3000);
+    child.once('exit', () => clearTimeout(timer));
   }
 }
 

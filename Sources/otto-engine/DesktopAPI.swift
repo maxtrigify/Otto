@@ -1,4 +1,5 @@
 import Foundation
+import OttoCore
 import OttoMemory
 import OttoModels
 import OttoRPCContracts
@@ -11,6 +12,8 @@ import OttoServices
 @MainActor
 struct DesktopAPI {
   let services: ApplicationServices
+  /// The workspace's canvas store, which owns the shared theme.
+  let store: CanvasStore
 
   struct Call: Decodable {
     var id: String
@@ -95,6 +98,15 @@ struct DesktopAPI {
       let input = try params(ReviewInput.self)
       try await services.commentOnReview(id: try uuid(input.id), text: input.text ?? "")
       return try reply(homeSnapshot())
+
+    // ---- Appearance ----------------------------------------------------------------------
+    // The workspace's theme, shared with the Mac app (the active canvas's themeID).
+    case "appearance.get":
+      return try reply(appearance())
+    case "appearance.set":
+      let input = try params(ThemeInput.self)
+      store.dispatch(.setTheme(input.themeID))
+      return try reply(appearance())
 
     // ---- Memory --------------------------------------------------------------------------
     case "memory.snapshot":
@@ -183,6 +195,18 @@ struct DesktopAPI {
       brain: records.map(BrainRecordSummary.init))
   }
 
+  private func appearance() -> Appearance {
+    let theme = OttoThemeCatalog.theme(id: store.activeCanvas.themeID)
+    return Appearance(
+      theme: theme,
+      material: theme.resolvedSurfaceMaterial.rawValue,
+      isLight: theme.isLightAppearance,
+      scrimFloor: theme.scrimFloorOpacity,
+      scrimDeep: theme.scrimDeepOpacity,
+      chromeBandOpacity: theme.chromeBandOpacity,
+      themes: OttoThemeCatalog.all.map { ThemeChoice(id: $0.id, name: $0.displayName) })
+  }
+
   private func uuid(_ text: String) throws -> UUID {
     guard let id = UUID(uuidString: text) else { throw APIError.notFound(text) }
     return id
@@ -193,6 +217,23 @@ struct DesktopAPI {
 
 struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
+struct ThemeInput: Decodable { var themeID: String }
+
+struct ThemeChoice: Encodable {
+  var id: String
+  var name: String
+}
+
+/// The theme as the Mac draws it: the definition plus the derived readability values.
+struct Appearance: Encodable {
+  var theme: OttoThemeDefinition
+  var material: String
+  var isLight: Bool
+  var scrimFloor: Double
+  var scrimDeep: Double
+  var chromeBandOpacity: Double
+  var themes: [ThemeChoice]
+}
 struct IDInput: Decodable { var id: String }
 struct PathInput: Decodable { var path: String }
 struct BriefCompleteInput: Decodable {

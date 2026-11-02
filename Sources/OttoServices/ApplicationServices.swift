@@ -3691,8 +3691,15 @@ public final class ApplicationServices: ObservableObject {
     // A user can submit immediately after launch while disk restoration is still scanning.
     // Never replace a genuinely live snapshot with the dormant restored projection.
     if (try? await supervisor.snapshot(agentID: node.id)) != nil { return }
-    let transcript = history.turns.map {
-      AgentTranscriptEntry(role: $0.role, text: $0.text, createdAt: node.createdAt)
+    // Provider files keep the wrapped prompt Otto sent; show what the person actually typed.
+    let transcript = history.turns.compactMap { turn -> AgentTranscriptEntry? in
+      guard turn.role == .user else {
+        return AgentTranscriptEntry(role: turn.role, text: turn.text, createdAt: node.createdAt)
+      }
+      guard !PromptSubmission.isHiddenControlPrompt(turn.text) else { return nil }
+      return AgentTranscriptEntry(
+        role: turn.role, text: PromptSubmission.originalUserText(turn.text),
+        createdAt: node.createdAt)
     }
     let lastPrompt = history.turns.last(where: { $0.role == .user })?.text
     let result = history.turns.last(where: { $0.role == .assistant })?.text

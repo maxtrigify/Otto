@@ -98,7 +98,7 @@ enum OttoEngine {
         deviceID: UUID(uuidString: "00000000-0000-0000-0000-00000000D35C")!,
         scopes: Set(OttoRPCScope.allCases))
       let output = ResponseWriter()
-      let desktop = DesktopAPI(services: services)
+      let desktop = DesktopAPI(services: services, store: store)
       let expected = Array(token.utf8)
       for await line in standardInputLines() {
         let request: Request
@@ -133,7 +133,10 @@ enum OttoEngine {
           await output.write(Failure(error: .init(code: "invalid_request", message: "Invalid request.")))
         }
       }
+      // Standard input closed: the desktop app is quitting. Save state before exiting.
       bridge.stop()
+      await services.flushPersistence()
+      exit(0)
     } catch {
       FileHandle.standardError.write(Data("\(error.localizedDescription)\n\(usage)\n".utf8))
       exit(64)

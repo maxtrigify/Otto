@@ -64,31 +64,32 @@ const type = async (text) => {
 
 let failure = null;
 try {
+  const engineLine = `appState && appState.daemon ? 'Engine ' + appState.daemon.version + ' · ' + appState.platform : 'offline'`;
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    if ((await evaluate(`document.getElementById('engine-status').textContent`))?.startsWith('Engine ')) break;
+    if ((await evaluate(engineLine))?.startsWith('Engine ')) break;
     await sleep(500);
   }
-  const engine = await evaluate(`document.getElementById('engine-status').textContent`);
+  const engine = await evaluate(engineLine);
   console.log(`engine: ${engine}`);
   await shot('1-welcome.png');
   if (!engine?.startsWith('Engine ')) throw new Error(`engine did not start: ${engine}`);
   if (process.env.OTTO_ENGINE_PATH) {
     // With the engine Otto Desktop lands on Home; New chat then offers bots.
-    for (let attempt = 0; attempt < 20 && (await evaluate(`document.getElementById('home').hidden`)); attempt += 1) {
+    for (let attempt = 0; attempt < 20 && (await evaluate(`document.getElementById('home-surface').hidden`)); attempt += 1) {
       await sleep(500);
     }
-    const home = await evaluate(`document.getElementById('home').hidden ? null : document.getElementById('home-greeting').textContent`);
+    const home = await evaluate(`document.getElementById('home-surface').hidden ? null : document.querySelector('.home-greeting')?.textContent`);
     console.log(`home: ${home ?? 'missing'}`);
     if (!home) throw new Error('Home did not come up with the engine');
     await shot('0-home.png');
-    await evaluate(`document.getElementById('new-chat').click()`);
+    await evaluate(`document.getElementById('surface-chat').click(); document.getElementById('new-chat').click()`);
     await sleep(500);
-    const newBot = await evaluate(`Boolean(document.querySelector('.agent-card.new-bot'))`);
-    console.log(`chat engine: ${newBot ? 'available' : 'missing'}`);
-    if (!newBot) throw new Error('the chat engine did not come up');
+    const composer = await evaluate(`!document.getElementById('welcome-composer').hidden`);
+    console.log(`chat engine: ${composer ? 'available' : 'missing'}`);
+    if (!composer) throw new Error('the chat engine did not come up');
   }
 
-  await evaluate(`[...document.querySelectorAll('.terminal-row .chip')].find((b) => b.textContent.startsWith('Terminal')).click()`);
+  await evaluate(`document.getElementById('surface-chat').click(); document.getElementById('add-terminal').click()`);
   await sleep(4000);
   await evaluate(`document.querySelector('.terminal-host:not([hidden]) textarea').focus()`);
   const marker = 'otto-smoke-ok';
