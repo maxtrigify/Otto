@@ -25,8 +25,8 @@ test('a bot answers a message end to end', { skip: !binary || !provider, timeout
   });
   const logs = [];
   client.on('log', (text) => logs.push(text.trim()));
-  t.after(() => {
-    client.dispose();
+  t.after(async () => {
+    await client.stop();
     fs.rmSync(root, { recursive: true, force: true });
   });
 

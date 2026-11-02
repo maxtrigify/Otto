@@ -17,8 +17,8 @@ async function engine(t) {
   const client = new EngineClient({ binary, stateDirectory: path.join(root, 'state'), workspace });
   const logs = [];
   client.on('log', (text) => logs.push(text.trim()));
-  t.after(() => {
-    client.dispose();
+  t.after(async () => {
+    await client.stop();
     fs.rmSync(root, { recursive: true, force: true });
   });
   return { client, workspace, logs };

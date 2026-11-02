@@ -149,6 +149,15 @@ class EngineClient extends EventEmitter {
     this.pending.clear();
   }
 
+  /** Resolves once the engine has saved its state and exited (Windows keeps files locked until then). */
+  stop() {
+    const child = this.child;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    this.dispose();
+    return exited;
+  }
+
   /** Closing stdin lets the engine save its state and exit; it is killed only if it lingers. */
   dispose() {
     if (!this.running) return;
