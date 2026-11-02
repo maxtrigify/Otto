@@ -40,6 +40,7 @@
         <ul class="sessions" id="terminals-list" aria-label="Terminals"></ul>
       </div>
 
+      <button class="nav-item settings-link" id="nav-settings"><span class="nav-icon" aria-hidden="true">⚙</span> Settings</button>
       <footer class="engine" id="engine-status">Starting engine…</footer>
     </aside>
 
@@ -90,6 +91,17 @@
           </div>
         </header>
         <div class="memory-body" id="memory-body"></div>
+      </section>
+
+      <!-- Settings: agents, workspace, about -->
+      <section class="settings" id="settings" hidden>
+        <header class="page-header drag">
+          <div>
+            <h1>Settings</h1>
+            <p class="page-sub">Agents, your workspace and this install.</p>
+          </div>
+        </header>
+        <div class="settings-body" id="settings-body"></div>
       </section>
 
       <!-- One open document -->

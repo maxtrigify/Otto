@@ -10,11 +10,26 @@ const path = require('node:path');
 
 const isWindows = process.platform === 'win32';
 
+// `login` is the agent's own sign-in, run in a terminal so credentials never pass through Otto.
 const AGENTS = [
-  { id: 'claude', name: 'Claude Code', command: 'claude', blurb: 'Anthropic' },
-  { id: 'codex', name: 'Codex', command: 'codex', blurb: 'OpenAI' },
-  { id: 'pi', name: 'Pi', command: 'pi', blurb: 'Any provider' },
-  { id: 'shell', name: 'Terminal', command: null, blurb: 'Plain shell' },
+  {
+    id: 'claude',
+    name: 'Claude Code',
+    command: 'claude',
+    blurb: 'Anthropic',
+    login: [],
+    install: 'https://www.npmjs.com/package/@anthropic-ai/claude-code',
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    command: 'codex',
+    blurb: 'OpenAI',
+    login: ['login'],
+    install: 'https://www.npmjs.com/package/@openai/codex',
+  },
+  { id: 'pi', name: 'Pi', command: 'pi', blurb: 'Any provider', login: [], install: null },
+  { id: 'shell', name: 'Terminal', command: null, blurb: 'Plain shell', login: null, install: null },
 ];
 
 function loginEnvironment() {

@@ -49,11 +49,11 @@ const Terminals = (() => {
     return { term, fit, element };
   }
 
-  async function launch(agentID) {
+  async function launch(agentID, signIn = false) {
     const view = createTerminal();
     view.fit.fit();
     try {
-      const result = await window.otto.launch(agentID, view.term.cols || 120, view.term.rows || 36);
+      const result = await window.otto.launch(agentID, view.term.cols || 120, view.term.rows || 36, signIn);
       const session = { ...view, name: result.name, status: 'running', startedAt: new Date() };
       sessions.set(result.sessionID, session);
       view.term.onData((text) => {

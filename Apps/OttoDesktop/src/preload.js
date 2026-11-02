@@ -11,7 +11,8 @@ contextBridge.exposeInMainWorld('otto', {
   desktop: (method, params) => ipcRenderer.invoke('engine:desktop', { method, params }),
   onEngineExit: (listener) => ipcRenderer.on('engine:exit', (_event, payload) => listener(payload)),
   // Terminals: raw sessions through ottod.
-  launch: (agentID, columns, rows) => ipcRenderer.invoke('session:launch', { agentID, columns, rows }),
+  launch: (agentID, columns, rows, signIn = false) =>
+    ipcRenderer.invoke('session:launch', { agentID, columns, rows, signIn }),
   input: (sessionID, text) => ipcRenderer.invoke('session:input', { sessionID, text }),
   resize: (sessionID, columns, rows) => ipcRenderer.invoke('session:resize', { sessionID, columns, rows }),
   stop: (sessionID) => ipcRenderer.invoke('session:stop', { sessionID }),

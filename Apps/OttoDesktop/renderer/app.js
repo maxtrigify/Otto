@@ -143,16 +143,94 @@ function showView(type) {
     ['documents', 'documents'],
     ['editor', 'editor'],
     ['memory', 'memory'],
+    ['settings', 'settings'],
   ]) {
     $(id).hidden = type !== place;
   }
   $('nav-home').classList.toggle('active', type === 'home');
   $('nav-documents').classList.toggle('active', type === 'documents' || type === 'editor');
   $('nav-memory').classList.toggle('active', type === 'memory');
+  $('nav-settings').classList.toggle('active', type === 'settings');
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+/** Settings works without the chat engine: it is where agents get installed and signed in. */
+function renderSettings() {
+  const body = $('settings-body');
+  body.replaceChildren();
+
+  const agents = el('section', 'home-section');
+  agents.append(el('h2', 'home-section-title', 'Agents'));
+  for (const agent of appState.agents.filter((candidate) => candidate.id !== 'shell')) {
+    const row = el('div', 'setting-row');
+    const text = el('div', 'setting-text');
+    text.append(el('strong', '', agent.name));
+    text.append(el('span', 'muted small', agent.available ? agent.path : 'Not installed'));
+    const actions = el('div', 'setting-actions');
+    if (agent.available && agent.canSignIn) {
+      const signIn = el('button', 'ghost', 'Sign in');
+      signIn.title = `Opens ${agent.name}'s own sign-in in a terminal`;
+      signIn.addEventListener('click', () => openTerminal(agent.id, true));
+      actions.append(signIn);
+    }
+    if (!agent.available && agent.install) {
+      const install = el('button', 'primary', 'How to install');
+      install.addEventListener('click', () => window.otto.openLink(agent.install));
+      actions.append(install);
+    }
+    row.append(text, actions);
+    agents.append(row);
+  }
+  agents.append(el('p', 'muted small', 'Sign-in runs in the agent itself, so your keys and passwords never pass through Otto. Restart Otto after installing an agent.'));
+  body.append(agents);
+
+  const workspace = el('section', 'home-section');
+  workspace.append(el('h2', 'home-section-title', 'Workspace'));
+  const row = el('div', 'setting-row');
+  const text = el('div', 'setting-text');
+  text.append(el('strong', '', appState.workspaceName || 'None chosen'));
+  text.append(el('span', 'muted small', appState.workspace || 'Pick the folder your bots and agents work in.'));
+  const change = el('button', 'ghost', appState.workspace ? 'Change folder' : 'Choose folder');
+  change.addEventListener('click', chooseWorkspace);
+  row.append(text, change);
+  workspace.append(row);
+  body.append(workspace);
+
+  const about = el('section', 'home-section');
+  about.append(el('h2', 'home-section-title', 'About'));
+  about.append(
+    el(
+      'p',
+      'muted',
+      [
+        `Otto Desktop ${appState.version || ''}`.trim(),
+        appState.daemon ? `engine ${appState.daemon.version}` : 'terminal engine offline',
+        chatAvailable() ? 'chats on' : 'chats unavailable',
+        appState.platform,
+      ].join(' · '),
+    ),
+  );
+  body.append(about);
 }
 
 /** Home and Documents need the engine; without it the start screen is the bot/terminal picker. */
 async function showPlace(place) {
+  if (place === 'settings') {
+    stopPolling();
+    chat = null;
+    await Documents.close();
+    view = { type: 'settings' };
+    showView('settings');
+    renderSettings();
+    renderSidebar();
+    return;
+  }
   if (!chatAvailable()) return goHome();
   stopPolling();
   chat = null;
@@ -490,12 +568,12 @@ async function createBot(event) {
 
 // ---- Terminals -----------------------------------------------------------------------------
 
-async function openTerminal(agentID) {
+async function openTerminal(agentID, signIn = false) {
   stopPolling();
   chat = null;
   showView('terminal');
   try {
-    const sessionID = await Terminals.launch(agentID);
+    const sessionID = await Terminals.launch(agentID, signIn);
     showTerminal(sessionID);
   } catch (error) {
     toast(cleanError(error));
@@ -535,6 +613,7 @@ $('new-chat').addEventListener('click', goHome);
 $('nav-home').addEventListener('click', () => showPlace('home'));
 $('nav-documents').addEventListener('click', () => showPlace('documents'));
 $('nav-memory').addEventListener('click', () => showPlace('memory'));
+$('nav-settings').addEventListener('click', () => showPlace('settings'));
 Memory.onError = (error) => toast(cleanError(error));
 $('new-document').addEventListener('click', () => Documents.create('document'));
 $('new-sheet').addEventListener('click', () => Documents.create('spreadsheet'));

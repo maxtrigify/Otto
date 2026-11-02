@@ -167,7 +167,16 @@ function state(hello) {
     platform: process.platform,
     workspace: settings.workspace,
     workspaceName: settings.workspace ? path.basename(settings.workspace) : null,
-    agents: agents.map(({ id, name, blurb, available }) => ({ id, name, blurb, available })),
+    agents: agents.map(({ id, name, blurb, available, executable, install, login }) => ({
+      id,
+      name,
+      blurb,
+      available,
+      path: executable,
+      install,
+      canSignIn: Array.isArray(login),
+    })),
+    version: app.getVersion(),
     providers: agents
       .filter((agent) => PROVIDERS[agent.id])
       .map((agent) => ({ id: PROVIDERS[agent.id], name: agent.name, available: agent.available })),
@@ -208,13 +217,15 @@ function registerIPC() {
     return engine.desktop(method, params);
   });
 
-  ipcMain.handle('session:launch', async (_event, { agentID, columns, rows }) => {
+  // `signIn` runs only the agent's own fixed login arguments, never anything from the window.
+  ipcMain.handle('session:launch', async (_event, { agentID, columns, rows, signIn }) => {
     if (!terminals) throw new Error('Choose a workspace first.');
     const agent = discoverAgents(env).find((candidate) => candidate.id === agentID);
     if (!agent || !agent.executable) throw new Error(`${agent ? agent.name : agentID} is not installed.`);
-    const command = launchCommand(agent.executable, []);
+    const args = signIn && Array.isArray(agent.login) ? agent.login : [];
+    const command = launchCommand(agent.executable, args);
     const { sessionID } = await terminals.launch({ ...command, workspace: settings.workspace, columns, rows });
-    return { sessionID, agentID: agent.id, name: agent.name };
+    return { sessionID, agentID: agent.id, name: signIn ? `${agent.name} sign-in` : agent.name };
   });
 
   ipcMain.handle('session:input', (_event, { sessionID, text }) => terminals?.input(sessionID, text));
