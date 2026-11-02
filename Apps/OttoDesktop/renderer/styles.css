@@ -554,7 +554,7 @@ body.light .primary { color: #fbf8f2; }
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   z-index: 30;
 }
-.dialog { border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; background: rgba(30, 28, 32, 0.98); color: var(--paper); padding: 22px; width: min(440px, 90vw); }
+.dialog { --paper-rgb: 245, 240, 232; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; background: rgba(30, 28, 32, 0.98); color: rgb(var(--paper-rgb)); padding: 22px; width: min(440px, 90vw); }
 .dialog::backdrop { background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); }
 .dialog h2 { margin: 0 0 14px; font-size: 16px; }
 .dialog label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; color: var(--text-soft); font-size: 12px; }
@@ -725,3 +725,25 @@ a.card-list-row:hover .card-list-label { text-decoration: underline; }
 .browser-ideas { display: flex; flex-direction: column; gap: 6px; }
 .browser-idea { text-align: left; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; color: var(--text-soft); background: var(--card-inner); }
 .browser-idea:hover { color: var(--paper); background: var(--hover); }
+
+/* Teams */
+.team-dialog { width: min(520px, 92vw); max-height: 88vh; overflow-y: auto; }
+.team-dialog .overline { margin: 4px 0 8px; }
+.dialog-sub { margin: 0 0 14px; font-size: 12.5px; color: var(--text-soft); }
+.dialog-hint { font-size: 11.5px; color: var(--text-faint); }
+.team-mentions { display: flex; gap: 6px; flex-wrap: wrap; margin: -6px 0 10px; }
+.mention-chip { padding: 3px 9px; border-radius: 10px; font-size: 12px; background: rgba(var(--signal-rgb), 0.16); color: var(--signal); }
+.team-members { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.team-member { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; text-align: left; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.08); }
+.team-member.on { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.16); }
+.team-member > .icon { color: var(--text-faint); }
+.team-member.on > .icon { color: var(--signal); }
+.team-member-text { display: flex; flex-direction: column; gap: 1px; }
+.team-member-text strong { font-size: 13px; font-weight: 600; }
+.team-member-text span { font-size: 11.5px; color: var(--text-faint); }
+.dialog-actions .grow { flex: 1; }
+.small-button.danger { color: var(--red); }
+.message-author { display: flex; align-items: center; gap: 7px; margin: 14px 0 -4px; font-size: 12px; font-weight: 600; color: var(--text-soft); }
+/* Dialogs are a dark plate on every theme (like cards), so their text stays light. */
+.dialog { --text-soft: rgba(245, 240, 232, 0.78); --text-faint: rgba(245, 240, 232, 0.5); --paper: rgb(245, 240, 232); }
+body .dialog .primary, body.light .dialog .primary { color: #1d1716; }

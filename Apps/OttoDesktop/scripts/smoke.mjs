@@ -237,6 +237,40 @@ try {
     if (!(captured?.pixelWidth > 0)) throw new Error('browser.screenshot captured nothing');
     await shot('place-browser.png');
 
+    // Teams: hire two bots, create a team through the dialog, land in its room.
+    await evaluate(`(async () => {
+      await window.otto.engine('bot.create', { name: 'Scout', responsibility: 'Research', provider: 'Claude Code' });
+      await window.otto.engine('bot.create', { name: 'Quill', responsibility: 'Write', provider: 'Codex' });
+      await refreshRoster();
+      renderSidebar();
+    })()`);
+    if (await evaluate(`document.getElementById('teams-header').hidden`)) throw new Error('the teams group did not appear');
+    await evaluate(`document.getElementById('add-team').click()`);
+    let members = 0;
+    for (let attempt = 0; attempt < 20 && members < 2; attempt += 1) {
+      await sleep(250);
+      members = await evaluate(`document.getElementById('team-dialog').open ? document.querySelectorAll('.team-member').length : 0`);
+    }
+    if (members < 2) throw new Error(`the team dialog did not list the bots (${members})`);
+    await evaluate(`(() => {
+      document.getElementById('team-name').value = 'Smoke crew';
+      document.getElementById('team-instructions').value = '@scout researches, @quill writes.';
+      document.getElementById('team-instructions').dispatchEvent(new Event('input'));
+    })()`);
+    await sleep(200);
+    await shot('team-dialog.png');
+    await evaluate(`document.getElementById('team-save').click()`);
+    let room = null;
+    for (let attempt = 0; attempt < 30 && room !== 'Smoke crew'; attempt += 1) {
+      await sleep(300);
+      room = await evaluate(`!document.getElementById('chat').hidden && !document.getElementById('chat-edit-team').hidden ? document.getElementById('chat-name').textContent : null`);
+    }
+    console.log(`team room: ${room}`);
+    if (room !== 'Smoke crew') throw new Error('creating a team did not open its room');
+    const teamRow = await evaluate(`document.querySelector('.team-row')?.textContent ?? null`);
+    if (!teamRow?.includes('Smoke crew')) throw new Error('the team is not in the rail');
+    await shot('team-room.png');
+
     await visit('Automations', 'automations', `document.querySelector('#automations-body .overline')`);
     await evaluate(`(() => {
       document.getElementById('new-automation').click();

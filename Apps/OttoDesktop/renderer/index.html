@@ -50,6 +50,8 @@
           <div class="places" id="places"></div>
         </div>
         <div class="rail-scroll">
+          <div class="rail-group-header" id="teams-header" hidden><span>teams</span><button class="rail-add" id="add-team" title="Create a team"></button></div>
+          <div id="teams-list"></div>
           <div class="rail-group-header"><span>bots</span><button class="rail-add" id="add-bot" title="Hire a bot"></button></div>
           <div id="bots-list"></div>
           <div class="rail-group-header"><span>sessions</span><button class="rail-add" id="add-terminal" title="Open a terminal"></button></div>
@@ -86,6 +88,7 @@
               <span id="chat-name"></span>
               <span class="stage-meta" id="chat-meta"></span>
             </div>
+            <button class="ghost small-button" id="chat-edit-team" hidden>Edit team</button>
             <button class="ghost small-button" id="chat-stop" hidden>Stop</button>
           </header>
           <div class="transcript" id="transcript" aria-live="polite"></div>
@@ -293,6 +296,32 @@
       </form>
     </dialog>
 
+    <dialog class="dialog team-dialog" id="team-dialog">
+      <form method="dialog" id="team-form">
+        <div class="overline" id="team-dialog-title">Create a team</div>
+        <p class="dialog-sub" id="team-dialog-sub">Name the group, say how it works, and pick who leads. @mention members in the brief.</p>
+        <label>Team name<input id="team-name" maxlength="60" placeholder="Staff" /></label>
+        <label>How this team works<textarea id="team-instructions" rows="3" placeholder="Example: @Taz is the orchestrator. @Aria implements. Taz reviews before we ship."></textarea></label>
+        <div class="team-mentions" id="team-mentions"></div>
+        <div class="overline">Members</div>
+        <div class="team-members" id="team-members"></div>
+        <label id="team-lead-label" hidden>Orchestrator<select id="team-lead"></select>
+          <span class="dialog-hint">This bot decides who acts and reviews work unless you @mention someone else.</span></label>
+        <label>Permissions<select id="team-permission">
+          <option value="unrestricted">Bypass permissions</option>
+          <option value="workspaceWrite">Workspace write (asks for risky actions)</option>
+          <option value="readOnly">Read only</option>
+          <option value="">Each bot's own setting</option>
+        </select><span class="dialog-hint" id="team-permission-hint"></span></label>
+        <div class="dialog-actions">
+          <button class="ghost small-button danger" value="delete" id="team-delete" formnovalidate hidden>Delete team</button>
+          <span class="grow"></span>
+          <button class="ghost small-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary small-button" value="save" id="team-save">Create team</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="dialog" id="name-dialog">
       <form method="dialog">
         <h2 id="name-dialog-title">Name</h2>
@@ -342,6 +371,7 @@
     <script src="places.js"></script>
     <script src="dashboards.js"></script>
     <script src="browser.js"></script>
+    <script src="teams.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

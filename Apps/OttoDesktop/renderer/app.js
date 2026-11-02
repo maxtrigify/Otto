@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 let appState = null;
 let bots = [];
 let threads = [];
+let teams = [];
 /** 'home' | 'chat' — the window chrome's Home | Chat switch. */
 let surface = 'home';
 /** Inside Chat: { type: 'welcome' | 'chat' | 'documents' | 'editor' | 'memory' | 'settings' | 'terminal', ... } */
@@ -54,7 +55,8 @@ function dotClass(state) {
 const chatAvailable = () => Boolean(appState?.chat?.available);
 // A bot's own chat: its one-member channel (kind `bot_channel`), not a team room it joins.
 const threadFor = (bot) =>
-  threads.find((thread) => thread.botProfileIDs.length === 1 && thread.botProfileIDs[0] === bot.id);
+  threads.find((thread) => thread.kind !== 'group' && thread.botProfileIDs.length === 1 && thread.botProfileIDs[0] === bot.id);
+const teamThread = (team) => threads.find((thread) => thread.kind === 'group' && thread.channelID === team.id);
 
 // ---- Engine data ---------------------------------------------------------------------------
 
@@ -62,11 +64,13 @@ async function refreshRoster() {
   if (!chatAvailable()) {
     bots = [];
     threads = [];
+    teams = [];
     return;
   }
   try {
     const [roster, list] = await Promise.all([window.otto.engine('bot.list'), window.otto.engine('thread.list')]);
     bots = roster.bots;
+    teams = roster.teams ?? [];
     threads = list.threads;
   } catch (error) {
     console.error(error);
@@ -170,6 +174,24 @@ function renderSidebar() {
 
   const needle = railQuery.trim().toLowerCase();
   const matches = (text) => !needle || text.toLowerCase().includes(needle);
+  // Teams sit above bots, as on the Mac; the group appears once a team is possible.
+  const teamsList = $('teams-list');
+  teamsList.replaceChildren();
+  $('teams-header').hidden = !chatAvailable() || (!teams.length && bots.length < 2);
+  for (const team of teams.filter((candidate) => matches(candidate.name))) {
+    const thread = teamThread(team);
+    teamsList.append(
+      railRow({
+        icon: 'person.2',
+        label: team.name,
+        className: 'team-row',
+        active: view.type === 'chat' && chat?.teamID === team.id,
+        dot: thread ? dotClass(thread.state) : null,
+        onClick: () => openTeam(team),
+      }),
+    );
+  }
+
   const botsList = $('bots-list');
   botsList.replaceChildren();
   const visibleBots = bots.filter((bot) => matches(`${bot.name} ${bot.jobTitle || ''}`));
@@ -289,6 +311,17 @@ function renderWelcome() {
 
 // ---- Chats ---------------------------------------------------------------------------------
 
+async function openTeam(team) {
+  if (surface !== 'chat') setSurface('chat');
+  let thread = teamThread(team);
+  if (!thread) {
+    await refreshRoster();
+    thread = teamThread(team);
+  }
+  if (thread) await openThread(thread.id);
+  else toast('That team’s room could not be found');
+}
+
 function newChatState(threadID, bot) {
   return { threadID, bot, messages: [], cursor: 0, state: 'idle', activeRunID: null, approval: null, sending: false };
 }
@@ -344,13 +377,16 @@ async function openThread(threadID) {
   try {
     const snapshot = await window.otto.engine('thread.getSnapshot', { threadID });
     const bot = bots.find((candidate) => snapshot.thread.botProfileIDs.includes(candidate.id)) || null;
-    chat = newChatState(threadID, bot);
+    const group = snapshot.thread.kind === 'group';
+    chat = newChatState(threadID, group ? null : bot);
+    chat.group = group;
+    chat.teamID = group ? snapshot.thread.channelID : null;
     chat.title = snapshot.thread.title;
     chat.messages = snapshot.messages;
     chat.cursor = snapshot.lastEventSequence;
     chat.state = snapshot.thread.state;
     chat.activeRunID = snapshot.activeRunID ?? null;
-    view = { type: 'chat', threadID, bot };
+    view = { type: 'chat', threadID, bot: chat.bot };
     showView('chat');
     if (chat.state === 'approval_required') await loadApproval();
     renderChat(true);
@@ -397,10 +433,23 @@ async function applyEvents(page) {
   return changed || needsApproval;
 }
 
+/** Team rooms keep their messages in the room, so follow the room's snapshot. */
+async function pollRoom() {
+  const threadID = chat.threadID;
+  const snapshot = await window.otto.engine('thread.getSnapshot', { threadID });
+  if (chat?.threadID !== threadID) return;
+  const before = JSON.stringify([chat.messages, chat.state]);
+  chat.messages = snapshot.messages;
+  chat.state = snapshot.thread.state;
+  chat.activeRunID = snapshot.activeRunID ?? null;
+  if (JSON.stringify([chat.messages, chat.state]) !== before) renderChat();
+}
+
 async function poll() {
   if (!chat?.threadID) return;
   const threadID = chat.threadID;
   try {
+    if (chat.group) return await pollRoom();
     const page = await window.otto.engine('thread.events', { threadID, afterSequence: chat.cursor, limit: 200 });
     if (chat?.threadID !== threadID) return;
     if (await applyEvents(page)) renderChat();
@@ -453,7 +502,8 @@ function messageElement(message) {
 function renderChat(scrollToEnd = false) {
   if (!chat) return;
   const name = chat.bot?.name || chat.title || 'Chat';
-  $('chat-face').replaceChildren(Icons.face(name, 22));
+  $('chat-face').replaceChildren(chat.group ? Icons.icon('person.2', 18) : Icons.face(name, 22));
+  $('chat-edit-team').hidden = !chat.group;
   $('chat-name').textContent = name;
   $('chat-meta').textContent = STATE_LABELS[chat.state] ?? '';
   $('chat-stop').hidden = !(chat.state === 'working' && chat.activeRunID);
@@ -463,9 +513,21 @@ function renderChat(scrollToEnd = false) {
   const nearBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 80;
   transcript.replaceChildren();
   if (!chat.messages.length) {
-    transcript.append(el('div', 'transcript-empty', chat.bot?.jobTitle ? `${name} · ${chat.bot.jobTitle}` : `Say hello to ${name}.`));
+    if (chat.group) transcript.append(el('div', 'transcript-empty', `Message the team. The orchestrator picks who acts; @mention a member to ask them directly.`));
+    else transcript.append(el('div', 'transcript-empty', chat.bot?.jobTitle ? `${name} · ${chat.bot.jobTitle}` : `Say hello to ${name}.`));
   }
-  for (const message of chat.messages) transcript.append(messageElement(message));
+  let previousAuthor = null;
+  for (const message of chat.messages) {
+    // In a team, each reply says which bot wrote it.
+    const author = message.author?.displayName;
+    if (chat.group && message.role === 'assistant' && author && author !== previousAuthor) {
+      const label = el('div', 'message-author');
+      label.append(Icons.face(author, 18), el('span', '', author));
+      transcript.append(label);
+    }
+    previousAuthor = message.role === 'assistant' ? author : null;
+    transcript.append(messageElement(message));
+  }
   if (chat.state === 'working') {
     const typing = el('div', 'typing');
     typing.innerHTML = '<span></span><span></span><span></span>';
@@ -692,6 +754,7 @@ function decorate() {
   $('new-chat').append(Icons.icon('plus', 15), el('span', '', 'New'));
   $('add-bot').append(Icons.icon('plus', 12));
   $('add-terminal').append(Icons.icon('plus', 12));
+  $('add-team').append(Icons.icon('plus', 12));
   $('nav-settings').append(Icons.icon('gearshape', 13), el('span', '', 'Settings'));
   $('welcome-clip').append(Icons.icon('paperclip', 15));
   $('welcome-send').append(Icons.icon('arrow.up', 14));
@@ -767,6 +830,22 @@ $('choose-workspace').addEventListener('click', chooseWorkspace);
 $('new-chat').addEventListener('click', () => go('welcome'));
 $('add-bot').addEventListener('click', openBotDialog);
 $('add-terminal').addEventListener('click', () => go('terminal'));
+$('add-team').addEventListener('click', () => Teams.open());
+$('chat-edit-team').addEventListener('click', () => chat?.teamID && Teams.open(chat.teamID));
+Teams.configure({
+  onError: (error) => toast(cleanError(error)),
+  saved: async (team) => {
+    await refreshRoster();
+    renderSidebar();
+    const saved = teams.find((candidate) => candidate.id === team.id);
+    if (saved) await openTeam(saved);
+  },
+  deleted: async () => {
+    await refreshRoster();
+    go('welcome');
+  },
+});
+Teams.wire();
 $('nav-settings').addEventListener('click', () => go('settings'));
 $('sidebar-search').addEventListener('input', (event) => {
   railQuery = event.target.value;

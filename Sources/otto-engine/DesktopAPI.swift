@@ -6,6 +6,7 @@ import OttoDocuments
 import OttoMemory
 import OttoModels
 import OttoRPCContracts
+import OttoRuntime
 import OttoServices
 import OttoTools
 
@@ -261,6 +262,42 @@ struct DesktopAPI {
       try await reportLoaded(input)
       return try reply(true)
 
+    // ---- Teams ---------------------------------------------------------------------------
+    // Group rooms of bots. Their chats are ordinary threads (kind "group") on the host RPC;
+    // these methods cover what the Mac's Create/Edit team sheet does.
+    case "teams.roster":
+      return try reply(
+        services.botRoster().map {
+          TeamMemberOption(
+            id: $0.profile.id, name: $0.profile.name, handle: $0.profile.handle,
+            jobTitle: $0.profile.jobTitle, provider: $0.profile.provider.rawValue)
+        })
+    case "teams.get":
+      let input = try params(IDInput.self)
+      return try reply(TeamDetails(try team(try uuid(input.id))))
+    case "teams.create":
+      let input = try params(TeamInput.self)
+      let channel = try services.createTeam(
+        memberProfileIDs: try input.memberProfileIDs.map(uuid), name: input.name,
+        instructions: input.instructions,
+        orchestratorProfileID: try input.orchestratorProfileID.map(uuid),
+        permissionMode: input.permission)
+      return try reply(TeamDetails(channel))
+    case "teams.update":
+      let input = try params(TeamInput.self)
+      guard let id = input.id else { throw APIError.invalid("id is required") }
+      let channel = try services.updateTeam(
+        channelID: try uuid(id), name: input.name, instructions: input.instructions,
+        memberProfileIDs: try input.memberProfileIDs.map(uuid),
+        orchestratorProfileID: try input.orchestratorProfileID.map(uuid),
+        permissionMode: input.permission)
+      return try reply(TeamDetails(channel))
+    case "teams.delete":
+      let input = try params(IDInput.self)
+      _ = try team(try uuid(input.id))
+      try services.deleteTeam(channelID: try uuid(input.id))
+      return try reply(true)
+
     // ---- Activity ------------------------------------------------------------------------
     case "activity.snapshot":
       return try reply(
@@ -471,6 +508,13 @@ struct DesktopAPI {
     store.dispatch(.setBrowserSession(id: nodeID, session: session), targetCanvasID: canvasID)
   }
 
+  private func team(_ channelID: UUID) throws -> BotChannel {
+    guard let channel = services.botChannels.channel(id: channelID), channel.kind == .group,
+      !channel.archived
+    else { throw APIError.notFound("Team") }
+    return channel
+  }
+
   private func dashboards() -> DashboardsSnapshot {
     DashboardsSnapshot(
       dashboards: services.homeCards.dashboards,
@@ -540,6 +584,44 @@ struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
 struct NameInput: Decodable { var name: String }
+struct TeamMemberOption: Encodable {
+  var id: UUID
+  var name: String
+  var handle: String
+  var jobTitle: String?
+  var provider: String
+}
+/// "unrestricted" (the Mac's default for teams), "workspaceWrite", "readOnly", or null for each
+/// bot's own setting.
+struct TeamInput: Decodable {
+  var id: String?
+  var name: String?
+  var instructions: String?
+  var memberProfileIDs: [String]
+  var orchestratorProfileID: String?
+  var permissionMode: String?
+
+  var permission: AgentPermissionMode? { permissionMode.flatMap(AgentPermissionMode.init(rawValue:)) }
+}
+struct TeamDetails: Encodable {
+  var id: UUID
+  var threadID: UUID
+  var name: String?
+  var instructions: String?
+  var memberProfileIDs: [UUID]
+  var orchestratorProfileID: UUID?
+  var permissionMode: String?
+
+  init(_ channel: BotChannel) {
+    id = channel.id
+    threadID = channel.conversationID
+    name = channel.name
+    instructions = channel.instructions
+    memberProfileIDs = channel.memberProfileIDs
+    orchestratorProfileID = channel.orchestratorProfileID
+    permissionMode = channel.permissionMode
+  }
+}
 struct BrowserURLInput: Decodable {
   var url: String
   var nodeID: String?

@@ -61,3 +61,36 @@ test('a bot answers a message end to end', { skip: !binary || !provider, timeout
   assert.ok(answered, `no answer. events:\n${seen.join('\n')}\nlogs:\n${logs.join('\n')}`);
   assert.ok(snapshot.messages.some((message) => message.role === 'user'), 'user message missing');
 });
+
+test('a team answers in its room end to end', { skip: !binary || !provider, timeout: 400_000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-engine-team-'));
+  const workspace = path.join(root, 'Workspace');
+  fs.mkdirSync(workspace);
+  const client = new EngineClient({ binary, stateDirectory: path.join(root, 'state'), workspace, env: loginEnvironment() });
+  t.after(async () => {
+    await client.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  await client.start();
+  const lead = await client.call('bot.create', { name: 'Lead', responsibility: 'Coordinate briefly', provider });
+  const helper = await client.call('bot.create', { name: 'Helper', responsibility: 'Answer briefly', provider });
+  const team = await client.desktop('teams.create', {
+    name: 'Live crew',
+    instructions: '@lead answers the person directly in one short line.',
+    memberProfileIDs: [lead.id, helper.id],
+    orchestratorProfileID: lead.id,
+  });
+  const marker = 'otto-team-ok';
+  await client.send(team.threadID, `Reply with exactly this and nothing else: ${marker}`);
+  const deadline = Date.now() + 360_000;
+  let snapshot = null;
+  while (Date.now() < deadline) {
+    snapshot = await client.snapshot(team.threadID);
+    if (snapshot.messages.some((message) => message.role === 'assistant' && message.text.includes(marker))) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  console.log(snapshot.messages.map((message) => `${message.author?.displayName ?? message.role}: ${message.text.slice(0, 120)}`).join('\n'));
+  const answer = snapshot.messages.find((message) => message.role === 'assistant' && message.text.includes(marker));
+  assert.ok(answer, 'the team never answered');
+  assert.ok(answer.author?.displayName, 'team replies say which bot wrote them');
+});

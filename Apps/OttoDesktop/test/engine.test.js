@@ -275,3 +275,51 @@ test('Browser: the desktop renders engine browsers and answers page reads for bo
   assert.equal(closed[0].state.tabs.length, 1);
   assert.deepEqual(await client.desktop('browser.close', { id: browser.nodeID }), []);
 });
+
+test('Teams: a group of bots is created, chats as a thread, is edited and removed', { skip: !binary }, async (t) => {
+  const { client } = await engine(t);
+  await client.start();
+  const scout = await client.call('bot.create', { name: 'Scout', responsibility: 'Research', provider: 'Claude Code' });
+  const quill = await client.call('bot.create', { name: 'Quill', responsibility: 'Write', provider: 'Codex' });
+  const roster = await client.desktop('teams.roster');
+  assert.deepEqual(roster.map((bot) => bot.handle).sort(), ['quill', 'scout']);
+
+  await assert.rejects(client.desktop('teams.create', { memberProfileIDs: [scout.id] }));
+  const team = await client.desktop('teams.create', {
+    name: 'Launch crew',
+    instructions: '@scout researches, @quill writes.',
+    memberProfileIDs: [scout.id, quill.id],
+    orchestratorProfileID: quill.id,
+    permissionMode: 'workspaceWrite',
+  });
+  assert.equal(team.name, 'Launch crew');
+  assert.equal(team.orchestratorProfileID, quill.id);
+  assert.equal(team.permissionMode, 'workspaceWrite');
+
+  // The team's room is an ordinary thread on the host RPC, so the chat UI works unchanged.
+  const { teams } = await client.bots();
+  assert.equal(teams.length, 1);
+  assert.equal(teams[0].id, team.id);
+  const threads = await client.threads();
+  const room = threads.find((thread) => thread.id === team.threadID);
+  assert.ok(room, JSON.stringify(threads));
+  assert.equal(room.kind, 'group');
+  const snapshot = await client.snapshot(team.threadID);
+  assert.deepEqual(snapshot.messages, []);
+
+  const edited = await client.desktop('teams.update', {
+    id: team.id,
+    name: 'Launch',
+    instructions: team.instructions,
+    memberProfileIDs: [scout.id, quill.id],
+    orchestratorProfileID: scout.id,
+    permissionMode: 'unrestricted',
+  });
+  assert.equal(edited.name, 'Launch');
+  assert.equal(edited.orchestratorProfileID, scout.id);
+  assert.equal((await client.desktop('teams.get', { id: team.id })).permissionMode, 'unrestricted');
+
+  assert.equal(await client.desktop('teams.delete', { id: team.id }), true);
+  assert.deepEqual((await client.bots()).teams, []);
+  await assert.rejects(client.desktop('teams.get', { id: team.id }));
+});

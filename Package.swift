@@ -263,7 +263,7 @@ let package = Package(
       name: "otto-engine",
       dependencies: [
         "OttoApplicationTools", "OttoBrowser", "OttoCore", "OttoDocuments", "OttoHostRuntime", "OttoMemory", "OttoModels", "OttoPersistence",
-        "OttoRPCContracts", "OttoSecurity", "OttoServices", "OttoTools",
+        "OttoRPCContracts", "OttoRuntime", "OttoSecurity", "OttoServices", "OttoTools",
       ]
     ),
     .executableTarget(
