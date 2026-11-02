@@ -73,7 +73,16 @@ try {
   await shot('1-welcome.png');
   if (!engine?.startsWith('Engine ')) throw new Error(`engine did not start: ${engine}`);
   if (process.env.OTTO_ENGINE_PATH) {
-    // With the chat engine the start screen offers bots; creating one needs an agent CLI.
+    // With the engine Otto Desktop lands on Home; New chat then offers bots.
+    for (let attempt = 0; attempt < 20 && (await evaluate(`document.getElementById('home').hidden`)); attempt += 1) {
+      await sleep(500);
+    }
+    const home = await evaluate(`document.getElementById('home').hidden ? null : document.getElementById('home-greeting').textContent`);
+    console.log(`home: ${home ?? 'missing'}`);
+    if (!home) throw new Error('Home did not come up with the engine');
+    await shot('0-home.png');
+    await evaluate(`document.getElementById('new-chat').click()`);
+    await sleep(500);
     const newBot = await evaluate(`Boolean(document.querySelector('.agent-card.new-bot'))`);
     console.log(`chat engine: ${newBot ? 'available' : 'missing'}`);
     if (!newBot) throw new Error('the chat engine did not come up');
@@ -87,9 +96,14 @@ try {
   let text = '';
   for (let attempt = 0; attempt < 40 && !text.includes(`${marker} on`); attempt += 1) {
     await sleep(500);
-    text = await evaluate(
-      `[...document.querySelectorAll('.terminal-host:not([hidden]) .xterm-rows > div')].map((row) => row.textContent).join('\\n')`,
-    );
+    // Read xterm's buffer, not the DOM: Chromium defers painting while the window is in the background.
+    text = await evaluate(`(() => {
+      const session = [...Terminals.sessions.values()].find((candidate) => !candidate.element.hidden);
+      const buffer = session.term.buffer.active;
+      const lines = [];
+      for (let index = 0; index < buffer.length; index += 1) lines.push(buffer.getLine(index)?.translateToString(true) ?? '');
+      return lines.join('\\n');
+    })()`);
   }
   await shot('2-terminal.png');
   console.log(text.split('\n').filter((line) => line.trim()).slice(-6).join('\n'));

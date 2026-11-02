@@ -44,7 +44,8 @@ struct OttoMCPCommand {
       },
       write: { response in
         print(response)
-        fflush(stdout)
+        // nil flushes every stream; Glibc's `stdout` is a global var that strict concurrency rejects.
+        fflush(nil)
       }
     )
     while let line = readLine() {
