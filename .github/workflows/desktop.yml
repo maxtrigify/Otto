@@ -146,7 +146,8 @@ jobs:
         run: |
           # Runtime modules must ship inside app.asar, or voice, terminals and updates break.
           asar=$(find dist -name app.asar | head -1)
-          npx --yes @electron/asar list "$asar" > asar.txt
+          # Windows lists entries with backslashes.
+          npx --yes @electron/asar list "$asar" | tr '\\' '/' > asar.txt
           for module in ws electron-updater @xterm/xterm @xterm/addon-fit; do
             grep -q "^/node_modules/$module/package.json$" asar.txt || { echo "missing $module in $asar"; exit 1; }
           done
@@ -228,7 +229,8 @@ jobs:
         run: |
           # Runtime modules must ship inside app.asar, or voice, terminals and updates break.
           asar=$(find dist -name app.asar | head -1)
-          npx --yes @electron/asar list "$asar" > asar.txt
+          # Windows lists entries with backslashes.
+          npx --yes @electron/asar list "$asar" | tr '\\' '/' > asar.txt
           for module in ws electron-updater @xterm/xterm @xterm/addon-fit; do
             grep -q "^/node_modules/$module/package.json$" asar.txt || { echo "missing $module in $asar"; exit 1; }
           done
