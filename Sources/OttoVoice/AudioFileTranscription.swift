@@ -1,3 +1,5 @@
+// Apple-only: speech and audio frameworks. Otto Desktop transcribes through the engine instead.
+#if os(macOS) || os(iOS)
 import Foundation
 import Speech
 
@@ -212,3 +214,4 @@ private final class AppleRecognition: @unchecked Sendable {
     pending.0?.resume(with: result)
   }
 }
+#endif

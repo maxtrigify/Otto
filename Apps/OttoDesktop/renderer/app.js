@@ -647,6 +647,10 @@ function renderSettings() {
   }
   body.append(el('p', 'muted small', 'Sign-in runs in the agent itself, so your keys and passwords never pass through Otto. Restart Otto after installing an agent.'));
 
+  const voiceSlot = el('div');
+  body.append(voiceSlot);
+  Voice.settingsSection().then((section) => voiceSlot.replaceChildren(section));
+
   body.append(el('div', 'overline', 'Appearance'));
   const appearance = el('div', 'setting-row');
   const themeText = el('div', 'setting-text');
@@ -846,6 +850,16 @@ Teams.configure({
   },
 });
 Teams.wire();
+Voice.configure({
+  onError: (error) => toast(cleanError(error)),
+  toast,
+  openSettings: () => go('settings'),
+});
+Voice.wire();
+$('welcome-mic').append(Icons.icon('mic', 15));
+$('composer-mic').append(Icons.icon('mic', 15));
+$('welcome-mic').addEventListener('click', () => Voice.dictate($('welcome-input'), $('welcome-mic')));
+$('composer-mic').addEventListener('click', () => Voice.dictate($('composer-input'), $('composer-mic')));
 $('nav-settings').addEventListener('click', () => go('settings'));
 $('sidebar-search').addEventListener('input', (event) => {
   railQuery = event.target.value;

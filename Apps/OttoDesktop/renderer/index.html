@@ -59,6 +59,7 @@
         </div>
         <footer class="rail-footer">
           <button class="rail-footer-button" id="nav-settings"></button>
+          <button class="voice-button" id="voice-button" title="Talk to Otto"><span class="voice-dot"></span><span id="voice-button-label">Talk</span></button>
           <span class="rail-status" id="engine-status"></span>
         </footer>
       </aside>
@@ -72,6 +73,7 @@
           <form class="composer welcome-composer" id="welcome-composer">
             <span class="composer-leading" id="welcome-clip"></span>
             <input id="welcome-input" placeholder="Message…" aria-label="Message" autocomplete="off" />
+            <button class="mic" type="button" aria-label="Dictate" title="Dictate" id="welcome-mic"></button>
             <button class="send" type="submit" aria-label="Send" id="welcome-send"></button>
           </form>
           <div class="suggestions" id="suggestions"></div>
@@ -104,6 +106,7 @@
           </div>
           <form class="composer conversation-composer" id="composer">
             <textarea id="composer-input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
+            <button class="mic" type="button" aria-label="Dictate" title="Dictate" id="composer-mic"></button>
             <button class="send" id="composer-send" type="submit" aria-label="Send"></button>
           </form>
         </section>
@@ -283,6 +286,21 @@
 
     <div class="toast" id="toast" role="status" hidden></div>
 
+    <!-- Talk to Otto: what it hears and says -->
+    <aside class="voice-panel" id="voice-panel" hidden aria-live="polite">
+      <header class="voice-panel-header">
+        <span class="voice-orb" id="voice-level"></span>
+        <span class="voice-state" id="voice-state">Off</span>
+        <button class="tiny" id="voice-close" title="Close">×</button>
+      </header>
+      <div class="voice-conversation" id="voice-conversation"></div>
+      <div class="voice-partial" id="voice-partial"></div>
+      <footer class="voice-panel-actions">
+        <button class="ghost small-button" id="voice-interrupt" hidden>Interrupt</button>
+        <button class="primary small-button" id="voice-stop">Talk</button>
+      </footer>
+    </aside>
+
     <dialog class="dialog" id="bot-dialog">
       <form method="dialog" id="bot-form">
         <h2>Hire a bot</h2>
@@ -372,6 +390,7 @@
     <script src="dashboards.js"></script>
     <script src="browser.js"></script>
     <script src="teams.js"></script>
+    <script src="voice.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

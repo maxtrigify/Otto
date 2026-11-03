@@ -8,12 +8,17 @@ const path = require('node:path');
 const { OttodClient } = require('./ottod');
 const { EngineClient } = require('./engine');
 const { BrowserHost } = require('./browser');
+const { VoiceHost } = require('./voice');
+const { SecretVault } = require('./secrets');
 const { loginEnvironment, discoverAgents } = require('./agents');
 
 const isWindows = process.platform === 'win32';
 let window = null;
 /** Renders the engine's browsers (see browser.js). */
 let browserHost = null;
+/** Voice audio, sockets and the keychain for the engine (see voice.js, secrets.js). */
+let vault = null;
+let voiceHost = null;
 let terminals = null; // ottod: raw terminal sessions
 let engine = null; // otto-engine: bots, threads, runs and approvals
 let engineError = null;
@@ -82,6 +87,12 @@ const DESKTOP_METHODS = new Set([
   'teams.create',
   'teams.update',
   'teams.delete',
+  'voice.status',
+  'voice.configure',
+  'voice.setKey',
+  'voice.talk',
+  'voice.sleep',
+  'voice.interrupt',
   'automations.list',
   'automations.create',
   'automations.setEnabled',
@@ -162,16 +173,24 @@ async function startEngine() {
     return null;
   }
   const key = crypto.createHash('sha256').update(settings.workspace).digest('hex').slice(0, 16);
+  vault ??= new SecretVault(path.join(app.getPath('userData'), 'secrets.json'));
+  voiceHost?.dispose();
+  voiceHost = new VoiceHost({ engine: () => engine, send, vault });
   const next = new EngineClient({
     binary: ottoEngine,
     stateDirectory: path.join(app.getPath('userData'), 'engines', key),
     workspace: settings.workspace,
     env,
+    desktopSecrets: true,
   });
   next.on('log', (text) => console.error('[otto-engine]', text.trim()));
   // The engine asks the desktop to render its browsers and act on their pages.
   next.on('host', async ({ id, method, params }) => {
     try {
+      if (voiceHost?.handles(method)) {
+        next.reply(id, await voiceHost.handle(method, params));
+        return;
+      }
       if (!browserHost) throw new Error('The window is not open');
       next.reply(id, await browserHost.handle(method, params));
     } catch (error) {
@@ -181,6 +200,7 @@ async function startEngine() {
   next.on('event', ({ kind, payload }) => {
     if (kind === 'browser.state') browserHost?.apply(payload);
     else if (kind === 'browser.closed') browserHost?.closed(payload);
+    else voiceHost?.event(kind, payload);
   });
   next.on('exit', (status) => {
     if (engine === next) send('engine:exit', status);
@@ -312,6 +332,15 @@ function registerIPC() {
     for (const browser of await engine.desktop('browser.list')) browserHost.apply(browser);
     return browserHost.list();
   });
+  // Voice: the window's microphone and speakers, and dictation.
+  ipcMain.on('voice:mic', (_event, pcm) => voiceHost?.microphone(pcm));
+  ipcMain.on('voice:speech', () => voiceHost?.speechStarted());
+  ipcMain.on('voice:answer', (_event, answer) => voiceHost?.answer(answer));
+  ipcMain.handle('voice:transcribe', (_event, input) => {
+    if (!voiceHost) throw new Error('Voice is not available');
+    return voiceHost.transcribe(input);
+  });
+  ipcMain.handle('voice:keychain', () => (vault ?? new SecretVault(path.join(app.getPath('userData'), 'secrets.json'))).describe());
   ipcMain.handle('link:open', (_event, url) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
   });

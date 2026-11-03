@@ -1,3 +1,5 @@
+// Apple-only: analyses AVAudio microphone buffers for the Mac transport.
+#if os(macOS) || os(iOS)
 @preconcurrency import AVFoundation
 import CoreMedia
 import Foundation
@@ -139,3 +141,4 @@ private final class VoiceInputSoundObserver: NSObject, SNResultsObserving, @unch
   func request(_ request: SNRequest, didFailWithError error: any Error) {}
   func requestDidComplete(_ request: SNRequest) {}
 }
+#endif

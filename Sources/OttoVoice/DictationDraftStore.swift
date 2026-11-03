@@ -1,3 +1,5 @@
+// Apple-only: the Mac dictation draft lock (Darwin flock). Otto Desktop dictates through the engine.
+#if os(macOS) || os(iOS)
 import Darwin
 import Foundation
 import OttoModels
@@ -132,3 +134,4 @@ public final class VoiceCaptureLease: @unchecked Sendable {
     lock.withLock { descriptor >= 0 }
   }
 }
+#endif

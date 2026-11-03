@@ -1,3 +1,5 @@
+// Apple-only: qualifies the on-device Parakeet relay recognizer.
+#if os(macOS) || os(iOS)
 import Foundation
 import OttoModels
 import OttoTools
@@ -330,3 +332,4 @@ public actor RelayQualificationCorpusStore {
     return (corpus.cases.count, Set(corpus.cases.map(\.speakerID)).count)
   }
 }
+#endif

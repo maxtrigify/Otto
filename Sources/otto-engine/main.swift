@@ -24,7 +24,7 @@ import OttoTools
 enum OttoEngine {
   static let usage = """
     Usage:
-      otto-engine stdio --token-file <path> --state-dir <path> --workspace <path>
+      otto-engine stdio --token-file <path> --state-dir <path> --workspace <path> [--secrets desktop]
 
     Runs Otto's engine for one workspace and serves the host RPC over standard input/output.
     """
@@ -35,6 +35,7 @@ enum OttoEngine {
     var request: OttoRPCRequest?
     var desktop: DesktopAPI.Call?
     var hostReply: DesktopHost.Reply?
+    var hostEvent: DesktopHost.IncomingEvent?
   }
 
   struct Failure: Encodable {
@@ -58,8 +59,20 @@ enum OttoEngine {
         path: options.stateDirectory.appending(path: "workspace.sqlite").path)
       let store = CanvasStore(persistence: database)
       let registry = ToolRegistry(auditSink: CompositeToolAuditSink([database]))
-      let secrets = EngineSecretStore(
-        fileURL: options.stateDirectory.appending(path: "secrets.json"))
+      let output = ResponseWriter()
+      let desktopHost = DesktopHost(output: output)
+      // Read input from the start: the desktop's keychain answers secret lookups while the engine
+      // starts. Host replies and events are handled at once; requests wait until it is ready.
+      let requests = startReading(token: token, host: desktopHost, output: output)
+      let legacySecrets = options.stateDirectory.appending(path: "secrets.json")
+      let secrets: any SecretStore
+      if options.desktopSecrets {
+        let keychain = DesktopSecretStore(host: desktopHost)
+        await keychain.adopt(legacyFile: legacySecrets)
+        secrets = keychain
+      } else {
+        secrets = EngineSecretStore(fileURL: legacySecrets)
+      }
       let services = ApplicationServices(
         store: store,
         registry: registry,
@@ -102,39 +115,23 @@ enum OttoEngine {
       let client = OttoHostClientContext(
         deviceID: UUID(uuidString: "00000000-0000-0000-0000-00000000D35C")!,
         scopes: Set(OttoRPCScope.allCases))
-      let output = ResponseWriter()
-      let desktopHost = DesktopHost(output: output)
       let browsers = DesktopBrowserBridge(
         store: store, runtime: services.browserRuntime, host: desktopHost)
       await browsers.start()
-      let desktop = DesktopAPI(services: services, store: store)
-      let expected = Array(token.utf8)
-      for await line in standardInputLines() {
-        let request: Request
-        do {
-          request = try OttoRPCCodec.decoder.decode(Request.self, from: Data(line.utf8))
-        } catch {
-          await output.write(Failure(error: .init(code: "invalid_request", message: "Invalid request.")))
-          continue
-        }
-        guard constantTimeEqual(Array(request.token.utf8), expected) else {
-          if let call = request.desktop {
-            await output.write(
-              DesktopAPI.Failure(
-                id: call.id, error: .init(code: "unauthorized", message: "Unauthorized.")))
-          } else {
-            await output.write(
-              Failure(
-                id: request.request?.id,
-                error: .init(code: "unauthorized", message: "Unauthorized.")))
-          }
-          continue
-        }
+      var desktop = DesktopAPI(services: services, store: store)
+      if options.desktopSecrets {
+        // Voice needs the desktop's microphone, speakers and keychain.
+        let voice = DesktopVoice(
+          services: services, store: store, host: desktopHost, secrets: secrets,
+          workspacePath: options.workspace.path)
+        await voice.start()
+        desktop.voice = voice
+      }
+      let api = desktop
+      for await request in requests {
         // Long calls (sending a message, starting a thread) must not hold up event polling.
-        if let reply = request.hostReply {
-          await desktopHost.receive(reply)
-        } else if let call = request.desktop {
-          Task { await output.writeLine(await desktop.handle(call)) }
+        if let call = request.desktop {
+          Task { await output.writeLine(await api.handle(call)) }
         } else if let rpc = request.request {
           Task {
             let response = await host.handle(rpc, client: client)
@@ -155,6 +152,50 @@ enum OttoEngine {
   }
 
   /// Lines from standard input, read on a background thread so the main actor stays free.
+  /// Reads standard input for the engine's whole life. Host replies and host events (the
+  /// desktop answering a keychain lookup, microphone audio) are delivered immediately, even
+  /// during startup; authorised requests are queued for the main loop once the engine is ready.
+  static func startReading(token: String, host: DesktopHost, output: ResponseWriter)
+    -> AsyncStream<Request>
+  {
+    let (requests, continuation) = AsyncStream<Request>.makeStream()
+    let expected = Array(token.utf8)
+    Task {
+      for await line in standardInputLines() {
+        let request: Request
+        do {
+          request = try OttoRPCCodec.decoder.decode(Request.self, from: Data(line.utf8))
+        } catch {
+          await output.write(
+            Failure(error: .init(code: "invalid_request", message: "Invalid request.")))
+          continue
+        }
+        guard constantTimeEqual(Array(request.token.utf8), expected) else {
+          if let call = request.desktop {
+            await output.write(
+              DesktopAPI.Failure(
+                id: call.id, error: .init(code: "unauthorized", message: "Unauthorized.")))
+          } else {
+            await output.write(
+              Failure(
+                id: request.request?.id,
+                error: .init(code: "unauthorized", message: "Unauthorized.")))
+          }
+          continue
+        }
+        if let reply = request.hostReply {
+          await host.receive(reply)
+        } else if let event = request.hostEvent {
+          await host.receive(event)
+        } else {
+          continuation.yield(request)
+        }
+      }
+      continuation.finish()
+    }
+    return requests
+  }
+
   static func standardInputLines() -> AsyncStream<String> {
     AsyncStream { continuation in
       Thread.detachNewThread {
@@ -205,6 +246,8 @@ struct Options {
   var tokenFile: URL
   var stateDirectory: URL
   var workspace: URL
+  /// `--secrets desktop`: keep secrets in Otto Desktop's OS keychain instead of a state file.
+  var desktopSecrets = false
 
   init(_ arguments: ArraySlice<String>) throws {
     var values: [String: String] = [:]
@@ -217,6 +260,7 @@ struct Options {
     guard remaining.isEmpty, let token = values["--token-file"], let state = values["--state-dir"],
       let workspace = values["--workspace"]
     else { throw EngineError.usage }
+    desktopSecrets = values["--secrets"] == "desktop"
     tokenFile = URL(fileURLWithPath: token)
     stateDirectory = URL(fileURLWithPath: state, isDirectory: true)
     self.workspace = URL(fileURLWithPath: workspace, isDirectory: true)

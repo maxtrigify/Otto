@@ -747,3 +747,33 @@ a.card-list-row:hover .card-list-label { text-decoration: underline; }
 /* Dialogs are a dark plate on every theme (like cards), so their text stays light. */
 .dialog { --text-soft: rgba(245, 240, 232, 0.78); --text-faint: rgba(245, 240, 232, 0.5); --paper: rgb(245, 240, 232); }
 body .dialog .primary, body.light .dialog .primary { color: #1d1716; }
+
+/* Voice */
+.voice-button { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 12px; font-size: 12px; color: var(--text-soft); background: rgba(var(--paper-rgb), 0.06); }
+.voice-button:hover { background: var(--hover); color: var(--paper); }
+.voice-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(var(--paper-rgb), 0.35); }
+.voice-button.live { color: var(--paper); background: rgba(var(--signal-rgb), 0.18); }
+.voice-button.live .voice-dot { background: var(--signal); box-shadow: 0 0 8px rgba(var(--signal-rgb), 0.8); animation: voice-pulse 1.4s ease-in-out infinite; }
+.voice-button.error .voice-dot { background: var(--red); }
+@keyframes voice-pulse { 50% { opacity: 0.45; } }
+.composer .mic { width: 30px; height: 30px; border-radius: 15px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-faint); flex: none; }
+.composer .mic:hover { color: var(--paper); background: var(--hover); }
+.composer .mic.recording { color: #fff; background: var(--red); animation: voice-pulse 1.2s ease-in-out infinite; }
+.composer .mic.busy { opacity: 0.5; pointer-events: none; }
+.voice-panel { --paper-rgb: 245, 240, 232; position: fixed; right: 20px; bottom: 20px; z-index: 40; width: 340px; max-height: 60vh; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 16px; color: rgb(245, 240, 232); background: rgba(22, 20, 24, 0.94); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35); backdrop-filter: blur(24px); }
+.voice-panel .tiny { color: rgba(245, 240, 232, 0.6); }
+.voice-panel-header { display: flex; align-items: center; gap: 10px; }
+.voice-state { flex: 1; font-size: 13px; font-weight: 600; }
+.voice-orb { --level: 0; width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle, rgb(var(--card-signal-rgb)) 0%, rgba(var(--card-signal-rgb), 0.25) 70%); transform: scale(calc(0.75 + var(--level) * 0.5)); transition: transform 0.08s linear; opacity: 0.5; }
+.voice-panel.live .voice-orb { opacity: 1; }
+.voice-conversation { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; font-size: 13px; line-height: 1.45; }
+.voice-line { padding: 6px 10px; border-radius: 10px; max-width: 92%; }
+.voice-line.user { align-self: flex-end; background: rgba(245, 240, 232, 0.1); }
+.voice-line.assistant { align-self: flex-start; background: rgba(var(--card-signal-rgb), 0.14); }
+.voice-partial { font-size: 12.5px; color: rgba(245, 240, 232, 0.6); font-style: italic; min-height: 1em; }
+.voice-panel-actions { display: flex; justify-content: flex-end; gap: 8px; }
+body.light .voice-panel .primary { color: #1d1716; }
+.settings-voice .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; }
+.settings-voice select, .settings-key input { color: var(--paper); background: var(--card-inner); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; }
+.settings-key { display: flex; align-items: center; gap: 10px; padding: 12px 0 6px; font-size: 13px; }
+.settings-key input { flex: 1; }

@@ -1,3 +1,5 @@
+// Apple-only: speech and audio frameworks. Otto Desktop transcribes through the engine instead.
+#if os(macOS) || os(iOS)
 import Foundation
 import OttoObjCSupport
 
@@ -31,3 +33,4 @@ public enum ObjectiveCExceptions {
     return try result.get()
   }
 }
+#endif

@@ -205,7 +205,7 @@ let package = Package(
         "OttoDocuments",
         "OttoMedia", "OttoMemory", "OttoModels", "OttoObservability",
         "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote", "OttoSecurity", "OttoHooks",
-        "OttoHostRuntime", "OttoRPCContracts",
+        "OttoHostRuntime", "OttoRPCContracts", "OttoVoice",
         // The phone host's HTTP server: SwiftNIO's file system module does not build on Windows.
         .target(name: "OttoHostTransport", condition: .when(platforms: [.macOS, .iOS, .linux])),
         .product(name: "OpenCombine", package: "OpenCombine", condition: .when(platforms: nonApple)),
@@ -216,10 +216,15 @@ let package = Package(
     .target(
       name: "OttoVoice",
       dependencies: [
-        "OttoModels", "OttoObjCSupport", "OttoSecurity", "OttoTools",
-        .product(name: "LiveKitWakeWord", package: "livekit-wakeword"),
+        "OttoModels", "OttoSecurity", "OttoTools",
+        // Audio capture, on-device speech and the wake word are Apple-only; Otto Desktop runs
+        // the same voice session with audio from Chromium (see otto-engine's VoiceBridge).
+        .target(name: "OttoObjCSupport", condition: .when(platforms: [.macOS, .iOS])),
+        .product(
+          name: "LiveKitWakeWord", package: "livekit-wakeword",
+          condition: .when(platforms: [.macOS, .iOS])),
       ],
-      linkerSettings: [.linkedFramework("AVFoundation")]
+      linkerSettings: [.linkedFramework("AVFoundation", .when(platforms: [.macOS, .iOS]))]
     ),
     .executableTarget(name: "ottoctl", dependencies: ["OttoCLI", "OttoControl", "OttoModels"]),
     .executableTarget(

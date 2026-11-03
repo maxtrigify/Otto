@@ -1,12 +1,17 @@
 import Foundation
-import OSLog
+
+#if canImport(OSLog)
+  import OSLog
+#endif
 
 /// Turns a speech engine's stderr into something a person can read. `sherpa-onnx-offline` prints
 /// its entire recognizer configuration (hundreds of characters of `OfflineXxxModelConfig(...)`)
 /// before it says what went wrong, so the line that matters is the last one. The full text still
 /// goes to the system log for Console.
 public enum TranscriptionDiagnostics {
-  static let logger = Logger(subsystem: "io.openotto.desktop", category: "Transcription")
+  #if canImport(OSLog)
+    static let logger = Logger(subsystem: "io.openotto.desktop", category: "Transcription")
+  #endif
 
   /// The last meaningful line of `errorText`, at most `limit` characters. Configuration dumps,
   /// progress chatter and blank lines are dropped; a bare `Errors in config!` or `Failed to read`
@@ -27,9 +32,14 @@ public enum TranscriptionDiagnostics {
   /// Logs an engine failure in full so the whole stderr is in Console even though the person
   /// only sees `summary(of:)`.
   static func logFailure(engine: String, status: Int32, errorText: String) {
-    logger.error(
-      "\(engine, privacy: .public) exited with status \(status). stderr: \(errorText, privacy: .public)"
-    )
+    #if canImport(OSLog)
+      logger.error(
+        "\(engine, privacy: .public) exited with status \(status). stderr: \(errorText, privacy: .public)"
+      )
+    #else
+      FileHandle.standardError.write(
+        Data("\(engine) exited with status \(status). stderr: \(errorText)\n".utf8))
+    #endif
   }
 
   private static let noise = [

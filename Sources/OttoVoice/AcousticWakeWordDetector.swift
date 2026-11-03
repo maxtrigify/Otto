@@ -1,3 +1,5 @@
+// Apple-only: wake word and on-device speech models. Not part of Otto Desktop yet.
+#if os(macOS) || os(iOS)
 import CryptoKit
 import Foundation
 
@@ -311,4 +313,5 @@ public enum AcousticWakeWordDetectorFactory {
         AcousticWakeWordDetection(name: match.key, confidence: match.value, timestamp: now))
     }
   }
+#endif
 #endif

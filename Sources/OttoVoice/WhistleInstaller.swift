@@ -1,3 +1,5 @@
+// Apple-only: wake word and on-device speech models. Not part of Otto Desktop yet.
+#if os(macOS) || os(iOS)
 import CryptoKit
 import Foundation
 
@@ -240,3 +242,4 @@ public actor WhistleInstaller {
     \(WhistleTerms.licenseURL.absoluteString)
     """
 }
+#endif

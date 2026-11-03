@@ -1,3 +1,5 @@
+// Apple-only: wake word and on-device speech models. Not part of Otto Desktop yet.
+#if os(macOS) || os(iOS)
 import AVFoundation
 import Foundation
 
@@ -114,3 +116,4 @@ private final class ExitSignal: @unchecked Sendable {
     }
   }
 }
+#endif

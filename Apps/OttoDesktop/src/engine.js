@@ -13,8 +13,10 @@ const REQUEST_TIMEOUT_MS = 60_000;
 const PROTOCOL_VERSION = 1;
 
 class EngineClient extends EventEmitter {
-  constructor({ binary, stateDirectory, workspace, env = process.env }) {
+  /** `desktopSecrets`: secrets live in Otto Desktop's OS keychain (the engine asks for them). */
+  constructor({ binary, stateDirectory, workspace, env = process.env, desktopSecrets = false }) {
     super();
+    this.desktopSecrets = desktopSecrets;
     this.binary = binary;
     this.stateDirectory = stateDirectory;
     this.workspace = workspace;
@@ -32,6 +34,7 @@ class EngineClient extends EventEmitter {
     fs.chmodSync(tokenFile, 0o600);
 
     const args = ['stdio', '--token-file', tokenFile, '--state-dir', this.stateDirectory, '--workspace', this.workspace];
+    if (this.desktopSecrets) args.push('--secrets', 'desktop');
     this.child = spawn(this.binary, args, { env: this.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.running = true;
     this.child.stdin.on('error', () => {});
@@ -70,6 +73,12 @@ class EngineClient extends EventEmitter {
       this.pending.set(id, { resolve, reject, timer });
       this.child.stdin.write(JSON.stringify(envelope) + '\n');
     });
+  }
+
+  /** Streams an event to the engine (microphone audio, WebSocket frames). */
+  event(kind, payload) {
+    if (!this.running) return;
+    this.child.stdin.write(JSON.stringify({ token: this.token, hostEvent: { kind, payload } }) + '\n');
   }
 
   /** Answers a host call from the engine with a result, or an error message. */

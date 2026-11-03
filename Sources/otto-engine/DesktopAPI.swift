@@ -9,6 +9,7 @@ import OttoRPCContracts
 import OttoRuntime
 import OttoServices
 import OttoTools
+import OttoVoice
 
 /// Desktop-only surfaces (Home and Documents) for the owner's own Otto Desktop. These are kept
 /// out of the shared host RPC so paired phones can never reach them. Each stdin line of the form
@@ -19,6 +20,8 @@ struct DesktopAPI {
   let services: ApplicationServices
   /// The workspace's canvas store, which owns the shared theme.
   let store: CanvasStore
+  /// Talk to Otto; nil when the engine runs without a desktop (tests, headless).
+  var voice: DesktopVoice? = nil
 
   struct Call: Decodable {
     var id: String
@@ -298,6 +301,32 @@ struct DesktopAPI {
       try services.deleteTeam(channelID: try uuid(input.id))
       return try reply(true)
 
+    // ---- Voice ---------------------------------------------------------------------------
+    case "voice.status":
+      return try reply(try requireVoice().status())
+    case "voice.configure":
+      let input = try params(VoiceConfigureInput.self)
+      let voice = try requireVoice()
+      voice.configure(provider: try input.kind(), voice: input.voice)
+      return try reply(voice.status())
+    case "voice.setKey":
+      let input = try params(VoiceKeyInput.self)
+      let voice = try requireVoice()
+      try await voice.setKey(input.key, for: try input.kind())
+      return try reply(voice.status())
+    case "voice.talk":
+      let voice = try requireVoice()
+      await voice.talk()
+      return try reply(voice.status())
+    case "voice.sleep":
+      let voice = try requireVoice()
+      await voice.sleep()
+      return try reply(voice.status())
+    case "voice.interrupt":
+      let voice = try requireVoice()
+      await voice.interrupt()
+      return try reply(voice.status())
+
     // ---- Activity ------------------------------------------------------------------------
     case "activity.snapshot":
       return try reply(
@@ -508,6 +537,11 @@ struct DesktopAPI {
     store.dispatch(.setBrowserSession(id: nodeID, session: session), targetCanvasID: canvasID)
   }
 
+  private func requireVoice() throws -> DesktopVoice {
+    guard let voice else { throw APIError.invalid("Voice needs Otto Desktop") }
+    return voice
+  }
+
   private func team(_ channelID: UUID) throws -> BotChannel {
     guard let channel = services.botChannels.channel(id: channelID), channel.kind == .group,
       !channel.archived
@@ -584,6 +618,26 @@ struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
 struct NameInput: Decodable { var name: String }
+struct VoiceConfigureInput: Decodable {
+  var provider: String
+  var voice: String?
+
+  func kind() throws -> VoiceProviderKind {
+    guard let kind = VoiceProviderKind(rawValue: provider) else {
+      throw DesktopAPI.APIError.invalid("Unknown voice provider")
+    }
+    return kind
+  }
+}
+/// A null or empty key removes the saved one.
+struct VoiceKeyInput: Decodable {
+  var provider: String
+  var key: String?
+
+  func kind() throws -> VoiceProviderKind {
+    try VoiceConfigureInput(provider: provider).kind()
+  }
+}
 struct TeamMemberOption: Encodable {
   var id: UUID
   var name: String

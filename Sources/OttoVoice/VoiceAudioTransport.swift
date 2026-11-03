@@ -1,4 +1,6 @@
-@preconcurrency import AVFoundation
+#if os(macOS) || os(iOS)
+  @preconcurrency import AVFoundation
+#endif
 import Foundation
 
 public protocol StreamingVoiceProvider: VoiceProvider {
@@ -111,6 +113,8 @@ public protocol MicrophoneAuthorizing: Sendable {
   func requestAccess() async -> Bool
 }
 
+// The Mac's own microphone and speakers. Otto Desktop supplies audio through the engine instead.
+#if os(macOS) || os(iOS)
 public struct SystemMicrophoneAuthorizer: MicrophoneAuthorizing {
   public init() {}
 
@@ -712,3 +716,4 @@ enum VoicePCMConverter {
     return samples.withUnsafeBytes { Data($0) }
   }
 }
+#endif

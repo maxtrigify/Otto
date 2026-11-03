@@ -1,3 +1,5 @@
+// Apple-only: speech and audio frameworks. Otto Desktop transcribes through the engine instead.
+#if os(macOS) || os(iOS)
 @preconcurrency import AVFoundation
 import Darwin
 import Foundation
@@ -237,3 +239,4 @@ public actor ParakeetWarmRecognizer {
     return payload
   }
 }
+#endif

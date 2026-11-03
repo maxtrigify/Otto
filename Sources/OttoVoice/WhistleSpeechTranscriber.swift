@@ -1,3 +1,5 @@
+// Apple-only: speech and audio frameworks. Otto Desktop transcribes through the engine instead.
+#if os(macOS) || os(iOS)
 import AVFoundation
 import Foundation
 
@@ -243,3 +245,4 @@ public final class WhistleSpeechTranscriber: SpeechTranscriber, @unchecked Senda
       ))
   }
 }
+#endif

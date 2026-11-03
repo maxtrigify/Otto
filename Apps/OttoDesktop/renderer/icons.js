@@ -25,6 +25,7 @@ const Icons = (() => {
     xmark: '<path d="M7 7l10 10M17 7 7 17"/>',
     pencil: '<path d="m15.5 5.5 3 3L9 18H6v-3z"/>',
     'text.bubble': '<path d="M5.5 5.5h13A1.5 1.5 0 0 1 20 7v8a1.5 1.5 0 0 1-1.5 1.5H11L7 19.5v-3H5.5A1.5 1.5 0 0 1 4 15V7a1.5 1.5 0 0 1 1.5-1.5z"/><path d="M8 10h8M8 13h5"/>',
+    mic: '<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.8 11.5a6.2 6.2 0 0 0 12.4 0M12 17.7v2.8"/>',
     'arrow.clockwise': '<path d="M18.5 12a6.5 6.5 0 1 1-1.9-4.6"/><path d="M18.8 4.6v3.6h-3.6"/>',
     'arrow.turn': '<path d="M6 6v5.5A2.5 2.5 0 0 0 8.5 14H18M14.5 10.5 18 14l-3.5 3.5"/>',
     person: '<circle cx="12" cy="9" r="3.4"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/>',

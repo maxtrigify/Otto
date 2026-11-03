@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
 public protocol RealtimeSocket: Sendable {
   var messages: AsyncStream<String> { get }
   func connect(request: URLRequest) async throws

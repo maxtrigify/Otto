@@ -323,3 +323,85 @@ test('Teams: a group of bots is created, chats as a thread, is edited and remove
   assert.deepEqual((await client.bots()).teams, []);
   await assert.rejects(client.desktop('teams.get', { id: team.id }));
 });
+
+test('Voice: keys live in the desktop keychain and Talk runs the Mac voice session over desktop audio', { skip: !binary, timeout: 60_000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-engine-voice-'));
+  const workspace = path.join(root, 'Workspace');
+  const state = path.join(root, 'state');
+  fs.mkdirSync(workspace);
+  fs.mkdirSync(state, { recursive: true });
+  // An older engine kept secrets in its state folder; they move into the keychain.
+  fs.writeFileSync(path.join(state, 'secrets.json'), JSON.stringify({ 'legacy.key': 'old-secret' }));
+  const client = new EngineClient({ binary, stateDirectory: state, workspace, desktopSecrets: true });
+  t.after(async () => {
+    await client.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // Play Otto Desktop: the keychain, the microphone and speakers, and the provider WebSocket.
+  const keychain = new Map();
+  const sockets = [];
+  const sent = [];
+  const played = [];
+  const calls = [];
+  client.on('host', ({ id, method, params }) => {
+    calls.push(method);
+    if (method === 'secrets.get') return client.reply(id, keychain.get(params.key) ?? null);
+    if (method === 'secrets.set') return client.reply(id, keychain.set(params.key, params.value) && true);
+    if (method === 'secrets.delete') return client.reply(id, keychain.delete(params.key) || true);
+    if (method === 'socket.open') {
+      sockets.push(params);
+      return client.reply(id, true);
+    }
+    if (method.startsWith('audio.')) return client.reply(id, true);
+    if (method.startsWith('browser.')) return client.reply(id, true);
+    client.reply(id, null, `unexpected ${method}`);
+  });
+  client.on('event', ({ kind, payload }) => {
+    if (kind === 'socket.send') sent.push(JSON.parse(payload.text));
+    if (kind === 'audio.play') played.push(payload.pcm);
+  });
+  const until = async (check, what) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const value = check();
+      if (value) return value;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.fail(`timed out waiting for ${what}. host calls: ${calls.join(', ')}`);
+  };
+
+  await client.start();
+  assert.equal(keychain.get('legacy.key'), 'old-secret');
+  assert.ok(!fs.existsSync(path.join(state, 'secrets.json')), 'the plain-text secrets file is removed');
+
+  const off = await client.desktop('voice.status');
+  assert.equal(off.state, 'disconnected');
+  assert.deepEqual(off.keys, { openai: false, xai: false });
+  assert.ok(off.voices.openai.length && off.voices.xai.length);
+
+  const keyed = await client.desktop('voice.setKey', { provider: 'openai', key: 'sk-test-123' });
+  assert.equal(keyed.keys.openai, true);
+  assert.equal(keychain.get('openai.api-key'), 'sk-test-123');
+
+  const talking = client.desktop('voice.talk');
+  const socket = await until(() => sockets[0], 'the provider socket');
+  assert.match(socket.url, /^wss:\/\/api\.openai\.com\/v1\/realtime/);
+  assert.equal(socket.headers.Authorization ?? socket.headers.authorization, 'Bearer sk-test-123');
+  const update = await until(() => sent.find((message) => message.type === 'session.update'), 'session.update');
+  assert.match(update.session.instructions, /You are Otto/);
+  assert.ok(update.session.tools.length > 10, `tools: ${update.session.tools.length}`);
+  client.event(`socket.message.${socket.id}`, { id: socket.id, text: JSON.stringify({ type: 'session.updated' }) });
+  await talking;
+  await until(() => calls.includes('audio.start'), 'the microphone');
+
+  // Microphone audio reaches the provider, and the provider's voice plays in the desktop.
+  const pcm = Buffer.alloc(1920, 7).toString('base64');
+  client.event('audio.input', { pcm });
+  await until(() => sent.some((message) => message.type === 'input_audio_buffer.append'), 'microphone audio at the provider');
+  const spoken = Buffer.alloc(960, 3).toString('base64');
+  client.event(`socket.message.${socket.id}`, { id: socket.id, text: JSON.stringify({ type: 'response.output_audio.delta', delta: spoken }) });
+  await until(() => played.length, 'speaker audio');
+
+  const asleep = await client.desktop('voice.sleep');
+  assert.notEqual(asleep.state, 'listening');
+});

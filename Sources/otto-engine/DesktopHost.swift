@@ -10,7 +10,16 @@ import OttoRPCContracts
 ///   `{"host": {"id", "method", "params"}}`  a call; the desktop answers on stdin with
 ///   `{"token", "hostReply": {"id", "result"} | {"id", "error"}}`
 ///   `{"event": {"kind", "payload"}}`        fire and forget
+/// and in the other direction the desktop streams `{"token", "hostEvent": {"kind", "payload"}}`
+/// (microphone audio, WebSocket messages) to handlers registered with `on(_:_:)`.
 actor DesktopHost {
+  struct IncomingEvent: Decodable {
+    var kind: String
+    var payload: OpaqueCodableValue?
+  }
+
+  typealias EventHandler = @Sendable (OpaqueCodableValue) async -> Void
+
   struct Reply: Decodable {
     var id: String
     var result: OpaqueCodableValue?
@@ -50,6 +59,7 @@ actor DesktopHost {
 
   private let output: ResponseWriter
   private var pending: [String: CheckedContinuation<OpaqueCodableValue, any Error>] = [:]
+  private var handlers: [String: EventHandler] = [:]
 
   init(output: ResponseWriter) { self.output = output }
 
@@ -74,6 +84,26 @@ actor DesktopHost {
     guard let line = try? OttoRPCCodec.encoder.encode(Event(event: .init(kind: kind, payload: payload)))
     else { return }
     await output.writeLine(line)
+  }
+
+  /// Handles every `hostEvent` of `kind`; a later registration replaces an earlier one.
+  func on(_ kind: String, _ handler: @escaping EventHandler) {
+    handlers[kind] = handler
+  }
+
+  func off(_ kind: String) {
+    handlers[kind] = nil
+  }
+
+  func receive(_ event: IncomingEvent) async {
+    guard let handler = handlers[event.kind] else { return }
+    await handler(event.payload ?? .null)
+  }
+
+  /// A fire-and-forget line to the desktop that must not be reordered against other sends of the
+  /// same stream (audio chunks, socket frames): callers await it in sequence.
+  func send<Payload: Encodable & Sendable>(_ kind: String, _ payload: Payload) async {
+    await emit(kind, payload)
   }
 
   func receive(_ reply: Reply) {

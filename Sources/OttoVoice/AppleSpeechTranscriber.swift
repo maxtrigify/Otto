@@ -1,3 +1,5 @@
+// Apple-only: speech and audio frameworks. Otto Desktop transcribes through the engine instead.
+#if os(macOS) || os(iOS)
 import AVFoundation
 import Foundation
 import Speech
@@ -227,3 +229,4 @@ public enum AppleSpeechFileTranscriber {
     }
   }
 }
+#endif

@@ -1,3 +1,5 @@
+// Apple-only: wake word and on-device speech models. Not part of Otto Desktop yet.
+#if os(macOS) || os(iOS)
 @preconcurrency import AVFoundation
 import Foundation
 
@@ -296,3 +298,4 @@ public enum WakeWordQualificationEvaluator {
     }
   #endif
 }
+#endif

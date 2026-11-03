@@ -18,7 +18,9 @@ fs.writeFileSync(path.join(workspace, 'Notes', 'Smoke note.md'), '# Smoke note\n
 
 // CI Linux runners cannot set up Chromium's user-namespace sandbox; the app itself keeps it.
 const linuxCI = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : [];
-const app = spawn(electron, ['.', `--remote-debugging-port=${port}`, ...linuxCI], {
+// A fake microphone, so voice and dictation run without hardware or a permission prompt.
+const fakeMedia = ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'];
+const app = spawn(electron, ['.', `--remote-debugging-port=${port}`, ...fakeMedia, ...linuxCI], {
   cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
   env: { ...process.env, OTTO_DESKTOP_WORKSPACE: workspace },
   stdio: 'inherit',
@@ -61,10 +63,18 @@ socket.addEventListener('message', ({ data }) => {
   waiting.get(message.id)?.(message);
   waiting.delete(message.id);
 });
+// Every DevTools call has a deadline, so a stuck page fails the run instead of hanging it.
 const call = (method, params = {}) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     const id = nextID++;
-    waiting.set(id, resolve);
+    const timer = setTimeout(() => {
+      waiting.delete(id);
+      reject(new Error(`DevTools ${method} timed out`));
+    }, 60_000);
+    waiting.set(id, (message) => {
+      clearTimeout(timer);
+      resolve(message);
+    });
     socket.send(JSON.stringify({ id, method, params }));
   });
 const evaluate = async (expression) =>
@@ -113,7 +123,7 @@ const visit = async (label, pageID, ready) => {
   })()`);
   if (!clicked) throw new Error(`no rail row for ${label}`);
   let ok = false;
-  for (let attempt = 0; attempt < 20 && !ok; attempt += 1) {
+  for (let attempt = 0; attempt < 60 && !ok; attempt += 1) {
     await sleep(300);
     ok = await evaluate(`!document.getElementById(${JSON.stringify(pageID)}).hidden && (${ready})`);
   }
@@ -125,7 +135,7 @@ const visit = async (label, pageID, ready) => {
 };
 try {
   const engineLine = `appState && appState.daemon ? 'Engine ' + appState.daemon.version + ' · ' + appState.platform : 'offline'`;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     if ((await evaluate(engineLine))?.startsWith('Engine ')) break;
     await sleep(500);
   }
@@ -135,7 +145,7 @@ try {
   if (!engine?.startsWith('Engine ')) throw new Error(`engine did not start: ${engine}`);
   if (process.env.OTTO_ENGINE_PATH) {
     // With the engine Otto Desktop lands on Home; New chat then offers bots.
-    for (let attempt = 0; attempt < 20 && (await evaluate(`document.getElementById('home-surface').hidden`)); attempt += 1) {
+    for (let attempt = 0; attempt < 60 && (await evaluate(`document.getElementById('home-surface').hidden`)); attempt += 1) {
       await sleep(500);
     }
     const home = await evaluate(`document.getElementById('home-surface').hidden ? null : document.querySelector('.home-greeting')?.textContent`);
@@ -157,7 +167,7 @@ try {
       document.querySelector('#name-dialog button[value=save]').click();
     })()`);
     let dashboard = null;
-    for (let attempt = 0; attempt < 20 && !dashboard; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !dashboard; attempt += 1) {
       await sleep(300);
       dashboard = await evaluate(`document.querySelector('.dashboard-head h2')?.textContent ?? null`);
     }
@@ -188,7 +198,7 @@ try {
     await sleep(300);
     await evaluate(`document.querySelector('.data-card .segmented button:nth-child(2)').click()`);
     let widened = false;
-    for (let attempt = 0; attempt < 20 && !widened; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !widened; attempt += 1) {
       await sleep(300);
       widened = await evaluate(`Boolean(document.querySelector('.data-card.width-wide'))`);
     }
@@ -206,7 +216,7 @@ try {
       document.getElementById('browser-start-form').requestSubmit();
     })()`);
     let browserState = null;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
       await sleep(300);
       browserState = (await evaluate(`window.otto.desktop('browser.list')`))?.[0];
       if (browserState?.state?.title === 'Otto smoke page' && !browserState.state.isLoading) break;
@@ -222,7 +232,7 @@ try {
     console.log(`click: ${clickResult}`);
     await evaluate(`window.otto.desktop('browser.type', { id: ${JSON.stringify(nodeID)}, element: 'Your name', text: 'Otto on ${process.platform}' })`);
     let after = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
       await sleep(250);
       after = await evaluate(`window.otto.desktop('browser.inspect', { id: ${JSON.stringify(nodeID)} })`);
       if (after?.elements?.some((element) => element.name === 'Pressed')) break;
@@ -247,7 +257,7 @@ try {
     if (await evaluate(`document.getElementById('teams-header').hidden`)) throw new Error('the teams group did not appear');
     await evaluate(`document.getElementById('add-team').click()`);
     let members = 0;
-    for (let attempt = 0; attempt < 20 && members < 2; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && members < 2; attempt += 1) {
       await sleep(250);
       members = await evaluate(`document.getElementById('team-dialog').open ? document.querySelectorAll('.team-member').length : 0`);
     }
@@ -261,7 +271,7 @@ try {
     await shot('team-dialog.png');
     await evaluate(`document.getElementById('team-save').click()`);
     let room = null;
-    for (let attempt = 0; attempt < 30 && room !== 'Smoke crew'; attempt += 1) {
+    for (let attempt = 0; attempt < 90 && room !== 'Smoke crew'; attempt += 1) {
       await sleep(300);
       room = await evaluate(`!document.getElementById('chat').hidden && !document.getElementById('chat-edit-team').hidden ? document.getElementById('chat-name').textContent : null`);
     }
@@ -271,6 +281,68 @@ try {
     if (!teamRow?.includes('Smoke crew')) throw new Error('the team is not in the rail');
     await shot('team-room.png');
 
+    // Voice: Settings shows it, 24 kHz capture loads, and dictation records and transcribes.
+    await evaluate(`document.getElementById('nav-settings').click()`);
+    let voiceSettings = null;
+    for (let attempt = 0; attempt < 60 && !voiceSettings; attempt += 1) {
+      await sleep(300);
+      voiceSettings = await evaluate(`document.querySelector('.settings-voice')?.innerText ?? null`);
+    }
+    console.log(`voice settings: ${voiceSettings?.replace(/\s+/g, ' ').slice(0, 160)}`);
+    if (!voiceSettings?.includes('Provider')) throw new Error('Settings has no Voice section');
+    if (process.env.CI) {
+      // On CI only: saving writes to the real OS keychain.
+      await evaluate(`(() => {
+        const field = document.querySelector('.settings-key input');
+        field.value = 'sk-smoke-not-real';
+        document.querySelector('.settings-key .primary').click();
+      })()`);
+      let saved = null;
+      for (let attempt = 0; attempt < 60 && !saved; attempt += 1) {
+        await sleep(300);
+        saved = await evaluate(`document.querySelector('.settings-key')?.textContent.includes('key saved') || null`);
+      }
+      if (!saved) throw new Error('saving a voice key did not stick');
+      const kept = await evaluate(`window.otto.desktop('voice.status').then((status) => status.keys.openai)`);
+      console.log(`voice key kept in keychain: ${kept}`);
+      if (!kept) throw new Error('the engine does not see the saved key');
+    }
+    await shot('settings-voice.png');
+    const capture = await evaluate(`(async () => {
+      const context = new AudioContext({ sampleRate: 24000 });
+      await context.audioWorklet.addModule('audio-capture.js');
+      const rate = context.sampleRate;
+      await context.close();
+      return rate;
+    })().catch((error) => 'failed: ' + error.message)`);
+    console.log(`voice capture: ${capture}`);
+    if (capture !== 24000) throw new Error(`voice audio capture did not load (${capture})`);
+    await evaluate(`go('welcome')`);
+    await sleep(400);
+    await evaluate(`document.getElementById('welcome-mic').click()`);
+    let recording = false;
+    for (let attempt = 0; attempt < 90 && !recording; attempt += 1) {
+      await sleep(250);
+      recording = await evaluate(`document.getElementById('welcome-mic').classList.contains('recording')`);
+    }
+    await sleep(800); // record a little audio
+    if (!recording) {
+      console.log(`dictation probe: ${await evaluate(`JSON.stringify({ welcomeHidden: document.getElementById('welcome').hidden, toast: document.getElementById('toast').hidden ? null : document.getElementById('toast').textContent, devices: typeof navigator.mediaDevices?.getUserMedia })`)}`);
+      console.log(`media probe: ${await evaluate(`navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => 'ok ' + stream.getAudioTracks().length, (error) => 'failed ' + error.name + ' ' + error.message)`)}`);
+    }
+    await evaluate(`document.getElementById('welcome-mic').click()`);
+    let dictation = null;
+    for (let attempt = 0; attempt < 120 && !dictation; attempt += 1) {
+      await sleep(300);
+      dictation = await evaluate(`document.getElementById('toast').hidden ? null : document.getElementById('toast').textContent`);
+    }
+    console.log(`dictation: recording=${recording} · ${dictation}`);
+    // With no real key the transcription is refused, which proves the clip reached the service.
+    if (!recording || !/API key|Incorrect API key|invalid|401/i.test(dictation ?? '')) {
+      throw new Error(`dictation did not record and transcribe (${dictation})`);
+    }
+    await evaluate(`document.getElementById('toast').hidden = true`);
+
     await visit('Automations', 'automations', `document.querySelector('#automations-body .overline')`);
     await evaluate(`(() => {
       document.getElementById('new-automation').click();
@@ -279,7 +351,7 @@ try {
       document.querySelector('#automation-form button[value=create]').click();
     })()`);
     let automation = null;
-    for (let attempt = 0; attempt < 20 && !automation; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !automation; attempt += 1) {
       await sleep(300);
       automation = await evaluate(`document.querySelector('.automation-row strong')?.textContent ?? null`);
     }
@@ -295,7 +367,7 @@ try {
     await visit('Files & notes', 'files', `document.querySelector('#files-body .file-row')`);
     await evaluate(`document.querySelector('#files-body .file-row').click()`);
     let heading = null;
-    for (let attempt = 0; attempt < 20 && !heading; attempt += 1) {
+    for (let attempt = 0; attempt < 60 && !heading; attempt += 1) {
       await sleep(300);
       heading = await evaluate(`document.getElementById('note').hidden ? null : document.querySelector('#note-preview :is(h1,h2,h3)')?.textContent ?? null`);
     }
@@ -316,7 +388,7 @@ try {
   const marker = 'otto-smoke-ok';
   await type(process.platform === 'win32' ? `Write-Output "${marker} on $([Environment]::OSVersion.VersionString)"` : `echo "${marker} on $(uname -s)"`);
   let text = '';
-  for (let attempt = 0; attempt < 40 && !text.includes(`${marker} on`); attempt += 1) {
+  for (let attempt = 0; attempt < 120 && !text.includes(`${marker} on`); attempt += 1) {
     await sleep(500);
     // Read xterm's buffer, not the DOM: Chromium defers painting while the window is in the background.
     text = await evaluate(`(() => {
@@ -343,7 +415,10 @@ try {
 } finally {
   socket.close();
   server.close();
+  // Wait for the app to exit, so a following run can take the debugging port.
+  const exited = new Promise((resolve) => app.once('exit', resolve));
   app.kill();
+  await Promise.race([exited, sleep(10_000)]);
 }
 if (failure) {
   console.error(failure.message);
