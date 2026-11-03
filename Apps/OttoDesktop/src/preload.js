@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld('otto', {
   onVoiceState: (listener) => ipcRenderer.on('voice:state', (_event, payload) => listener(payload)),
   transcribe: (audio, mimeType) => ipcRenderer.invoke('voice:transcribe', { audio, mimeType }),
   keychain: () => ipcRenderer.invoke('voice:keychain'),
+  // Updates for installed builds.
+  updateState: () => ipcRenderer.invoke('update:state'),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdate: (listener) => ipcRenderer.on('update:state', (_event, payload) => listener(payload)),
   browserShow: (nodeID, bounds) => ipcRenderer.invoke('browser:show', { nodeID, bounds }),
   browserHide: () => ipcRenderer.invoke('browser:hide'),
   browserList: () => ipcRenderer.invoke('browser:list'),

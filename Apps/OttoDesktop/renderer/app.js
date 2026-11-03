@@ -673,7 +673,61 @@ function renderSettings() {
   body.append(
     el('p', 'muted', [`Otto Desktop ${appState.version || ''}`.trim(), appState.daemon ? `engine ${appState.daemon.version}` : 'terminal engine offline', chatAvailable() ? 'chats on' : 'chats unavailable', appState.platform].join(' · ')),
   );
+  const updates = el('div', 'setting-row');
+  updates.id = 'update-row';
+  body.append(updates);
+  window.otto.updateState().then(renderUpdate);
 }
+
+// ---- Updates -------------------------------------------------------------------------------
+
+const UPDATE_TEXT = {
+  unsupported: ['Updates', 'This build updates through its installer, not in place.'],
+  idle: ['Updates', 'Otto checks for updates every few hours.'],
+  checking: ['Checking for updates…', ''],
+  current: ['Otto is up to date', ''],
+  available: ['Update available', ''],
+  downloading: ['Downloading update…', ''],
+  verifying: ['Checking the update’s signature…', ''],
+  ready: ['Update ready', 'Restart Otto to finish.'],
+  error: ['Update problem', ''],
+};
+
+/** Settings → About shows the update state with the next step, as the Mac does. */
+function renderUpdate(state) {
+  const row = $('update-row');
+  if (!row || !state) return;
+  row.replaceChildren();
+  const [title, detail] = UPDATE_TEXT[state.phase] ?? UPDATE_TEXT.idle;
+  const text = el('div', 'setting-text');
+  const extra =
+    state.phase === 'available' ? `Otto ${state.available}${state.notes ? ` · ${state.notes.split('\n')[0]}` : ''}` :
+    state.phase === 'downloading' ? `${state.percent ?? 0}%` :
+    state.phase === 'error' ? state.error :
+    detail;
+  text.append(el('strong', '', title), el('span', 'muted small', extra || `You have ${state.version}.`));
+  const actions = el('div', 'setting-actions');
+  const button = (label, primary, action) => {
+    const control = el('button', `${primary ? 'primary' : 'ghost'} small-button`, label);
+    control.addEventListener('click', action);
+    actions.append(control);
+  };
+  if (state.phase === 'available') button('Download & Restart', true, () => window.otto.downloadUpdate());
+  if (state.phase === 'ready') button('Restart now', true, () => window.otto.installUpdate());
+  if (['idle', 'current', 'error'].includes(state.phase)) button('Check now', false, () => window.otto.checkForUpdate());
+  row.append(text, actions);
+}
+
+let announcedUpdate = null;
+window.otto.onUpdate((state) => {
+  renderUpdate(state);
+  // Mention a new version once; the download waits for the person to say so.
+  if (state.phase === 'available' && announcedUpdate !== state.available) {
+    announcedUpdate = state.available;
+    toast(`Otto ${state.available} is available. Settings → About to update.`);
+  }
+  if (state.phase === 'ready') toast(`Otto ${state.available} is ready. Restart from Settings → About.`);
+});
 
 // ---- Theme menu ----------------------------------------------------------------------------
 

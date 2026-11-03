@@ -15,6 +15,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "electron-updater": "^6.8.11",
     "ws": "^8.22.1"
   },
   "devDependencies": {
@@ -27,7 +28,6 @@
     "files": [
       "src/**",
       "renderer/**",
-      "node_modules/@xterm/**",
       "package.json",
       "build/icon.png"
     ],
@@ -50,10 +50,35 @@
     "linux": {
       "category": "Development",
       "maintainer": "Otto <hello@openotto.io>",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "Otto-${version}-${arch}.${ext}"
     },
     "directories": {
       "buildResources": "build"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://maxtrigify.github.io/muse-releases/desktop"
+      }
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Otto-Setup-${version}-${arch}.${ext}",
+      "differentialPackage": true
+    },
+    "deb": {
+      "depends": [
+        "libsecret-1-0",
+        "libnss3",
+        "libxss1",
+        "libasound2t64 | libasound2"
+      ]
     }
   },
   "author": {

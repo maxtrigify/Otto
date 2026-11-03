@@ -125,17 +125,44 @@ jobs:
           path: ${{ runner.temp }}/smoke/*.png
           if-no-files-found: ignore
 
+      - name: Unit tests (update signature gate)
+        working-directory: Apps/OttoDesktop
+        run: node --test test/update-manifest.test.js
+
       - name: Package installer
         working-directory: Apps/OttoDesktop
         env:
+          # Authenticode signing turns on once a certificate is added as repository secrets
+          # (WIN_CSC_LINK: base64 .pfx, WIN_CSC_KEY_PASSWORD). Without it the installer is
+          # unsigned and Windows SmartScreen warns on first run.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: Check the packaged app contents
+        working-directory: Apps/OttoDesktop
+        shell: bash
+        run: |
+          # Runtime modules must ship inside app.asar, or voice, terminals and updates break.
+          asar=$(find dist -name app.asar | head -1)
+          npx --yes @electron/asar list "$asar" > asar.txt
+          for module in ws electron-updater @xterm/xterm @xterm/addon-fit; do
+            grep -q "^/node_modules/$module/package.json$" asar.txt || { echo "missing $module in $asar"; exit 1; }
+          done
+          grep -q "^/src/updater.js$" asar.txt && grep -q "^/renderer/audio-capture.js$" asar.txt
+          grep -q "maxtrigify.github.io/muse-releases/desktop" "$(dirname "$asar")/app-update.yml"
+          echo "packaged app contents ok"
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: otto-windows-installer
-          path: Apps/OttoDesktop/dist/*.exe
+          # latest.yml and the blockmap are the update feed publish-desktop-release.sh signs.
+          path: |
+            Apps/OttoDesktop/dist/*.exe
+            Apps/OttoDesktop/dist/*.exe.blockmap
+            Apps/OttoDesktop/dist/latest.yml
 
   linux-desktop:
     runs-on: ubuntu-24.04
@@ -187,9 +214,27 @@ jobs:
           path: ${{ runner.temp }}/smoke/*.png
           if-no-files-found: ignore
 
+      - name: Unit tests (update signature gate)
+        working-directory: Apps/OttoDesktop
+        run: node --test test/update-manifest.test.js
+
       - name: Package AppImage and deb
         working-directory: Apps/OttoDesktop
         run: npx electron-builder --linux AppImage deb --x64 --publish never
+
+      - name: Check the packaged app contents
+        working-directory: Apps/OttoDesktop
+        shell: bash
+        run: |
+          # Runtime modules must ship inside app.asar, or voice, terminals and updates break.
+          asar=$(find dist -name app.asar | head -1)
+          npx --yes @electron/asar list "$asar" > asar.txt
+          for module in ws electron-updater @xterm/xterm @xterm/addon-fit; do
+            grep -q "^/node_modules/$module/package.json$" asar.txt || { echo "missing $module in $asar"; exit 1; }
+          done
+          grep -q "^/src/updater.js$" asar.txt && grep -q "^/renderer/audio-capture.js$" asar.txt
+          grep -q "maxtrigify.github.io/muse-releases/desktop" "$(dirname "$asar")/app-update.yml"
+          echo "packaged app contents ok"
 
       - name: Upload packages
         uses: actions/upload-artifact@v4
@@ -198,3 +243,4 @@ jobs:
           path: |
             Apps/OttoDesktop/dist/*.AppImage
             Apps/OttoDesktop/dist/*.deb
+            Apps/OttoDesktop/dist/latest-linux.yml

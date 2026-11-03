@@ -10,6 +10,7 @@ const { EngineClient } = require('./engine');
 const { BrowserHost } = require('./browser');
 const { VoiceHost } = require('./voice');
 const { SecretVault } = require('./secrets');
+const { Updater } = require('./updater');
 const { loginEnvironment, discoverAgents } = require('./agents');
 
 const isWindows = process.platform === 'win32';
@@ -19,6 +20,8 @@ let browserHost = null;
 /** Voice audio, sockets and the keychain for the engine (see voice.js, secrets.js). */
 let vault = null;
 let voiceHost = null;
+/** Installed builds update themselves from the signed release feed (see updater.js). */
+let updater = null;
 let terminals = null; // ottod: raw terminal sessions
 let engine = null; // otto-engine: bots, threads, runs and approvals
 let engineError = null;
@@ -341,6 +344,11 @@ function registerIPC() {
     return voiceHost.transcribe(input);
   });
   ipcMain.handle('voice:keychain', () => (vault ?? new SecretVault(path.join(app.getPath('userData'), 'secrets.json'))).describe());
+  // Updates: state for Settings, and the person's go-ahead to download and restart.
+  ipcMain.handle('update:state', () => updater?.state ?? { phase: 'unsupported' });
+  ipcMain.handle('update:check', () => updater?.check());
+  ipcMain.handle('update:download', () => updater?.download());
+  ipcMain.handle('update:install', () => updater?.install());
   ipcMain.handle('link:open', (_event, url) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
   });
@@ -370,6 +378,10 @@ function createWindow() {
   });
   window.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   browserHost = new BrowserHost({ window, engine: () => engine, notify: send });
+  if (!updater) {
+    updater = new Updater({ notify: send });
+    window.webContents.once('did-finish-load', () => updater.start());
+  }
 }
 
 app.whenReady().then(() => {

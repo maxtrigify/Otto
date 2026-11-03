@@ -15,6 +15,7 @@ struct OttoReleaseCommand {
     Usage:
       otto-release public-key
       otto-release sign-manifest <manifest.json> <signed-manifest.json>
+      otto-release sign-desktop-manifest <desktop-manifest.json> <signed-desktop-manifest.json>
       otto-release sign-remote-upgrade <manifest.json> <signed-upgrade.json>
       otto-release sign-remote-artifact <ottod> <version> <build> <platform> <signed-upgrade.json>
 
@@ -44,6 +45,15 @@ struct OttoReleaseCommand {
         try validate(manifest)
         let document = try signer.sign(manifest)
         try JSONEncoder.commercial.encode(document).write(to: outputURL, options: .atomic)
+      } else if arguments.count == 3, arguments[0] == "sign-desktop-manifest" {
+        // Otto Desktop (Windows/Linux) checks every downloaded update against this signature.
+        let manifest = try JSONDecoder.commercial.decode(
+          DesktopUpdateManifest.self,
+          from: Data(contentsOf: URL(fileURLWithPath: arguments[1])))
+        try manifest.validate()
+        let document = try signer.sign(manifest)
+        try JSONEncoder.commercial.encode(document).write(
+          to: URL(fileURLWithPath: arguments[2]), options: .atomic)
       } else if arguments.count == 3, arguments[0] == "sign-remote-upgrade" {
         let inputURL = URL(fileURLWithPath: arguments[1])
         let outputURL = URL(fileURLWithPath: arguments[2])
@@ -137,6 +147,41 @@ struct OttoReleaseCommand {
     }
     let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
     return (digest, Int64(fileSize))
+  }
+}
+
+/// What Otto Desktop installs. `product` keeps a Mac manifest from ever passing as a desktop one.
+struct DesktopUpdateManifest: Codable, Sendable {
+  struct File: Codable, Sendable {
+    /// "win32" or "linux".
+    var platform: String
+    var arch: String
+    /// "nsis", "appimage" or "deb".
+    var kind: String
+    var name: String
+    var url: URL
+    /// Base64 SHA-512, as electron-updater's feed lists it.
+    var sha512: String
+    var size: Int
+  }
+
+  var product: String
+  var version: String
+  var releasedAt: Date
+  var files: [File]
+
+  func validate() throws {
+    let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+    guard product == "otto-desktop", parts.count == 3, parts.allSatisfy({ Int($0) != nil }),
+      !files.isEmpty
+    else { throw ReleaseToolError.invalidManifest }
+    for file in files {
+      guard
+        ["win32", "linux"].contains(file.platform), ["nsis", "appimage", "deb"].contains(file.kind),
+        file.url.scheme?.lowercased() == "https", file.size > 0,
+        Data(base64Encoded: file.sha512)?.count == 64
+      else { throw ReleaseToolError.invalidManifest }
+    }
   }
 }
 

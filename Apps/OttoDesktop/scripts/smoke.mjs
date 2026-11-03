@@ -308,6 +308,14 @@ try {
       if (!kept) throw new Error('the engine does not see the saved key');
     }
     await shot('settings-voice.png');
+    // Development runs cannot update in place; Settings says so instead of offering a check.
+    let updateRow = null;
+    for (let attempt = 0; attempt < 30 && !updateRow; attempt += 1) {
+      await sleep(200);
+      updateRow = await evaluate(`document.getElementById('update-row')?.innerText || null`);
+    }
+    console.log(`updates: ${updateRow?.replace(/\s+/g, ' ')}`);
+    if (!updateRow?.includes('Updates')) throw new Error('Settings has no Updates row');
     const capture = await evaluate(`(async () => {
       const context = new AudioContext({ sampleRate: 24000 });
       await context.audioWorklet.addModule('audio-capture.js');
