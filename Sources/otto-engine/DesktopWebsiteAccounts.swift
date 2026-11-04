@@ -103,16 +103,14 @@ enum DesktopWebsiteAccounts {
     }
     await host.on("account.done") { payload in
       guard let event = try? OttoRPCCodec.decode(AccountEvent.self, from: payload) else { return }
-      await MainActor.run {
-        Task {
-          do {
-            try await accounts.finishLogin(accountID: event.accountID)
-            await host.send("account.finished", ["accountID": event.accountID.uuidString])
-          } catch {
-            await host.send(
-              "account.finished",
-              ["accountID": event.accountID.uuidString, "error": error.localizedDescription])
-          }
+      Task { @MainActor in
+        do {
+          try await accounts.finishLogin(accountID: event.accountID)
+          await host.send("account.finished", ["accountID": event.accountID.uuidString])
+        } catch {
+          await host.send(
+            "account.finished",
+            ["accountID": event.accountID.uuidString, "error": error.localizedDescription])
         }
       }
     }
