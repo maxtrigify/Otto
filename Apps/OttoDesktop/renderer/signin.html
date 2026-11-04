@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'" />
+    <title>Sign in privately</title>
+    <style>
+      @font-face { font-family: 'Inter Variable'; src: url('fonts/InterVariable.ttf') format('truetype'); }
+      html, body { margin: 0; height: 64px; overflow: hidden; background: #16141a; color: #f5f0e8; font: 13px/1.4 'Inter Variable', 'Segoe UI', system-ui, sans-serif; }
+      .bar { height: 64px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+      .lock { width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: rgba(115, 240, 179, 0.14); color: #73f0b3; flex: none; }
+      .text { flex: 1; min-width: 0; }
+      .text strong { display: block; font-size: 13.5px; }
+      .text span { color: rgba(245, 240, 232, 0.6); font-size: 12px; }
+      .text .error { color: #f87070; }
+      button { font: inherit; border: 0; border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+      .ghost { background: rgba(245, 240, 232, 0.08); color: #f5f0e8; }
+      .primary { background: #f5f0e8; color: #1d1716; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <div class="lock" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="11" width="12" height="9" rx="1.8"/><path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11"/></svg>
+      </div>
+      <div class="text">
+        <strong id="title">Sign in privately</strong>
+        <span id="detail">Your password stays in this window. Bots never see it; they only use the signed-in session.</span>
+      </div>
+      <button class="ghost" id="cancel">Cancel</button>
+      <button class="primary" id="done">Done</button>
+    </div>
+    <script src="signin.js"></script>
+  </body>
+</html>

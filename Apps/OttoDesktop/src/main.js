@@ -12,6 +12,7 @@ const { VoiceHost } = require('./voice');
 const { SecretVault } = require('./secrets');
 const { Updater } = require('./updater');
 const { LoopbackSignIn } = require('./oauth');
+const { AccountHost } = require('./accounts');
 
 /** Google sign-in's one-shot loopback listener (see oauth.js). */
 const loopback = new LoopbackSignIn();
@@ -32,6 +33,8 @@ let browserHost = null;
 /** Voice audio, sockets and the keychain for the engine (see voice.js, secrets.js). */
 let vault = null;
 let voiceHost = null;
+/** Website accounts' private sessions and sign-in window (see accounts.js). */
+let accountHost = null;
 /** Installed builds update themselves from the signed release feed (see updater.js). */
 let updater = null;
 let terminals = null; // ottod: raw terminal sessions
@@ -102,6 +105,13 @@ const DESKTOP_METHODS = new Set([
   'teams.create',
   'teams.update',
   'teams.delete',
+  'accounts.list',
+  'accounts.create',
+  'accounts.grant',
+  'accounts.disconnect',
+  'accounts.login',
+  'accounts.finish',
+  'accounts.perform',
   'connections.google',
   'connections.google.configure',
   'connections.google.connect',
@@ -185,6 +195,7 @@ async function startTerminals() {
 /** One engine per workspace, with its state kept beside the desktop app's own data. */
 async function startEngine() {
   browserHost?.dispose();
+  accountHost?.dispose();
   engine?.dispose();
   engine = null;
   engineError = null;
@@ -211,6 +222,7 @@ async function startEngine() {
     try {
       if (method === 'oauth.listen') return next.reply(id, await loopback.listen());
       if (method === 'oauth.callback') return next.reply(id, await loopback.callback(params));
+      if (accountHost?.handles(method)) return next.reply(id, await accountHost.handle(method, params));
       if (voiceHost?.handles(method)) {
         next.reply(id, await voiceHost.handle(method, params));
         return;
@@ -224,6 +236,7 @@ async function startEngine() {
   next.on('event', ({ kind, payload }) => {
     if (kind === 'browser.state') browserHost?.apply(payload);
     else if (kind === 'browser.closed') browserHost?.closed(payload);
+    else if (kind.startsWith('account.')) accountHost?.event(kind, payload);
     else voiceHost?.event(kind, payload);
   });
   next.on('exit', (status) => {
@@ -365,6 +378,8 @@ function registerIPC() {
     return voiceHost.transcribe(input);
   });
   ipcMain.handle('voice:keychain', () => (vault ?? new SecretVault(path.join(app.getPath('userData'), 'secrets.json'))).describe());
+  // The private sign-in window's Done and Cancel.
+  ipcMain.on('signin:answer', (_event, answer) => accountHost?.answer(answer));
   // Updates: state for Settings, and the person's go-ahead to download and restart.
   ipcMain.handle('update:state', () => updater?.state ?? { phase: 'unsupported' });
   ipcMain.handle('update:check', () => updater?.check());
@@ -399,6 +414,7 @@ function createWindow() {
   });
   window.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   browserHost = new BrowserHost({ window, engine: () => engine, notify: send });
+  accountHost = new AccountHost({ window, engine: () => engine });
   if (!updater) {
     updater = new Updater({ notify: send });
     window.webContents.once('did-finish-load', () => updater.start());
@@ -420,6 +436,15 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => loopback.dispose());
+// The smoke test's local HTTPS site uses a self-signed certificate; accept it for that test only.
+app.on('certificate-error', (event, _contents, url, _error, _certificate, callback) => {
+  if (process.env.OTTO_DESKTOP_TEST_TLS === '1' && new URL(url).hostname === '127.0.0.1') {
+    event.preventDefault();
+    callback(true);
+  } else {
+    callback(false);
+  }
+});
 app.on('window-all-closed', () => {
   terminals?.dispose();
   engine?.dispose();

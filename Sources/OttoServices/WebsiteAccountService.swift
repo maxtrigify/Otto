@@ -12,6 +12,7 @@
   import Crypto
 #endif
 import Foundation
+import OttoModels
 #if canImport(FoundationNetworking)
   import FoundationNetworking
 #endif
@@ -616,7 +617,7 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
   func requireNoSensitiveFields() async throws {
     let found =
       try await js(
-        "return [...document.querySelectorAll('input')].some(e => (e.type === 'password' || /(?:one-time-code|current-password|new-password)/.test(e.autocomplete)) && e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden');"
+        WebsiteAccountScripts.sensitiveFields
       ) as? Bool
     guard found == false else { throw WebsiteAccountError.signInRequired }
   }
@@ -630,15 +631,7 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
     let current = UUID()
     let object =
       try await js(
-        """
-        const visible = e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
-        const selector = human ? 'input:not([type=hidden]),textarea,button,select' : 'input:not([type=hidden]),textarea,button,a[href],select';
-        const elements = [...document.querySelectorAll(selector)].filter(visible).slice(0,200);
-        const fingerprint = e => [e.tagName,e.type,e.name,e.getAttribute('href'),e.form?.action,e.getAttribute('formaction'),e.innerText,e.getAttribute('aria-label')].join('\\u001f');
-        globalThis.__ottoPrivate = { revision, elements, fingerprint, marks:elements.map(fingerprint) };
-        const entries = elements.map((e,i) => ({id:String(i), label:(e.labels?.[0]?.innerText || e.getAttribute('aria-label') || e.innerText || e.placeholder || e.type || e.tagName).slice(0,160), purpose:e.type==='password' && e.autocomplete!=='new-password' ? 'password' : e.autocomplete==='one-time-code' ? 'otp' : null, kind:e.matches('input,textarea') ? (e.type === 'password' || /(?:one-time-code|current-password|new-password)/.test(e.autocomplete) ? 'secret' : 'field') : 'button'}));
-        return {elements:entries, text:human ? '' : (document.body?.innerText || '').slice(0,20000)};
-        """, ["revision": current.uuidString, "human": human]) as? [String: Any]
+        WebsiteAccountScripts.inspect, ["revision": current.uuidString, "human": human]) as? [String: Any]
     guard let items = object?["elements"] as? [[String: Any]] else {
       throw WebsiteAccountError.unavailable
     }
@@ -653,31 +646,10 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
           id: id, label: label, kind: kind, purpose: item["purpose"] as? String)
       }, text: human ? nil : object?["text"] as? String)
   }
-  private var credentialFieldsScript: String {
-    """
-    const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
-    const passwords=[...document.querySelectorAll('input[type=password]')].filter(visible);
-    if(passwords.length!==1 || passwords[0].autocomplete==='new-password')return null;
-    const p=passwords[0], f=p.form;
-    if(!f || new URL(f.action).origin!==location.origin)return null;
-    const usernames=[...f.querySelectorAll('input')].filter(e=>visible(e)&&['text','email'].includes(e.type));
-    if(usernames.length!==1)return null;
-    const u=usernames[0];if(!(u.name||u.id)||!(p.name||p.id))return null;
-    const signature=JSON.stringify([location.origin,f.action,u.name,u.id,u.type,p.name,p.id]);
-    """
-  }
   func fillSavedCredential(_ credential: WebsiteCredentialVault.Credential) async throws -> Bool {
     let result =
       try await js(
-        credentialFieldsScript + """
-          if(signature!==expected)return false;
-          const buttons=[...f.querySelectorAll('button[type=submit],input[type=submit],button:not([type])')].filter(e=>visible(e)&&!e.disabled);
-          if(buttons.length!==1)return false;
-          const set=(e,value)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,value);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));};
-          set(u,username);set(p,password);
-          if(!p.isConnected||!u.isConnected||!buttons[0].isConnected||new URL(f.action).origin!==location.origin)return false;
-          buttons[0].click();return true;
-          """,
+        WebsiteAccountScripts.credentialFields + WebsiteAccountScripts.fillSuffix,
         [
           "expected": credential.signature, "username": credential.username,
           "password": credential.password,
@@ -693,13 +665,7 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
     }
     let result =
       try await js(
-        credentialFieldsScript + """
-          const s=globalThis.__ottoPrivate;if(!s||s.revision!==revision)return null;
-          const ui=s.elements.indexOf(u),pi=s.elements.indexOf(p);
-          if(ui<0||pi<0||s.fingerprint(u)!==s.marks[ui]||s.fingerprint(p)!==s.marks[pi])return null;
-          if(typeof fields[String(pi)]!=='string'||!fields[String(pi)])return null;
-          return {signature,username:fields[String(ui)]??u.value,password:fields[String(pi)]};
-          """, ["revision": revision.uuidString, "fields": input.fields ?? [:]])
+        WebsiteAccountScripts.credentialFields + WebsiteAccountScripts.candidateSuffix, ["revision": revision.uuidString, "fields": input.fields ?? [:]])
       as? [String: String]
     guard let result, let signature = result["signature"], let username = result["username"],
       let password = result["password"]
@@ -715,11 +681,7 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
     try await requireNoSensitiveFields()
     let label =
       try await js(
-        """
-        const s=globalThis.__ottoPrivate, e=s?.elements[Number(id)];
-        if(!s || s.revision!==revision || !e?.isConnected || !e.getClientRects().length || getComputedStyle(e).visibility==='hidden' || e.disabled || s.fingerprint(e)!==s.marks[Number(id)]) return null;
-        return (e.labels?.[0]?.innerText || e.getAttribute('aria-label') || e.innerText || e.type || e.tagName).slice(0,160);
-        """, ["revision": expected.uuidString, "id": elementID]) as? String
+        WebsiteAccountScripts.targetLabel, ["revision": expected.uuidString, "id": elementID]) as? String
     guard let label else { throw WebsiteAccountError.stalePage }
     return label
   }
@@ -739,27 +701,7 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
     revision = nil  // Every input is single-use, including failures and uncertain navigation.
     let okay =
       try await js(
-        """
-        const s=globalThis.__ottoPrivate; if(!s || s.revision!==revision) return false;
-        globalThis.__ottoPrivate=null;
-        const e=s.elements[Number(id)]; if(!e?.isConnected || !e.getClientRects().length || getComputedStyle(e).visibility==='hidden' || e.disabled || s.fingerprint(e)!==s.marks[Number(id)]) return false;
-        if(!human && (e.type==='password' || /(?:one-time-code|current-password|new-password)/.test(e.autocomplete))) return false;
-        const entries=Object.entries(fields);
-        const validField = (key) => { const f=s.elements[Number(key)]; return /^\\d+$/.test(key) && f?.isConnected && f.matches('input,textarea') && f.getClientRects().length && getComputedStyle(f).visibility!=='hidden' && !f.disabled && s.fingerprint(f)===s.marks[Number(key)]; };
-        if(entries.some(([key])=>!validField(key))) return false;
-        for(const [key,text] of entries) {
-          const f=s.elements[Number(key)]; if(!validField(key)) return false;
-          const proto=f.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
-          Object.getOwnPropertyDescriptor(proto,'value').set.call(f,text);
-          f.dispatchEvent(new Event('input',{bubbles:true})); f.dispatchEvent(new Event('change',{bubbles:true}));
-        }
-        if(!e.isConnected || e.disabled || s.fingerprint(e)!==s.marks[Number(id)]) return false;
-        if(kind==='click') { e.click(); return true; }
-        if(!e.matches('input,textarea')) return false;
-        const prototype=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
-        Object.getOwnPropertyDescriptor(prototype,'value').set.call(e,value);
-        e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); return true;
-        """,
+        WebsiteAccountScripts.act,
         [
           "revision": expected.uuidString, "id": elementID, "kind": kind, "value": value ?? "",
           "human": human, "fields": fields,
@@ -774,20 +716,27 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
   }
 }
 #else
-  /// Website sign-in drives a private WebKit view; other platforms report it as unavailable
-  /// until a Chromium-backed driver lands.
+  /// Linux and Windows: the same driver logic as the Mac's WebKit one (origin rule, load and
+  /// settle loop, password-field guard, single-use revisions, the shared WebsiteAccountScripts),
+  /// with the page in a private Chromium session the host renders (Otto Desktop).
   @MainActor
   private final class WebsiteAccountDriver {
-    /// The few page facts the service reads; nothing ever loads here.
+    /// The page facts the service reads, as last reported by the renderer.
+    @MainActor
     final class Page {
-      var url: URL? { nil }
-      var isLoading: Bool { false }
-      func removeFromSuperview() {}
+      fileprivate weak var driver: WebsiteAccountDriver?
+      var url: URL? { driver?.state?.url.flatMap(URL.init(string:)) }
+      var isLoading: Bool { driver?.state?.isLoading ?? false }
+      func removeFromSuperview() { driver?.hide() }
     }
     let webView = Page()
+    let accountID: UUID
     let origin: String
     var locked = false
     var busy = false
+    private var revision: UUID?
+    private var closed = false
+    private var opened = false
     #if DEBUG
       var fixtureURL: URL?
     #endif
@@ -796,24 +745,225 @@ private final class WebsiteAccountDriver: NSObject, WKNavigationDelegate {
       var elements: [SecureLoginElement]
       var text: String?
     }
-    init(accountID _: UUID, origin: String) { self.origin = origin }
-    func close() { locked = true }
-    func allowed(_: URL?) -> Bool { false }
-    func load(_: String) async throws { throw WebsiteAccountError.unavailable }
-    func requireNoSensitiveFields() async throws { throw WebsiteAccountError.unavailable }
-    func inspect(human _: Bool) async throws -> Snapshot { throw WebsiteAccountError.unavailable }
-    func fillSavedCredential(_: WebsiteCredentialVault.Credential) async throws -> Bool {
+
+    init(accountID: UUID, origin: String) {
+      self.accountID = accountID
+      self.origin = origin
+      webView.driver = self
+    }
+
+    private var renderer: (any WebsiteAccountRenderer)? { WebsiteAccountRendering.renderer }
+    fileprivate var state: WebsiteAccountPageState? { renderer?.state(accountID: accountID) }
+    private var navigationFailed: Bool { state?.failed ?? false }
+
+    func close() {
+      closed = true
+      locked = true
+      let id = accountID
+      if let renderer { Task { await renderer.close(accountID: id) } }
+    }
+
+    fileprivate func hide() {
+      let id = accountID
+      if let renderer { Task { await renderer.hide(accountID: id) } }
+    }
+
+    func allowed(_ url: URL?) -> Bool {
+      #if DEBUG
+        if let fixtureURL, let url, url.scheme == fixtureURL.scheme, url.host == fixtureURL.host,
+          url.port == fixtureURL.port
+        {
+          return true
+        }
+      #endif
+      guard let url, url.scheme == "https", url.user == nil, url.password == nil,
+        let target = URL(string: origin)
+      else { return false }
+      return url.host?.lowercased() == target.host?.lowercased()
+        && (url.port ?? 443) == (target.port ?? 443)
+    }
+
+    private func ensureOpen() async throws -> any WebsiteAccountRenderer {
+      guard let renderer, !closed else { throw WebsiteAccountError.unavailable }
+      if !opened {
+        var allowedOrigin = origin
+        #if DEBUG
+          if let fixtureURL { allowedOrigin = fixtureURL.absoluteString }
+        #endif
+        try await renderer.open(accountID: accountID, origin: origin, fixtureOrigin: allowedOrigin)
+        opened = true
+      }
+      return renderer
+    }
+
+    func load(_ urlString: String) async throws {
+      var destination = urlString
+      #if DEBUG
+        if let fixtureURL, urlString.hasPrefix(origin) {
+          destination = fixtureURL.absoluteString + String(urlString.dropFirst(origin.count))
+        }
+      #endif
+      guard !closed, let url = URL(string: destination), allowed(url) else {
+        throw WebsiteAccountError.denied
+      }
+      let renderer = try await ensureOpen()
+      revision = nil
+      try await renderer.load(accountID: accountID, url: url.absoluteString)
+      for _ in 0..<200 {
+        try await Task.sleep(for: .milliseconds(50))
+        guard !closed else { throw WebsiteAccountError.denied }
+        if webView.url != nil && !webView.isLoading {
+          guard !navigationFailed, allowed(webView.url) else { throw WebsiteAccountError.denied }
+          return
+        }
+      }
       throw WebsiteAccountError.unavailable
     }
-    func credentialCandidate(_: SecureLoginInput) async throws -> WebsiteCredentialVault.Credential? {
-      throw WebsiteAccountError.unavailable
+
+    private func js(_ script: String, _ arguments: [String: OpaqueCodableValue] = [:]) async throws
+      -> OpaqueCodableValue
+    {
+      guard !closed, !navigationFailed, allowed(webView.url), let renderer else {
+        throw WebsiteAccountError.denied
+      }
+      do {
+        return try await renderer.evaluate(accountID: accountID, body: script, arguments: arguments)
+      } catch { throw WebsiteAccountError.unavailable }
     }
-    func targetLabel(revision _: UUID?, elementID _: String?) async throws -> String {
-      throw WebsiteAccountError.unavailable
+
+    func requireNoSensitiveFields() async throws {
+      let found = try await js(WebsiteAccountScripts.sensitiveFields)
+      guard case .bool(false) = found else { throw WebsiteAccountError.signInRequired }
     }
+
+    func inspect(human: Bool) async throws -> Snapshot {
+      if !human { try await requireNoSensitiveFields() }
+      let current = UUID()
+      let object = try await js(
+        WebsiteAccountScripts.inspect,
+        ["revision": .string(current.uuidString), "human": .bool(human)])
+      guard case .object(let fields) = object, case .array(let items)? = fields["elements"] else {
+        throw WebsiteAccountError.unavailable
+      }
+      revision = current
+      return Snapshot(
+        revision: current,
+        elements: items.compactMap { item in
+          guard case .object(let entry) = item, case .string(let id)? = entry["id"],
+            case .string(let label)? = entry["label"], case .string(let kind)? = entry["kind"]
+          else { return nil }
+          let purpose: String? = if case .string(let value)? = entry["purpose"] { value } else { nil }
+          return SecureLoginElement(id: id, label: label, kind: kind, purpose: purpose)
+        },
+        text: human ? nil : { if case .string(let text)? = fields["text"] { text } else { nil } }())
+    }
+
+    func fillSavedCredential(_ credential: WebsiteCredentialVault.Credential) async throws -> Bool {
+      let result = try await js(
+        WebsiteAccountScripts.credentialFields + WebsiteAccountScripts.fillSuffix,
+        [
+          "expected": .string(credential.signature), "username": .string(credential.username),
+          "password": .string(credential.password),
+        ])
+      return result == .bool(true)
+    }
+
+    func credentialCandidate(_ input: SecureLoginInput) async throws -> WebsiteCredentialVault
+      .Credential?
+    {
+      guard let revision = input.revision, revision == self.revision else {
+        throw WebsiteAccountError.stalePage
+      }
+      let result = try await js(
+        WebsiteAccountScripts.credentialFields + WebsiteAccountScripts.candidateSuffix,
+        [
+          "revision": .string(revision.uuidString),
+          "fields": .object((input.fields ?? [:]).mapValues { .string($0) }),
+        ])
+      guard case .object(let found) = result, case .string(let signature)? = found["signature"],
+        case .string(let username)? = found["username"],
+        case .string(let password)? = found["password"]
+      else { return nil }
+      return WebsiteCredentialVault.Credential(
+        signature: signature, username: username, password: password)
+    }
+
+    func targetLabel(revision expected: UUID?, elementID: String?) async throws -> String {
+      guard let expected, revision == expected, let elementID, Int(elementID) != nil else {
+        throw WebsiteAccountError.stalePage
+      }
+      try await requireNoSensitiveFields()
+      let label = try await js(
+        WebsiteAccountScripts.targetLabel,
+        ["revision": .string(expected.uuidString), "id": .string(elementID)])
+      guard case .string(let text) = label else { throw WebsiteAccountError.stalePage }
+      return text
+    }
+
     func act(
-      kind _: String, revision _: UUID?, elementID _: String?, value _: String?, human _: Bool,
-      fields _: [String: String] = [:]
-    ) async throws { throw WebsiteAccountError.unavailable }
+      kind: String, revision expected: UUID?, elementID: String?, value: String?, human: Bool,
+      fields: [String: String] = [:]
+    ) async throws {
+      guard let expected, revision == expected, let elementID, Int(elementID) != nil,
+        (value?.utf8.count ?? 0) <= 16_384
+      else { throw WebsiteAccountError.stalePage }
+      guard fields.count <= 200, fields.values.reduce(0, { $0 + $1.utf8.count }) <= 16_384,
+        human || fields.isEmpty
+      else { throw WebsiteAccountError.denied }
+      if !human { try await requireNoSensitiveFields() }
+      revision = nil  // Every input is single-use, including failures and uncertain navigation.
+      let okay = try await js(
+        WebsiteAccountScripts.act,
+        [
+          "revision": .string(expected.uuidString), "id": .string(elementID),
+          "kind": .string(kind), "value": .string(value ?? ""), "human": .bool(human),
+          "fields": .object(fields.mapValues { .string($0) }),
+        ])
+      guard okay == .bool(true) else { throw WebsiteAccountError.stalePage }
+      for _ in 0..<200 {
+        try await Task.sleep(for: .milliseconds(50))
+        guard !closed else { throw WebsiteAccountError.denied }
+        if !webView.isLoading { return }
+      }
+      throw WebsiteAccountError.unavailable
+    }
   }
 #endif
+
+/// What a website account's private page last reported to the host renderer.
+public struct WebsiteAccountPageState: Sendable, Equatable {
+  public var url: String?
+  public var isLoading: Bool
+  public var failed: Bool
+
+  public init(url: String?, isLoading: Bool, failed: Bool) {
+    self.url = url
+    self.isLoading = isLoading
+    self.failed = failed
+  }
+}
+
+/// Renders website accounts' private pages for hosts without WebKit (Otto Desktop's engine).
+/// Each account is its own browser session, kept to its origin; scripts run in an isolated world.
+public protocol WebsiteAccountRenderer: Sendable {
+  func open(accountID: UUID, origin: String, fixtureOrigin: String) async throws
+  func load(accountID: UUID, url: String) async throws
+  /// The latest reported state, without waiting (the driver polls it like WKWebView properties).
+  func state(accountID: UUID) -> WebsiteAccountPageState?
+  /// Runs a function `body` with `arguments` as named parameters and returns its JSON result.
+  func evaluate(accountID: UUID, body: String, arguments: [String: OpaqueCodableValue]) async throws
+    -> OpaqueCodableValue
+  func hide(accountID: UUID) async
+  func close(accountID: UUID) async
+}
+
+public enum WebsiteAccountRendering {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var installed: (any WebsiteAccountRenderer)?
+
+  public static func install(_ renderer: any WebsiteAccountRenderer) {
+    lock.withLock { installed = renderer }
+  }
+
+  public static var renderer: (any WebsiteAccountRenderer)? { lock.withLock { installed } }
+}

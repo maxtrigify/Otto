@@ -132,6 +132,7 @@ enum OttoEngine {
           workspacePath: options.workspace.path)
         await voice.start()
         desktop.voice = voice
+        await DesktopWebsiteAccounts.start(services: services, host: desktopHost)
       }
       let api = desktop
       for await request in requests {

@@ -7,6 +7,7 @@ import OttoMemory
 import OttoModels
 import OttoRPCContracts
 import OttoRuntime
+import OttoSecurity
 import OttoServices
 import OttoTools
 import OttoVoice
@@ -353,6 +354,47 @@ struct DesktopAPI {
       try await services.appConnections.disconnect(accountID: try uuid(input.id))
       return try reply(googleStatus())
 
+    // ---- Website accounts ----------------------------------------------------------------
+    // Sites bots may use with the person's own sign-in (Mac: Website Accounts). Sign-in happens
+    // privately in Otto Desktop's sign-in window; passwords never pass through a chat.
+    case "accounts.list":
+      await services.websiteAccounts.refresh()
+      return try reply(websiteAccounts())
+    case "accounts.create":
+      let input = try params(AccountCreateInput.self)
+      let origin = try WebsiteAccountService.originForLogin(input.origin)
+      _ = try await services.websiteAccounts.create(origin: origin, bots: try input.scope())
+      return try reply(websiteAccounts())
+    case "accounts.grant":
+      let input = try params(AccountGrantInput.self)
+      try await services.websiteAccounts.setGrant(
+        accountID: try uuid(input.id), bots: try input.scope())
+      return try reply(websiteAccounts())
+    case "accounts.disconnect":
+      let input = try params(IDInput.self)
+      try await services.websiteAccounts.disconnect(accountID: try uuid(input.id))
+      return try reply(websiteAccounts())
+    case "accounts.login":
+      let input = try params(IDInput.self)
+      await services.websiteAccounts.showLogin(accountID: try uuid(input.id))
+      if !services.websiteAccounts.notice.isEmpty {
+        throw APIError.invalid(services.websiteAccounts.notice)
+      }
+      return try reply(websiteAccounts())
+    case "accounts.finish":
+      let input = try params(IDInput.self)
+      try await services.websiteAccounts.finishLogin(accountID: try uuid(input.id))
+      return try reply(websiteAccounts())
+    case "accounts.perform":
+      // What a bot's browser.account call does, for the desktop's own checks.
+      let input = try params(AccountPerformInput.self)
+      return try reply(
+        try await services.websiteAccounts.perform(
+          WebsiteAccountCommand(
+            action: input.action, accountID: try uuid(input.id), url: input.url,
+            revision: try input.revision.map(uuid), elementID: input.elementID, text: input.text),
+          botID: try uuid(input.botID), runID: UUID()))
+
     // ---- Activity ------------------------------------------------------------------------
     case "activity.snapshot":
       return try reply(
@@ -575,6 +617,10 @@ struct DesktopAPI {
       })
   }
 
+  private func websiteAccounts() -> [WebsiteAccountSummary] {
+    services.websiteAccounts.accounts.map(WebsiteAccountSummary.init)
+  }
+
   private func requireVoice() throws -> DesktopVoice {
     guard let voice else { throw APIError.invalid("Voice needs Otto Desktop") }
     return voice
@@ -656,6 +702,61 @@ struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
 struct NameInput: Decodable { var name: String }
+/// `allBots` grants every current and future bot; otherwise only `botIDs`.
+struct AccountCreateInput: Decodable {
+  var origin: String
+  var allBots: Bool?
+  var botIDs: [String]?
+
+  func scope() throws -> AccountAccessBroker.BotScope {
+    if allBots == true { return .allCurrentAndFuture }
+    return .selected(Set(try (botIDs ?? []).map { id in
+      guard let value = UUID(uuidString: id) else { throw DesktopAPI.APIError.invalid("Invalid bot") }
+      return value
+    }))
+  }
+}
+struct AccountGrantInput: Decodable {
+  var id: String
+  var allBots: Bool?
+  var botIDs: [String]?
+
+  func scope() throws -> AccountAccessBroker.BotScope {
+    try AccountCreateInput(origin: "", allBots: allBots, botIDs: botIDs).scope()
+  }
+}
+struct AccountPerformInput: Decodable {
+  var id: String
+  var botID: String
+  var action: String
+  var url: String?
+  var revision: String?
+  var elementID: String?
+  var text: String?
+}
+struct WebsiteAccountSummary: Encodable {
+  var id: UUID
+  var origin: String
+  var allBots: Bool
+  var botIDs: [UUID]
+  var signedIn: Bool
+  var savedLogin: Bool
+
+  init(_ account: AccountAccessBroker.Account) {
+    id = account.id
+    origin = account.origin
+    switch account.bots {
+    case .allCurrentAndFuture:
+      allBots = true
+      botIDs = []
+    case .selected(let ids):
+      allBots = false
+      botIDs = ids.sorted { $0.uuidString < $1.uuidString }
+    }
+    signedIn = account.browserSessionApproved == true
+    savedLogin = account.hasCredential
+  }
+}
 struct GoogleClientInput: Decodable {
   var clientID: String
   var clientSecret: String?

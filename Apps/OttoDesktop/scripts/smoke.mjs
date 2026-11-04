@@ -2,6 +2,7 @@
 // usage: OTTOD_PATH=... node scripts/smoke.mjs <workspace> <output-directory>
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -22,7 +23,8 @@ const linuxCI = process.platform === 'linux' && process.env.CI ? ['--no-sandbox'
 const fakeMedia = ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'];
 const app = spawn(electron, ['.', `--remote-debugging-port=${port}`, ...fakeMedia, ...linuxCI], {
   cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
-  env: { ...process.env, OTTO_DESKTOP_WORKSPACE: workspace },
+  // The website-accounts check signs in to a local HTTPS site with a test certificate.
+  env: { ...process.env, OTTO_DESKTOP_WORKSPACE: workspace, OTTO_DESKTOP_TEST_TLS: '1' },
   stdio: 'inherit',
 });
 
@@ -37,6 +39,43 @@ const server = http.createServer((_request, response) => {
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const pageURL = `http://127.0.0.1:${server.address().port}/`;
+
+// A site with a real sign-in for the website-accounts check (HTTPS, as accounts require).
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures');
+const site = https.createServer(
+  { key: fs.readFileSync(path.join(fixtures, 'localhost-test-key.pem')), cert: fs.readFileSync(path.join(fixtures, 'localhost-test-cert.pem')) },
+  (request, response) => {
+    const signedIn = /otto_session=ok/.test(request.headers.cookie ?? '');
+    const send = (body, headers = {}) => {
+      response.writeHead(headers.location ? 303 : 200, { 'content-type': 'text/html', ...headers });
+      response.end(body);
+    };
+    if (request.method === 'POST' && request.url === '/login') {
+      let body = '';
+      request.on('data', (chunk) => (body += chunk));
+      request.on('end', () => {
+        const form = new URLSearchParams(body);
+        if (form.get('username') === 'max' && form.get('password') === 'correct horse') {
+          send('', { location: '/home', 'set-cookie': 'otto_session=ok; Path=/; HttpOnly; Secure' });
+        } else {
+          send('<title>Sign in</title><p>Wrong password</p>');
+        }
+      });
+      return;
+    }
+    if (request.url === '/home' && signedIn) {
+      return send(`<title>Account home</title><h1 id="status">Welcome back, Max</h1>
+        <button onclick="document.getElementById('status').textContent = 'Done it'">Do thing</button>`);
+    }
+    if (request.url === '/home' || request.url === '/') return send('', { location: signedIn ? '/home' : '/login' });
+    send(`<title>Sign in</title><form method="post" action="/login">
+      <input type="text" name="username" autocomplete="username" aria-label="Username">
+      <input type="password" name="password" autocomplete="current-password" aria-label="Password">
+      <button type="submit">Sign in</button></form>`);
+  },
+);
+await new Promise((resolve) => site.listen(0, '127.0.0.1', resolve));
+const siteOrigin = `https://127.0.0.1:${site.address().port}`;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let socket;
@@ -92,6 +131,20 @@ const type = async (text) => {
   await call('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, text: '\r', unmodifiedText: '\r' });
   await call('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
 };
+
+/** Evaluates `expression` in the first DevTools target whose URL starts with `prefix`. */
+async function evaluateIn(prefix, expression) {
+  const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+  const target = targets.find((candidate) => candidate.url.startsWith(prefix));
+  if (!target) return undefined;
+  const tab = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve) => tab.addEventListener('open', resolve));
+  const reply = new Promise((resolve) => tab.addEventListener('message', ({ data }) => resolve(JSON.parse(data))));
+  tab.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true, awaitPromise: true } }));
+  const value = (await reply).result?.result?.value;
+  tab.close();
+  return value;
+}
 
 /** Reads the browser tab directly through its own DevTools target (for diagnosing failures). */
 async function pageProbe(url) {
@@ -354,6 +407,67 @@ try {
     }
     await evaluate(`document.getElementById('toast').hidden = true`);
 
+    // Website accounts (Windows/Linux; on the Mac the engine drives WebKit): add a site, sign in
+    // privately in the sign-in window, then a bot reads and acts in that signed-in session.
+    if (process.platform !== 'darwin') {
+      await evaluate(`document.getElementById('nav-settings').click()`);
+      let form = false;
+      for (let attempt = 0; attempt < 60 && !form; attempt += 1) {
+        await sleep(250);
+        form = await evaluate(`Boolean(document.getElementById('website-account-origin'))`);
+      }
+      if (!form) throw new Error('Settings has no Website accounts section');
+      await evaluate(`(() => {
+        document.getElementById('website-account-origin').value = ${JSON.stringify(siteOrigin)};
+        document.querySelector('.website-account-add').requestSubmit();
+      })()`);
+      let row = false;
+      for (let attempt = 0; attempt < 60 && !row; attempt += 1) {
+        await sleep(250);
+        row = await evaluate(`Boolean(document.querySelector('.website-account[data-origin="${siteOrigin}"] .account-sign-in'))`);
+      }
+      if (!row) throw new Error('adding a website account did not show it');
+      await evaluate(`document.querySelector('.website-account[data-origin="${siteOrigin}"] .account-sign-in').click()`);
+      // The person signs in inside the private window.
+      let filled = null;
+      for (let attempt = 0; attempt < 80 && filled !== 'submitted'; attempt += 1) {
+        await sleep(250);
+        filled = await evaluateIn(`${siteOrigin}/login`, `(() => {
+          const user = document.querySelector('input[name=username]');
+          if (!user) return 'waiting';
+          user.value = 'max';
+          document.querySelector('input[name=password]').value = 'correct horse';
+          document.querySelector('form').submit();
+          return 'submitted';
+        })()`);
+      }
+      if (filled !== 'submitted') throw new Error(`the sign-in window did not show the site (${filled})`);
+      let home = null;
+      for (let attempt = 0; attempt < 80 && !home; attempt += 1) {
+        await sleep(250);
+        home = await evaluateIn(`${siteOrigin}/home`, `document.title`);
+      }
+      if (home !== 'Account home') throw new Error('signing in on the site did not reach its home page');
+      await evaluateIn('file:', `document.getElementById('done')?.click() ?? 'no bar'`);
+      let signedIn = false;
+      for (let attempt = 0; attempt < 80 && !signedIn; attempt += 1) {
+        await sleep(250);
+        signedIn = await evaluate(`window.otto.desktop('accounts.list').then((list) => list.some((item) => item.origin === ${JSON.stringify(siteOrigin)} && item.signedIn))`);
+      }
+      console.log(`website account signed in: ${signedIn}`);
+      if (!signedIn) throw new Error('finishing the private sign-in did not stick');
+      await shot('settings-website-accounts.png');
+      const botID = await evaluate(`bots.find((bot) => bot.name === 'Scout')?.id`);
+      const accountID = await evaluate(`window.otto.desktop('accounts.list').then((list) => list.find((item) => item.origin === ${JSON.stringify(siteOrigin)}).id)`);
+      const read = await evaluate(`window.otto.desktop('accounts.perform', { id: ${JSON.stringify(accountID)}, botID: ${JSON.stringify(botID)}, action: 'inspect' }).catch((error) => ({ error: error.message }))`);
+      console.log(`bot reads account page: ${read?.error ?? read?.pageText?.slice(0, 60)}`);
+      if (!read?.pageText?.includes('Welcome back')) throw new Error(`the bot could not read the signed-in page (${read?.error})`);
+      const button = read.elements.find((element) => element.label === 'Do thing');
+      const acted = await evaluate(`window.otto.desktop('accounts.perform', { id: ${JSON.stringify(accountID)}, botID: ${JSON.stringify(botID)}, action: 'click', revision: ${JSON.stringify(read.revision)}, elementID: ${JSON.stringify(button?.id)} }).catch((error) => ({ error: error.message }))`);
+      console.log(`bot acts on account page: ${acted?.error ?? acted?.pageText?.slice(0, 60)}`);
+      if (!acted?.pageText?.includes('Done it')) throw new Error(`the bot's click did not land (${acted?.error})`);
+    }
+
     await visit('Automations', 'automations', `document.querySelector('#automations-body .overline')`);
     await evaluate(`(() => {
       document.getElementById('new-automation').click();
@@ -426,6 +540,7 @@ try {
 } finally {
   socket.close();
   server.close();
+  site.close();
   // Wait for the app to exit, so a following run can take the debugging port.
   const exited = new Promise((resolve) => app.once('exit', resolve));
   app.kill();

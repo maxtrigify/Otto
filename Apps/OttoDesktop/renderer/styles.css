@@ -782,3 +782,6 @@ body.light .voice-panel .primary { color: #1d1716; }
 .connection-option { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 12.5px; color: var(--text-soft); }
 .google-setup { display: flex; gap: 8px; padding: 8px 0; }
 .google-setup input { flex: 1; color: var(--paper); background: var(--card-inner); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; }
+.website-account-add { display: flex; gap: 8px; padding: 10px 0; }
+.website-account-add input, .website-account-add select { color: var(--paper); background: var(--card-inner); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; }
+.website-account-add input { flex: 1; }

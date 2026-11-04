@@ -651,6 +651,14 @@ function renderSettings() {
   body.append(connectionsSlot);
   Connections.section().then((section) => connectionsSlot.replaceChildren(section));
 
+  // On a Mac the engine's website accounts would share the Otto Mac app's stores; the Mac app
+  // has its own Website Accounts, so the section is for Windows and Linux.
+  if (appState.platform !== 'darwin') {
+    const accountsSlot = el('div');
+    body.append(accountsSlot);
+    WebsiteAccounts.section().then((section) => accountsSlot.replaceChildren(section));
+  }
+
   const voiceSlot = el('div');
   body.append(voiceSlot);
   Voice.settingsSection().then((section) => voiceSlot.replaceChildren(section));
@@ -915,6 +923,7 @@ Voice.configure({
 });
 Voice.wire();
 Connections.configure({ onError: (error) => toast(cleanError(error)) });
+WebsiteAccounts.configure({ onError: (error) => toast(cleanError(error)), bots: () => bots });
 $('welcome-mic').append(Icons.icon('mic', 15));
 $('composer-mic').append(Icons.icon('mic', 15));
 $('welcome-mic').addEventListener('click', () => Voice.dictate($('welcome-input'), $('welcome-mic')));

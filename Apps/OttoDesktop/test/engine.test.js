@@ -455,3 +455,89 @@ test('Connect apps: service secrets go to the desktop keychain and Google sign-i
   assert.equal(attempt.connecting, false);
   assert.ok(attempt.error && !/not supported|unsupported/i.test(attempt.error), attempt.error);
 });
+
+// Not on the Mac: there the engine's website accounts use WebKit and the Mac app's shared stores.
+test('Website accounts: private sign-in in the desktop, then bots act only on the signed-in origin', { skip: !binary || process.platform === 'darwin', timeout: 60_000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-engine-accounts-'));
+  const workspace = path.join(root, 'Workspace');
+  fs.mkdirSync(workspace);
+  const client = new EngineClient({ binary, stateDirectory: path.join(root, 'state'), workspace, desktopSecrets: true });
+  t.after(async () => {
+    await client.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const keychain = new Map();
+  const events = [];
+  const scripts = [];
+  let passwordShowing = false;
+  const page = { url: null };
+  const push = (accountID, url, failed = false) => client.event('account.state', { accountID, url, isLoading: false, failed });
+  client.on('host', ({ id, method, params }) => {
+    if (method === 'secrets.get') return client.reply(id, keychain.get(params.key) ?? null);
+    if (method === 'secrets.set') return client.reply(id, keychain.set(params.key, params.value) && true);
+    if (method === 'secrets.delete') return client.reply(id, keychain.delete(params.key) || true);
+    if (method === 'account.open') return client.reply(id, true);
+    if (method === 'account.load') {
+      client.reply(id, true);
+      // A site that redirects somewhere else ends up off the account's origin.
+      page.url = params.url.endsWith('/leave') ? 'https://evil.example/' : params.url;
+      return push(params.accountID, page.url);
+    }
+    if (method === 'account.eval') {
+      scripts.push(params.body);
+      if (params.body.includes(".some(e => (e.type === 'password'")) return client.reply(id, passwordShowing);
+      if (params.body.includes('globalThis.__ottoPrivate = { revision')) {
+        return client.reply(id, { elements: [{ id: '0', label: 'Do thing', kind: 'button', purpose: null }], text: 'Welcome back' });
+      }
+      if (params.body.includes("if(kind==='click')")) return client.reply(id, true);
+      return client.reply(id, null);
+    }
+    client.reply(id, true);
+  });
+  client.on('event', ({ kind, payload }) => {
+    events.push(kind);
+    // The person signs in privately in the window, then presses Done.
+    if (kind === 'account.show') client.event('account.done', { accountID: payload.accountID });
+  });
+  const until = async (check, what) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (check()) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.fail(`timed out waiting for ${what}: ${events.join(', ')}`);
+  };
+  await client.start();
+  const bot = await client.call('bot.create', { name: 'Clerk', responsibility: 'Admin', provider: 'Claude Code' });
+
+  await assert.rejects(client.desktop('accounts.create', { origin: 'http://insecure.example', allBots: true }));
+  const [account] = await client.desktop('accounts.create', { origin: 'https://example.com', allBots: true });
+  assert.equal(account.origin, 'https://example.com');
+  assert.equal(account.signedIn, false);
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'inspect' }), /Sign in/);
+
+  await client.desktop('accounts.login', { id: account.id });
+  await until(() => events.includes('account.finished'), 'the private sign-in to finish');
+  const [signedIn] = await client.desktop('accounts.list');
+  assert.equal(signedIn.signedIn, true);
+
+  // The bot reads and acts through the shared Mac scripts, in the signed-in session.
+  const inspected = await client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'inspect' });
+  assert.equal(inspected.pageText, 'Welcome back');
+  assert.equal(inspected.elements[0].label, 'Do thing');
+  const clicked = await client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'click', revision: inspected.revision, elementID: '0' });
+  assert.ok(clicked.revision && clicked.revision !== inspected.revision, 'every action needs a fresh look');
+  assert.ok(scripts.some((body) => body.includes("if(kind==='click')")));
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'click', revision: inspected.revision, elementID: '0' }), 'an old revision is single-use');
+
+  // Off-origin pages and password prompts stop the bot.
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'open', url: 'https://other.example/' }));
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'open', url: 'https://example.com/leave' }));
+  // Stranded off the origin, the page refuses every script until it is back home.
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'inspect' }), /not authorised/);
+  await client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'open', url: 'https://example.com/' });
+  passwordShowing = true;
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'inspect' }), /Sign in/);
+
+  await client.desktop('accounts.disconnect', { id: account.id });
+  await assert.rejects(client.desktop('accounts.perform', { id: account.id, botID: bot.id, action: 'inspect' }));
+});
