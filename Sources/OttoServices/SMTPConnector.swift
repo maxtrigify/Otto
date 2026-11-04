@@ -158,10 +158,10 @@ public actor SMTPConnector {
       subject.allSatisfy(\.isASCII)
       ? subject
       : "=?UTF-8?B?\(Data(subject.utf8).base64EncodedString())?="
-    let normalizedBody =
+    let normalizedBody = Self.dotStuff(
       body
-      .replacingOccurrences(of: "\r\n", with: "\n")
-      .replacingOccurrences(of: "\n", with: "\r\n")
+        .replacingOccurrences(of: "\r\n", with: "\n")
+        .replacingOccurrences(of: "\n", with: "\r\n"))
     var headers = [
       "From: \(from)",
       "To: \(to)",
@@ -184,6 +184,17 @@ public actor SMTPConnector {
       "Content-Transfer-Encoding: 8bit",
     ]
     return headers.joined(separator: "\r\n") + "\r\n\r\n" + normalizedBody + "\r\n"
+  }
+
+  /// RFC 5321 §4.5.2 transparency: in the DATA phase a line of exactly "." ends the message and
+  /// any other line starting with "." has its first dot removed by the server. Every body line
+  /// that begins with a dot is therefore doubled. Without it, an agent's reply containing a
+  /// lone "." line — an empty bullet, a table cell, a diff context line — arrived cut short
+  /// while curl still reported success.
+  static func dotStuff(_ crlfBody: String) -> String {
+    crlfBody.split(separator: "\r\n", omittingEmptySubsequences: false).map { line in
+      line.hasPrefix(".") ? "." + line : Substring(line)
+    }.joined(separator: "\r\n")
   }
 
   static func validate(_ configuration: SMTPConfiguration) throws {

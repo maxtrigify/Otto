@@ -25,6 +25,21 @@ struct SMTPConnectorTests {
     #expect(text.hasSuffix("\r\n\r\nHi\r\nthere\r\n"))
   }
 
+  @Test("Body lines are dot-stuffed for the SMTP DATA phase")
+  func dotStuffing() throws {
+    // RFC 5321 §4.5.2: in DATA a line of exactly "." ends the message, and a line starting with
+    // "." has its first dot removed by the server. Both need doubling — an empty bullet, a
+    // table cell, a ".git" path line or a diff context line would otherwise be misdelivered,
+    // with curl still exiting 0.
+    let text = try SMTPConnector.message(
+      from: "bot@example.com", to: "amy@example.com", subject: "Diff",
+      body: "Here is the summary.\n.\nThe end.\n..context\n.minor\n",
+      date: Date(timeIntervalSince1970: 0), messageID: "<id@example.com>")
+    #expect(
+      text.hasSuffix(
+        "\r\n\r\nHere is the summary.\r\n..\r\nThe end.\r\n...context\r\n..minor\r\n\r\n"))
+  }
+
   @Test("Line breaks in headers are rejected so callers cannot inject headers")
   func headerInjectionRejected() {
     #expect(throws: SMTPError.invalidField("To")) {
