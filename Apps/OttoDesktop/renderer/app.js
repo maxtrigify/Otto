@@ -647,6 +647,10 @@ function renderSettings() {
   }
   body.append(el('p', 'muted small', 'Sign-in runs in the agent itself, so your keys and passwords never pass through Otto. Restart Otto after installing an agent.'));
 
+  const connectionsSlot = el('div');
+  body.append(connectionsSlot);
+  Connections.section().then((section) => connectionsSlot.replaceChildren(section));
+
   const voiceSlot = el('div');
   body.append(voiceSlot);
   Voice.settingsSection().then((section) => voiceSlot.replaceChildren(section));
@@ -910,6 +914,7 @@ Voice.configure({
   openSettings: () => go('settings'),
 });
 Voice.wire();
+Connections.configure({ onError: (error) => toast(cleanError(error)) });
 $('welcome-mic').append(Icons.icon('mic', 15));
 $('composer-mic').append(Icons.icon('mic', 15));
 $('welcome-mic').addEventListener('click', () => Voice.dictate($('welcome-input'), $('welcome-mic')));

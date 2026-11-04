@@ -405,3 +405,53 @@ test('Voice: keys live in the desktop keychain and Talk runs the Mac voice sessi
   const asleep = await client.desktop('voice.sleep');
   assert.notEqual(asleep.state, 'listening');
 });
+
+test('Connect apps: service secrets go to the desktop keychain and Google sign-in runs through the desktop', { skip: !binary, timeout: 60_000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'otto-engine-google-'));
+  const workspace = path.join(root, 'Workspace');
+  fs.mkdirSync(workspace);
+  const client = new EngineClient({ binary, stateDirectory: path.join(root, 'state'), workspace, desktopSecrets: true, env: { ...process.env, OTTO_GOOGLE_CLIENT_ID: '' } });
+  t.after(async () => {
+    await client.stop();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const keychain = new Map();
+  const oauth = [];
+  client.on('host', ({ id, method, params }) => {
+    if (method === 'secrets.get') return client.reply(id, keychain.get(params.key) ?? null);
+    if (method === 'secrets.set') return client.reply(id, keychain.set(params.key, params.value) && true);
+    if (method === 'secrets.delete') return client.reply(id, keychain.delete(params.key) || true);
+    if (method === 'oauth.listen') return client.reply(id, { port: 54321 });
+    if (method === 'oauth.callback') {
+      oauth.push(params);
+      const state = new URL(params.url).searchParams.get('state');
+      return client.reply(id, { request: `/oauth2callback?state=${encodeURIComponent(state)}&code=fake-code` });
+    }
+    client.reply(id, true);
+  });
+  await client.start();
+
+  const blank = await client.desktop('connections.google');
+  assert.equal(blank.configured, false);
+  assert.deepEqual(blank.accounts, []);
+  await assert.rejects(client.desktop('connections.google.configure', { clientID: 'not-a-google-client' }));
+  const clientID = '1234-test.apps.googleusercontent.com';
+  const configured = await client.desktop('connections.google.configure', { clientID, clientSecret: 'shh' });
+  assert.equal(configured.configured, true);
+  // The Gmail service's own secret lands in the OS keychain, in its own namespace.
+  assert.equal(keychain.get(`io.openotto.app-connections/google-client-${clientID}`), 'shh');
+  assert.ok(fs.existsSync(path.join(root, 'state', 'google-app-client.json')), 'the client setup lives with this engine');
+
+  if (process.platform === 'darwin') return; // the Mac engine signs in with Network.framework
+  const attempt = await client.desktop('connections.google.connect', { allowCalendar: true });
+  assert.equal(oauth.length, 1, 'the desktop opened Google sign-in');
+  const url = new URL(oauth[0].url);
+  assert.equal(url.origin + url.pathname, 'https://accounts.google.com/o/oauth2/v2/auth');
+  assert.equal(url.searchParams.get('redirect_uri'), 'http://127.0.0.1:54321/oauth2callback');
+  assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
+  assert.match(url.searchParams.get('scope'), /gmail\.readonly/);
+  assert.match(url.searchParams.get('scope'), /calendar/);
+  // The fake code cannot be exchanged, so Google refuses it: proof the callback was accepted.
+  assert.equal(attempt.connecting, false);
+  assert.ok(attempt.error && !/not supported|unsupported/i.test(attempt.error), attempt.error);
+});

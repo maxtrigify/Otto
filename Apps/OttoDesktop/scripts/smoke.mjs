@@ -289,6 +289,9 @@ try {
       voiceSettings = await evaluate(`document.querySelector('.settings-voice')?.innerText ?? null`);
     }
     console.log(`voice settings: ${voiceSettings?.replace(/\s+/g, ' ').slice(0, 160)}`);
+    const connections = await evaluate(`document.querySelector('.settings-connections')?.innerText ?? null`);
+    console.log(`connect apps: ${connections?.replace(/\s+/g, ' ').slice(0, 120)}`);
+    if (!connections?.includes('Gmail')) throw new Error('Settings has no Connect apps section');
     if (!voiceSettings?.includes('Provider')) throw new Error('Settings has no Voice section');
     if (process.env.CI) {
       // On CI only: saving writes to the real OS keychain.

@@ -70,6 +70,9 @@ enum OttoEngine {
         let keychain = DesktopSecretStore(host: desktopHost)
         await keychain.adopt(legacyFile: legacySecrets)
         secrets = keychain
+        // Every service's own secrets (Gmail, Telegram, website passwords…) use it too.
+        PlatformKeyring.install(keychain)
+        LoopbackSignIn.install(DesktopLoopbackBroker(host: desktopHost))
       } else {
         secrets = EngineSecretStore(fileURL: legacySecrets)
       }
@@ -82,6 +85,9 @@ enum OttoEngine {
           rootDirectory: options.stateDirectory.appending(
             path: "accounts", directoryHint: .isDirectory),
           secrets: secrets),
+        // Gmail's client setup lives with this engine, never beside the Mac app's.
+        appConnections: AppConnectionsStore(
+          workspacePath: options.workspace.path, configurationDirectory: options.stateDirectory),
         workspacePath: options.workspace.path,
         personalMemoryPath: options.stateDirectory.appending(path: "user-context.md").path
       )

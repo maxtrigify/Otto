@@ -154,12 +154,21 @@ public final class AppConnectionsStore: ObservableObject {
       secrets: makeKeychainSecretStore(service: OttoSecretService.appConnections),
       http: GoogleHTTP())
   }
+  /// For hosts with their own state folder (otto-engine): the Google client setup lives there
+  /// instead of beside the Mac app's, and secrets go to the host's keyring.
+  public convenience init(workspacePath: String, configurationDirectory: URL) {
+    self.init(
+      workspacePath: workspacePath,
+      secrets: makeKeychainSecretStore(service: OttoSecretService.appConnections),
+      http: GoogleHTTP(), configurationDirectory: configurationDirectory)
+  }
+
   init(
     workspacePath: String, secrets: any SecretStore, http: GoogleHTTP,
-    clientID: String? = nil
+    clientID: String? = nil, configurationDirectory: URL? = nil
   ) {
     fileURL = URL(fileURLWithPath: workspacePath).appending(path: ".otto/app-connections.json")
-    let root = ProviderAccountStore.defaultRootDirectory
+    let root = configurationDirectory ?? ProviderAccountStore.defaultRootDirectory
     configurationURL = root.appending(path: "google-app-client.json")
     namespace = SHA256.hash(
       data: Data(URL(fileURLWithPath: workspacePath).standardizedFileURL.path.utf8)

@@ -51,7 +51,48 @@ public func makeDefaultSecretStore(service: String = OttoSecretService.credentia
 }
 
 /// A keychain store for `service` that lazily migrates items from its pre-rename service.
+/// A keyring the host process supplies in place of the platform Keychain. Otto Desktop's engine
+/// sets it to the operating system keychain it reaches through Electron safeStorage; the Mac app
+/// never sets it. Each service gets its own key namespace (`<service>/<key>`).
+public enum PlatformKeyring {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var installed: (any SecretStore)?
+
+  /// Call once at startup, before any service creates a secret store.
+  public static func install(_ store: any SecretStore) {
+    lock.withLock { installed = store }
+  }
+
+  public static var store: (any SecretStore)? { lock.withLock { installed } }
+}
+
+/// One service's view of the host keyring.
+public struct NamespacedSecretStore: SecretStore {
+  let base: any SecretStore
+  let service: String
+
+  public init(base: any SecretStore, service: String) {
+    self.base = base
+    self.service = service
+  }
+
+  public func set(_ value: String, for key: String) async throws {
+    try await base.set(value, for: "\(service)/\(key)")
+  }
+
+  public func value(for key: String) async throws -> String? {
+    try await base.value(for: "\(service)/\(key)")
+  }
+
+  public func delete(_ key: String) async throws {
+    try await base.delete("\(service)/\(key)")
+  }
+}
+
 public func makeKeychainSecretStore(service: String) -> any SecretStore {
+  if let keyring = PlatformKeyring.store {
+    return NamespacedSecretStore(base: keyring, service: service)
+  }
   let primary = KeychainSecretStore(service: service)
   guard let legacy = OttoSecretService.legacyService(for: service) else { return primary }
   return LegacyFallbackSecretStore(primary: primary, legacy: KeychainSecretStore(service: legacy))
@@ -173,8 +214,8 @@ public actor KeychainSecretStore: SecretStore {
   }
 }
 #else
-  /// Linux and Windows have no Keychain yet. Until the platform keyring (libsecret, Windows
-  /// Credential Manager) is wired up, reads find nothing and writes fail loudly.
+  /// Linux and Windows have no Keychain. Secrets go to the host's keyring (Otto Desktop: the
+  /// OS keychain through Electron safeStorage); without one, reads find nothing and writes fail.
   public actor KeychainSecretStore: SecretStore {
     private let service: String
 
@@ -182,13 +223,24 @@ public actor KeychainSecretStore: SecretStore {
       self.service = service
     }
 
-    public func set(_ value: String, for key: String) async throws {
-      throw SecretStoreError.storageUnavailable("no system keyring on this platform yet")
+    private var keyring: (any SecretStore)? {
+      PlatformKeyring.store.map { NamespacedSecretStore(base: $0, service: service) }
     }
 
-    public func value(for key: String) async throws -> String? { nil }
+    public func set(_ value: String, for key: String) async throws {
+      guard let keyring else {
+        throw SecretStoreError.storageUnavailable("no system keyring on this platform")
+      }
+      try await keyring.set(value, for: key)
+    }
 
-    public func delete(_ key: String) async throws {}
+    public func value(for key: String) async throws -> String? {
+      try await keyring?.value(for: key)
+    }
+
+    public func delete(_ key: String) async throws {
+      try await keyring?.delete(key)
+    }
   }
 #endif
 

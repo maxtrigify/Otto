@@ -184,16 +184,62 @@ final class GoogleLoopbackSignIn {
   }
 }
 #else
-  /// Google sign-in listens on a loopback port with Network.framework; other platforms need a
-  /// portable listener before Gmail and Calendar can connect there.
+  /// Linux and Windows: the host's LoopbackSignInBroker listens on 127.0.0.1 and opens the
+  /// browser (Otto Desktop does both in its main process). The PKCE pair, state and callback
+  /// checks are the same as the Mac's.
   @MainActor
   final class GoogleLoopbackSignIn {
-    func authorize(clientID _: String, scopes _: Set<String>) async throws -> Authorization {
-      throw AppConnectionError.unsupportedPlatform
+    private var task: Task<String, Error>?
+
+    func authorize(clientID: String, scopes: Set<String>) async throws -> Authorization {
+      guard let broker = LoopbackSignIn.broker else { throw AppConnectionError.unsupportedPlatform }
+      let state = try Self.random()
+      let verifier = try Self.random()
+      let port = try await broker.listen()
+      let redirectURI = "http://127.0.0.1:\(port)/oauth2callback"
+      let url = Self.authorizationURL(
+        clientID: clientID, redirectURI: redirectURI, scopes: scopes, state: state,
+        challenge: Self.challenge(verifier))
+      let task = Task {
+        try await broker.callback(opening: url, state: state, port: port, timeout: .seconds(180))
+      }
+      self.task = task
+      let request = try await withTaskCancellationHandler {
+        try await task.value
+      } onCancel: {
+        task.cancel()
+      }
+      guard let components = URLComponents(string: "http://127.0.0.1:\(port)\(request)") else {
+        throw AppConnectionError.invalidCallback
+      }
+      let code = try Self.validateCallback(components, expectedState: state)
+      return Authorization(code: code, verifier: verifier, redirectURI: redirectURI)
     }
-    func cancel() {}
+
+    func cancel() { task?.cancel() }
   }
 #endif
+
+/// Catches the OAuth redirect for hosts without Network.framework (otto-engine under Otto Desktop).
+public protocol LoopbackSignInBroker: Sendable {
+  /// Starts listening on 127.0.0.1 and returns the port.
+  func listen() async throws -> Int
+  /// Opens `url` in the person's browser and returns the path and query of the callback that
+  /// carries `state`. Other requests are answered as unverified and ignored.
+  func callback(opening url: URL, state: String, port: Int, timeout: Duration) async throws
+    -> String
+}
+
+public enum LoopbackSignIn {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var installed: (any LoopbackSignInBroker)?
+
+  public static func install(_ broker: any LoopbackSignInBroker) {
+    lock.withLock { installed = broker }
+  }
+
+  public static var broker: (any LoopbackSignInBroker)? { lock.withLock { installed } }
+}
 
 /// PKCE and callback validation are platform-neutral.
 extension GoogleLoopbackSignIn {

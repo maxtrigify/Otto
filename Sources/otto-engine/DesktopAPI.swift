@@ -327,6 +327,32 @@ struct DesktopAPI {
       await voice.interrupt()
       return try reply(voice.status())
 
+    // ---- Connections: Gmail and Calendar --------------------------------------------------
+    case "connections.google":
+      return try reply(googleStatus())
+    case "connections.google.configure":
+      let input = try params(GoogleClientInput.self)
+      try await services.appConnections.configureGoogle(
+        clientID: input.clientID, clientSecret: input.clientSecret)
+      return try reply(googleStatus())
+    case "connections.google.connect":
+      let input = try params(GoogleConnectInput.self)
+      await services.appConnections.connect(
+        allowSending: input.allowSending ?? false, allowCalendar: input.allowCalendar ?? false,
+        reconnecting: try input.reconnect.map(uuid))
+      return try reply(googleStatus())
+    case "connections.google.cancel":
+      services.appConnections.cancelConnect()
+      return try reply(googleStatus())
+    case "connections.google.share":
+      let input = try params(GoogleShareInput.self)
+      try services.appConnections.setShared(input.shared, accountID: try uuid(input.id))
+      return try reply(googleStatus())
+    case "connections.google.disconnect":
+      let input = try params(IDInput.self)
+      try await services.appConnections.disconnect(accountID: try uuid(input.id))
+      return try reply(googleStatus())
+
     // ---- Activity ------------------------------------------------------------------------
     case "activity.snapshot":
       return try reply(
@@ -537,6 +563,18 @@ struct DesktopAPI {
     store.dispatch(.setBrowserSession(id: nodeID, session: session), targetCanvasID: canvasID)
   }
 
+  private func googleStatus() -> GoogleStatus {
+    let store = services.appConnections
+    return GoogleStatus(
+      configured: store.isConfigured, connecting: store.isConnecting, error: store.error,
+      accounts: store.accounts.map {
+        GoogleAccount(
+          id: $0.id, email: $0.email, needsReconnect: $0.needsReconnect, shared: $0.shared,
+          canSend: $0.scopes.contains(AppConnectionsStore.sendScope),
+          canReadCalendar: $0.scopes.contains { $0.contains("calendar") })
+      })
+  }
+
   private func requireVoice() throws -> DesktopVoice {
     guard let voice else { throw APIError.invalid("Voice needs Otto Desktop") }
     return voice
@@ -618,6 +656,33 @@ struct TitleInput: Decodable { var title: String }
 struct TextInput: Decodable { var text: String }
 struct ThemeInput: Decodable { var themeID: String }
 struct NameInput: Decodable { var name: String }
+struct GoogleClientInput: Decodable {
+  var clientID: String
+  var clientSecret: String?
+}
+struct GoogleConnectInput: Decodable {
+  var allowSending: Bool?
+  var allowCalendar: Bool?
+  var reconnect: String?
+}
+struct GoogleShareInput: Decodable {
+  var id: String
+  var shared: Bool
+}
+struct GoogleAccount: Encodable {
+  var id: UUID
+  var email: String
+  var needsReconnect: Bool
+  var shared: Bool
+  var canSend: Bool
+  var canReadCalendar: Bool
+}
+struct GoogleStatus: Encodable {
+  var configured: Bool
+  var connecting: Bool
+  var error: String?
+  var accounts: [GoogleAccount]
+}
 struct VoiceConfigureInput: Decodable {
   var provider: String
   var voice: String?

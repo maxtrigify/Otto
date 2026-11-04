@@ -11,6 +11,18 @@ const { BrowserHost } = require('./browser');
 const { VoiceHost } = require('./voice');
 const { SecretVault } = require('./secrets');
 const { Updater } = require('./updater');
+const { LoopbackSignIn } = require('./oauth');
+
+/** Google sign-in's one-shot loopback listener (see oauth.js). */
+const loopback = new LoopbackSignIn();
+/** The Google OAuth client ID baked in at build time (public app identity, not a secret). */
+const builtInGoogleClientID = (() => {
+  try {
+    return require('../package.json').ottoGoogleClientID || '';
+  } catch {
+    return '';
+  }
+})();
 const { loginEnvironment, discoverAgents } = require('./agents');
 
 const isWindows = process.platform === 'win32';
@@ -90,6 +102,12 @@ const DESKTOP_METHODS = new Set([
   'teams.create',
   'teams.update',
   'teams.delete',
+  'connections.google',
+  'connections.google.configure',
+  'connections.google.connect',
+  'connections.google.cancel',
+  'connections.google.share',
+  'connections.google.disconnect',
   'voice.status',
   'voice.configure',
   'voice.setKey',
@@ -183,13 +201,16 @@ async function startEngine() {
     binary: ottoEngine,
     stateDirectory: path.join(app.getPath('userData'), 'engines', key),
     workspace: settings.workspace,
-    env,
+    // The engine reads the built-in Google client ID the way the Mac reads Info.plist.
+    env: builtInGoogleClientID && !env.OTTO_GOOGLE_CLIENT_ID ? { ...env, OTTO_GOOGLE_CLIENT_ID: builtInGoogleClientID } : env,
     desktopSecrets: true,
   });
   next.on('log', (text) => console.error('[otto-engine]', text.trim()));
   // The engine asks the desktop to render its browsers and act on their pages.
   next.on('host', async ({ id, method, params }) => {
     try {
+      if (method === 'oauth.listen') return next.reply(id, await loopback.listen());
+      if (method === 'oauth.callback') return next.reply(id, await loopback.callback(params));
       if (voiceHost?.handles(method)) {
         next.reply(id, await voiceHost.handle(method, params));
         return;
@@ -398,6 +419,7 @@ app.whenReady().then(() => {
   createWindow();
 });
 
+app.on('will-quit', () => loopback.dispose());
 app.on('window-all-closed', () => {
   terminals?.dispose();
   engine?.dispose();

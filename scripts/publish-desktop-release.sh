@@ -8,6 +8,8 @@
 #   4. pushes the update feed (latest.yml, latest-linux.yml, manifest.json) to its Pages site.
 #
 # usage: scripts/publish-desktop-release.sh <version> <ci-run-id>
+#        OTTO_DRY_RUN=<folder> scripts/publish-desktop-release.sh …  prepares and checks everything,
+#        writes the unsigned manifest and feed files to <folder>, and signs, uploads and pushes nothing.
 #   The run must be a green Desktop workflow run whose packages carry <version>
 #   (Apps/OttoDesktop/package.json "version").
 set -euo pipefail
@@ -65,6 +67,12 @@ for (const feed of ['win/latest.yml', 'linux/latest-linux.yml']) {
   fs.writeFileSync(file, text);
 }
 EOF
+if [[ -n ${OTTO_DRY_RUN:-} ]]; then
+  mkdir -p "$OTTO_DRY_RUN"
+  cp "$work/manifest.json" "$work/win/latest.yml" "$work/linux/latest-linux.yml" "$OTTO_DRY_RUN/"
+  echo "Dry run: wrote the manifest and feed files to $OTTO_DRY_RUN; nothing was signed or published."
+  exit 0
+fi
 signing_key=$(security find-generic-password -s otto-release-signing -w 2>/dev/null \
   || security find-generic-password -s muse-release-signing -w)
 release_bin=$("$root/scripts/otto-swift" build -c release --product otto-release --show-bin-path \

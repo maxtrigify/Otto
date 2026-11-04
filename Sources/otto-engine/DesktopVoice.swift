@@ -337,3 +337,35 @@ final class DesktopVoice {
     }
   }
 }
+
+// MARK: - Google sign-in, through the desktop
+
+/// Google sign-in for Gmail and Calendar: Otto Desktop listens on 127.0.0.1 and opens the
+/// person's browser; the engine keeps the PKCE secret and checks the callback (as on the Mac).
+struct DesktopLoopbackBroker: LoopbackSignInBroker {
+  private struct Port: Codable, Sendable { var port: Int }
+  private struct CallbackParams: Encodable, Sendable {
+    var url: String
+    var state: String
+    var port: Int
+    var timeoutSeconds: Int
+  }
+  private struct Callback: Decodable { var request: String }
+
+  let host: DesktopHost
+
+  func listen() async throws -> Int {
+    try await host.call("oauth.listen", [String: String](), as: Port.self).port
+  }
+
+  func callback(opening url: URL, state: String, port: Int, timeout: Duration) async throws
+    -> String
+  {
+    let seconds = Int(timeout.components.seconds)
+    return try await host.call(
+      "oauth.callback",
+      CallbackParams(url: url.absoluteString, state: state, port: port, timeoutSeconds: seconds),
+      as: Callback.self, timeout: timeout + .seconds(10)
+    ).request
+  }
+}
