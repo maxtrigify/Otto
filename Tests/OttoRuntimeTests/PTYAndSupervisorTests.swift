@@ -284,6 +284,42 @@ struct AgentSupervisorTests {
     try await supervisor.stop(agentID: id)
   }
 
+  @Test("A provider auth failure at its idle prompt fails the run and clears attention")
+  func providerAuthFailureFailsRunAndClearsAttention() async throws {
+    // Issue #54: Claude Code's OAuth session expires and the CLI prints its failure line while
+    // staying at its idle prompt. The prose must read as a failed run that needs re-authentication
+    // — not as a question waiting on the person — so attention resolves instead of lingering as
+    // a Home "Needs you" card and buddy bubble that re-post forever.
+    let supervisor = AgentSupervisor()
+    let id = try await supervisor.spawn(
+      provider: .claudeCode,
+      specification: ProcessLaunchSpec(
+        executable: "/bin/sh",
+        arguments: [
+          "-c",
+          #"printf 'ready\n'; while IFS= read -r line; do :; done"#,
+        ],
+        workingDirectory: FileManager.default.currentDirectoryPath
+      ),
+      parser: .claude(ClaudeOutputParser()),
+      initialState: .idle,
+      executionMode: .interactiveProvider
+    )
+    try await waitForOutput("ready", id: id, supervisor: supervisor)
+    try await supervisor.sendInput(
+      agentID: id, text: "Failed to authenticate: OAuth session expired")
+    try await waitForState(.failed, id: id, supervisor: supervisor)
+    let snapshot = try await supervisor.snapshot(agentID: id)
+    // The failure is visible in the conversation, and the run left the waiting state: a dead
+    // provider is not a question the person can answer in chat.
+    #expect(
+      snapshot.transcript.contains {
+        $0.kind == .notice && $0.text.contains("Failed to authenticate")
+      })
+    #expect(snapshot.state != .waitingUser && snapshot.state != .waitingPermission)
+    try await supervisor.stop(agentID: id)
+  }
+
   @Test("Approve or Deny on a card with nothing behind it clears the card")
   func dismissUnbackedAttention() async throws {
     let supervisor = AgentSupervisor()

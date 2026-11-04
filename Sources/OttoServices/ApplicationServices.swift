@@ -3566,7 +3566,12 @@ public final class ApplicationServices: ObservableObject {
         state: snapshot.state,
         reason: snapshot.attentionReason ?? statusDetail
       )
-    case .created, .starting, .idle, .working, .interrupted, .stopped:
+    case .interrupted, .stopped:
+      // An answered question, a resolved approval, or a killed run is no longer waiting on the
+      // person. Clearing here also keeps a provider that dies after raising attention — an OAuth
+      // sign-in expiring at its idle prompt, say — from re-posting a "Needs you" entry forever.
+      acknowledgeAttention(nodeID: id)
+    case .created, .starting, .idle, .working:
       break
     }
   }
@@ -3708,7 +3713,9 @@ public final class ApplicationServices: ObservableObject {
     }
   }
 
-  private func queueAttention(
+  /// Raises a "Needs you" entry for an agent waiting on the person. Internal only as a test
+  /// seam for the attention lifecycle; runtime callers go through consumeFleetEvent.
+  func queueAttention(
     nodeID: UUID,
     canvasID: UUID,
     state: AgentLifecycleState,
