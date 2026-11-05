@@ -481,6 +481,10 @@ public final class TelegramConnector: ObservableObject {
   private let prefix: String
   private var transport: TelegramBotTransport?
   private var pollTask: Task<Void, Never>?
+  /// Watches for approvals raised away from Telegram — a session on the Mac, a scheduled
+  /// routine — and relays them to the paired chat (issue #49). Bots' own approvals stay with
+  /// the request's follow, which answers them in the chat that started the run.
+  private var approvalsWatchTask: Task<Void, Never>?
   private var offset: Int64
   private var pendingSenderID: Int64?
   private var activeBotByChatID: [Int64: UUID] = [:]
@@ -651,6 +655,7 @@ public final class TelegramConnector: ObservableObject {
     approvalsFromTelegram = enabled
     defaults.set(enabled, forKey: "\(prefix).approvals")
     if !enabled { pendingApprovals = [:] }
+    startApprovalsWatch()
   }
 
   /// The one paired person, in the chat they paired: the private chat, or the approved group's
@@ -706,6 +711,8 @@ public final class TelegramConnector: ObservableObject {
   public func stop() {
     pollTask?.cancel()
     pollTask = nil
+    approvalsWatchTask?.cancel()
+    approvalsWatchTask = nil
     cancelMessageTasks()
     transport = nil
     username = nil
@@ -857,6 +864,56 @@ public final class TelegramConnector: ObservableObject {
         }
       }
     }
+    startApprovalsWatch()
+  }
+
+  /// Relays approvals that Telegram started no run for (issue #49): a session opened on the Mac
+  /// or a routine's agent waiting on a tool approval never reaches the phone otherwise. Every
+  /// couple of seconds, anything the Mac itself shows under "Needs you" in waitingPermission,
+  /// that is answerable from Telegram, and that no open offer already covers, goes once to the
+  /// paired private chat with the same Approve and Deny buttons the follow loop uses. Bot nodes
+  /// are left to that follow — it owns the chat the run belongs to and its "needs your approval"
+  /// notice. Account approvals stay on the Mac, matching the follow loop's rule.
+  private func startApprovalsWatch() {
+    guard approvalsWatchTask == nil, pollTask != nil else { return }
+    approvalsWatchTask = Task { [weak self] in
+      while !Task.isCancelled {
+        guard let self else { return }
+        if self.approvalsFromTelegram, let client = self.transport,
+          let chat = self.approvedChatID, let services = self.services
+        {
+          await self.relaySessionApprovals(services: services, client: client, chat: chat)
+        }
+        try? await Task.sleep(for: .seconds(2))
+      }
+    }
+  }
+
+  private func relaySessionApprovals(
+    services: ApplicationServices, client: TelegramBotTransport, chat: Int64
+  ) async {
+    let botNodes = Set(services.botRoster().compactMap(\.nodeID))
+    let open = Set(pendingApprovals.values.map { "\($0.agentID.uuidString):\($0.requestID)" })
+    for item in services.attentionItems
+    where item.state == .waitingPermission && !botNodes.contains(item.nodeID) {
+      guard let pending = await services.supervisor.pendingPermission(agentID: item.nodeID),
+        Self.isAnswerableOnTelegram(pending),
+        !open.contains("\(item.nodeID.uuidString):\(pending.requestID)")
+      else { continue }
+      let label = Self.sessionApprovalLabel(
+        snapshot: services.fleetStore.snapshot(for: item.nodeID))
+      await offerApproval(
+        pending, agentID: item.nodeID, label: label, client: client, chat: chat)
+    }
+  }
+
+  /// Names a relayed approval for the chat: what the session was asked to do, or a plain
+  /// fallback when the run has no prompt yet.
+  private nonisolated static func sessionApprovalLabel(snapshot: AgentRuntimeSnapshot?) -> String {
+    guard let prompt = snapshot?.lastPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !prompt.isEmpty
+    else { return "A session on your Mac" }
+    return "Your Mac session “\(excerpt(prompt))”"
   }
 
   private func handle(_ message: TelegramIncomingMessage, client: TelegramBotTransport) async {
@@ -1140,7 +1197,8 @@ public final class TelegramConnector: ObservableObject {
         }
         if pending.requestID != offeredRequestID {
           offeredRequestID = pending.requestID
-          await offerApproval(pending, agentID: agentID, bot: bot, client: client, chat: chat)
+          await offerApproval(
+            pending, agentID: agentID, label: "@\(bot.handle)", client: client, chat: chat)
         }
         // A person on their phone may take a while to answer.
         deadline = max(deadline, Date.now.addingTimeInterval(600))
@@ -1178,12 +1236,12 @@ public final class TelegramConnector: ObservableObject {
   }
 
   private func offerApproval(
-    _ pending: AgentPendingPermission, agentID: UUID, bot: AgentProfile,
+    _ pending: AgentPendingPermission, agentID: UUID, label: String,
     client: TelegramBotTransport, chat: Int64
   ) async {
     pendingApprovals = pendingApprovals.filter { $0.value.expires > .now }
     let token = TelegramApprovalAnswer.makeToken()
-    let text = "@\(bot.handle) asks for approval:\n\n\(pending.reason)"
+    let text = "\(label) asks for approval:\n\n\(pending.reason)"
     guard
       let messageID = try? await client.send(
         text, to: chat,
