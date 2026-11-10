@@ -126,6 +126,7 @@ struct ChatWorkspaceView: View {
   @State private var showingSidebar = true
   @State private var showingEnvironment = false
   @State private var conversationsWithWorkPanel: Set<String> = []
+  @StateObject private var sessionOrder = SessionOrderStore()
 
   /// Visibility belongs to the conversation, not the shared Chat workspace view. Bot keys
   /// survive runtime replacement and cannot collide with sessions backed by the same node.
@@ -435,6 +436,9 @@ struct ChatWorkspaceView: View {
       {
         applyTerminalReveal(request)
       }
+    }
+    .task(id: services.defaultWorkspacePath) {
+      sessionOrder.load(workspacePath: services.defaultWorkspacePath)
     }
     .onChange(of: services.terminalRevealRequest) { _, request in
       if let request { applyTerminalReveal(request) }
@@ -947,7 +951,8 @@ struct ChatWorkspaceView: View {
   }
 
   private var filteredSessions: [OttoNode] {
-    sessionAgents.filter { sidebarMatches($0.displayName) }
+    let matches = sessionAgents.filter { sidebarMatches($0.displayName) }
+    return SessionOrderStore.arrange(matches, storedOrder: sessionOrder.order)
   }
 
   /// The session creator, kept inside the window. A `.popover` is a separate
@@ -2766,6 +2771,13 @@ struct ChatWorkspaceView: View {
         pendingClear = ClearChatTarget(id: node.id, name: node.displayName, isBot: false)
       }
       Divider()
+      Button("Move up", systemImage: "chevron.up") { moveSession(node, by: -1) }
+        .disabled(filteredSessions.firstIndex(where: { $0.id == node.id }) == 0)
+      Button("Move down", systemImage: "chevron.down") { moveSession(node, by: 1) }
+        .disabled(
+          filteredSessions.firstIndex(where: { $0.id == node.id })
+            == filteredSessions.count - 1)
+      Divider()
       Button("Close session", systemImage: "xmark", role: .destructive) {
         closeSession(node)
       }
@@ -2778,6 +2790,10 @@ struct ChatWorkspaceView: View {
     Binding(
       get: { renamingSessionID != nil },
       set: { if !$0 { renamingSessionID = nil } })
+  }
+
+  private func moveSession(_ node: OttoNode, by delta: Int) {
+    sessionOrder.move(node.id, by: delta, among: filteredSessions.map(\.id))
   }
 
   private func beginSessionRename(_ node: OttoNode) {
