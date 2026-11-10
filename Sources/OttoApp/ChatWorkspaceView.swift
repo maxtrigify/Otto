@@ -2505,7 +2505,7 @@ struct ChatWorkspaceView: View {
             Button("Browse files") { selectedFile.wrappedValue = nil }
               .font(.ottoMono(8, weight: .bold))
               .padding(12)
-            WorkFileEditor(path: selectedPath, palette: palette)
+            WorkFileViewer(path: selectedPath, palette: palette)
               .id(selectedPath)
           }
         } else {
@@ -5655,12 +5655,13 @@ private func workspaceEntries(in directory: URL, root: URL) -> [WorkspaceTreeEnt
   }
 }
 
-private struct WorkFileEditor: View {
+private struct WorkFileViewer: View {
   let path: String
   let palette: OttoPalette
   @State private var text = ""
   @State private var loadedPath: String?
   @State private var editing = false
+  @State private var presentation: WorkFilePresentation = .text
   private var isMarkdown: Bool {
     ["md", "markdown"].contains((path as NSString).pathExtension.lowercased())
   }
@@ -5673,13 +5674,21 @@ private struct WorkFileEditor: View {
         Text((path as NSString).lastPathComponent)
           .font(.ottoMono(8, weight: .bold))
         Spacer()
-        if isMarkdown {
-          Button(editing ? "Preview" : "Edit") { editing.toggle() }
+        if showsText {
+          if isMarkdown {
+            Button(editing ? "Preview" : "Edit") { editing.toggle() }
+              .font(.ottoMono(8, weight: .bold))
+          }
+          if dirty {
+            Button("Save") { save() }
+              .font(.ottoMono(8, weight: .bold))
+          }
+        } else {
+          // The previewer covers pictures, movies and sounds; this is the way out for a
+          // format the system cannot draw here.
+          Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
             .font(.ottoMono(8, weight: .bold))
-        }
-        if dirty {
-          Button("Save") { save() }
-            .font(.ottoMono(8, weight: .bold))
+            .help("Open this file in its usual app")
         }
       }
       .foregroundStyle(palette.paper)
@@ -5688,42 +5697,46 @@ private struct WorkFileEditor: View {
       if let errorMessage {
         Text(errorMessage).font(.ottoMono(7)).foregroundStyle(palette.red).padding(.horizontal, 12)
       }
-      if isMarkdown && !editing {
-        ScrollView {
-          MarkdownMessageView(
-            text: text, scale: 1, palette: palette,
-            assetDirectory: URL(fileURLWithPath: path).deletingLastPathComponent()
-          )
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(16)
+      if showsText {
+        if isMarkdown && !editing {
+          ScrollView {
+            MarkdownMessageView(
+              text: text, scale: 1, palette: palette,
+              assetDirectory: URL(fileURLWithPath: path).deletingLastPathComponent()
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+          }
+        } else {
+          TextEditor(text: $text)
+            .font(.ottoMono(10.5))
+            .scrollContentBackground(.hidden)
+            .foregroundStyle(palette.paper)
+            .padding(8)
+            .onChange(of: text) { _, _ in
+              if loadedPath == path { dirty = true }
+            }
         }
       } else {
-        TextEditor(text: $text)
-          .font(.ottoMono(10.5))
-          .scrollContentBackground(.hidden)
-          .foregroundStyle(palette.paper)
-          .padding(8)
-          .onChange(of: text) { _, _ in
-            if loadedPath == path { dirty = true }
-          }
+        WorkFilePreviewer(path: path)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
     .onAppear(perform: load)
     .onChange(of: path) { _, _ in load() }
   }
 
+  private var showsText: Bool { presentation == .text }
+
   private func load() {
-    do {
-      text = try String(contentsOfFile: path, encoding: .utf8)
-      loadedPath = path
-      dirty = false
-      errorMessage = nil
-    } catch {
-      text = ""
-      loadedPath = path
-      dirty = false
-      errorMessage = "Could not read this file as text."
-    }
+    let decoded = WorkFilePresentation.decodeText(atPath: path)
+    presentation = WorkFilePresentation.forPath(path, decodesAsText: decoded != nil)
+    text = decoded ?? ""
+    loadedPath = path
+    editing = false
+    dirty = false
+    errorMessage =
+      FileManager.default.fileExists(atPath: path) ? nil : "This file is no longer there."
   }
 
   private func save() {
