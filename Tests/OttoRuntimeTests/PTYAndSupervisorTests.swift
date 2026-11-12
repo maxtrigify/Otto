@@ -232,6 +232,13 @@ struct AgentSupervisorTests {
     try await supervisor.sendPrompt(agentID: id, prompt: "hello later")
     try await waitForOutput("heard:hello later", id: id, supervisor: supervisor)
     #expect(try await supervisor.snapshot(agentID: id).output.contains("heard:hello later"))
+    // A caller that will not read the output can skip decoding it; the offsets stay current.
+    let full = try await supervisor.snapshot(agentID: id)
+    let light = try await supervisor.snapshot(agentID: id, includingOutput: false)
+    #expect(light.output.isEmpty)
+    #expect(light.outputEndOffset >= full.outputEndOffset)
+    #expect(light.outputEndOffset > 0)
+    #expect(light.state == full.state)
     try await supervisor.stop(agentID: id)
   }
 

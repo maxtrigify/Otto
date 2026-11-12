@@ -3,11 +3,11 @@ import Combine
 import Foundation
 import OttoModels
 
-/// Documents, spreadsheets and presentations a person writes with their agents. They are real
-/// files in the space's `Documents` folder: Word documents (.docx), Otto sheets and Otto slides,
-/// so they stay visible in Finder and export to Office formats.
+/// Documents, spreadsheets, presentations and whiteboards a person makes with their agents.
+/// They are real files in the space's `Documents` folder: Word documents (.docx), Otto sheets,
+/// Otto slides and Otto boards, so they stay visible in Finder and export to Office formats.
 public enum OfficeKind: String, Codable, Sendable, CaseIterable, Identifiable {
-  case document, spreadsheet, presentation
+  case document, spreadsheet, presentation, whiteboard
 
   public var id: String { rawValue }
   public var fileExtension: String {
@@ -15,6 +15,7 @@ public enum OfficeKind: String, Codable, Sendable, CaseIterable, Identifiable {
     case .document: "docx"
     case .spreadsheet: "ottosheet"
     case .presentation: "ottoslides"
+    case .whiteboard: "ottoboard"
     }
   }
 
@@ -25,6 +26,7 @@ public enum OfficeKind: String, Codable, Sendable, CaseIterable, Identifiable {
     case .document: ["docx"]
     case .spreadsheet: ["ottosheet", "musesheet"]
     case .presentation: ["ottoslides", "museslides"]
+    case .whiteboard: ["ottoboard"]
     }
   }
   public var displayName: String {
@@ -32,6 +34,7 @@ public enum OfficeKind: String, Codable, Sendable, CaseIterable, Identifiable {
     case .document: "Document"
     case .spreadsheet: "Spreadsheet"
     case .presentation: "Presentation"
+    case .whiteboard: "Whiteboard"
     }
   }
   public var symbol: String {
@@ -39,6 +42,7 @@ public enum OfficeKind: String, Codable, Sendable, CaseIterable, Identifiable {
     case .document: "doc.richtext"
     case .spreadsheet: "tablecells"
     case .presentation: "rectangle.on.rectangle.angled"
+    case .whiteboard: "scribble.variable"
     }
   }
 
@@ -55,6 +59,7 @@ public enum OfficeKind: String, Codable, Sendable, CaseIterable, Identifiable {
     case "document", "doc", "docs", "word", "docx", "text": self = .document
     case "spreadsheet", "sheet", "sheets", "excel", "xlsx", "table": self = .spreadsheet
     case "presentation", "slides", "slide", "deck", "powerpoint", "pptx": self = .presentation
+    case "whiteboard", "board", "canvas", "brainstorm", "diagram", "map": self = .whiteboard
     default: return nil
     }
   }
@@ -113,6 +118,25 @@ public struct DocSuggestion: Codable, Sendable, Equatable, Identifiable {
   }
 }
 
+/// The whiteboard note a piece of agent work was handed off from.
+public struct BoardTaskOrigin: Equatable, Sendable {
+  public var path: String
+  public var boardTitle: String
+  public var itemID: String
+  /// The note's first line, which is the task as the person wrote it.
+  public var text: String
+  public var agentID: UUID
+  public var assignedAt: Date
+  /// False once the note is marked done or blocked.
+  public var isOpen: Bool
+
+  /// "From your board “Launch plan”: Reply to issue #47."
+  public var sentence: String {
+    let task = text.isEmpty ? "" : ": \(text)"
+    return "From your board “\(boardTitle)”\(task)."
+  }
+}
+
 /// An open editor registers itself so agent changes land in the live text, with undo, instead
 /// of fighting it on disk.
 @MainActor
@@ -155,12 +179,16 @@ public final class OfficeStore: ObservableObject {
   public let folderURL: URL
   @Published public private(set) var files: [OfficeFile] = []
   @Published private var state = State()
+  /// Agents an automation is still starting, by the automation that owns them.
+  @Published private var startingRunOwners: [UUID: String] = [:]
   /// Cells, slide ids or other marks agents changed recently, per file, for highlighting.
   @Published public private(set) var agentTouched: [String: Set<String>] = [:]
   /// Bumped whenever a sheet or deck changes on disk so open editors reload.
   @Published public private(set) var revisions: [String: Int] = [:]
   @Published public private(set) var persistenceError: String?
   private var live: [String: any LiveOfficeDocument] = [:]
+  /// Notes handed to agents, per board, re-read only when the board's file changes.
+  private var boardTasks: [String: (modified: Date, tasks: [BoardTaskOrigin])] = [:]
   private let stateURL: URL
   private let fileManager: FileManager
 
@@ -241,6 +269,7 @@ public final class OfficeStore: ObservableObject {
     case .presentation:
       try saveDeck(
         Presentation(slides: [Slide(title: candidate, layout: .title)]), path: path)
+    case .whiteboard: try saveBoard(Whiteboard(), path: path)
     }
     refresh()
     return file(path: path)
@@ -434,6 +463,51 @@ public final class OfficeStore: ObservableObject {
     }
   }
 
+  public func loadBoard(path: String) throws -> Whiteboard {
+    try JSONDecoder().decode(Whiteboard.self, from: Data(contentsOf: url(for: path)))
+  }
+
+  /// Saves a board. `touched` holds the ids of items an agent added or changed; passing it
+  /// (even empty) tells an open board to reload.
+  public func saveBoard(_ board: Whiteboard, path: String, touched: Set<String>? = nil) throws {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    try encoder.encode(board).write(to: url(for: path), options: .atomic)
+    boardTasks[path] = nil
+    if let touched {
+      agentTouched[path, default: []].formUnion(touched)
+      revisions[path, default: 0] += 1
+    }
+  }
+
+  /// The whiteboard note this agent's work was handed off from, if any: the latest hand-off to
+  /// it, and only one still open unless `includingFinished`. Home uses it to say where a
+  /// question or a result came from.
+  public func boardTaskOrigin(agentID: UUID, includingFinished: Bool = false) -> BoardTaskOrigin? {
+    var found: [BoardTaskOrigin] = []
+    for file in files where file.kind == .whiteboard {
+      if let cached = boardTasks[file.path], cached.modified == file.modifiedAt {
+        found += cached.tasks
+        continue
+      }
+      let tasks: [BoardTaskOrigin] =
+        (try? loadBoard(path: file.path))?.items.compactMap { item in
+          guard let task = item.task else { return nil }
+          let line =
+            item.text.split(separator: "\n").first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+          return BoardTaskOrigin(
+            path: file.path, boardTitle: file.title, itemID: item.id,
+            text: String(line.prefix(80)), agentID: task.agentID, assignedAt: task.assignedAt,
+            isOpen: item.status != .done && item.status != .blocked)
+        } ?? []
+      boardTasks[file.path] = (file.modifiedAt, tasks)
+      found += tasks
+    }
+    return found.filter { $0.agentID == agentID && (includingFinished || $0.isOpen) }
+      .max { $0.assignedAt < $1.assignedAt }
+  }
+
   public func clearTouched(path: String) { agentTouched[path] = nil }
 
   // MARK: Helper chats
@@ -447,8 +521,23 @@ public final class OfficeStore: ObservableObject {
     try? persist(next)
   }
 
-  /// Every agent bound to a document or dashboard. Chat keeps these out of its session list.
-  public var boundSessionIDs: Set<UUID> { Set(state.sessions.values) }
+  /// Every agent bound to a document or dashboard, or still being started by an automation.
+  /// Chat keeps these out of its session list.
+  public var boundSessionIDs: Set<UUID> {
+    Set(state.sessions.values).union(startingRunOwners.keys)
+  }
+
+  /// Marks an agent an automation has just created as background work. Starting an agent takes
+  /// a few seconds and its lasting binding is only known afterwards; without this the agent
+  /// would show as a session in between. Kept in memory only.
+  public func holdStartingRun(_ nodeID: UUID, owner: String) {
+    startingRunOwners[nodeID] = owner
+  }
+
+  /// Ends the hold once the run's agent has its lasting binding, or failed to start.
+  public func releaseStartingRuns(owner: String) {
+    startingRunOwners = startingRunOwners.filter { $0.value != owner }
+  }
 
   /// What a helper agent is bound to, if anything.
   public func binding(of nodeID: UUID) -> String? {

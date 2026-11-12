@@ -107,6 +107,69 @@ struct RoutineStoreTests {
     #expect(await fired.value == 1)
   }
 
+  @MainActor @Test func onlyTheAppHoldingTheScheduleFiresIt() async throws {
+    let root = FileManager.default.temporaryDirectory
+      .appending(path: "otto-routines-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = RoutineStore(workspacePath: root.path)
+    _ = try store.save(
+      Routine(
+        name: "Shared", instruction: "Run",
+        trigger: .schedule(cron: nil, intervalSeconds: 60),
+        target: .existingAgent(nodeID: UUID()), enabled: true))
+    let fired = FireCounter()
+    let gate = GateBox()
+    let engine = RoutineEngine(
+      store: store, eventBus: OttoEventBus(), tickSeconds: 30,
+      scheduleGate: { gate.open },
+      executor: { _, _ in
+        await fired.increment()
+        return UUID()
+      }, resultProvider: { _ in nil },
+      deliveryHandler: { _, _, _ in })
+    let start = Date.now
+    await engine.tick(now: start)
+    // Another Otto app holds the schedule: the due run is theirs to fire.
+    await engine.tick(now: start.addingTimeInterval(61))
+    #expect(await fired.value == 0)
+    // Taking over must not replay the run the other app already fired.
+    gate.open = true
+    await engine.tick(now: start.addingTimeInterval(62))
+    #expect(await fired.value == 0)
+    await engine.tick(now: start.addingTimeInterval(125))
+    #expect(await fired.value == 1)
+  }
+
+  @MainActor @Test func aSecondAppWaitsForTheScheduleUntilTheFirstLetsGo() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appending(path: "otto-routines-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let first = RoutineSchedulerLock(workspacePath: root.path)
+    let second = RoutineSchedulerLock(workspacePath: root.path)
+    #expect(first.holds())
+    #expect(first.holds())
+    #expect(!second.holds())
+    first.release()
+    #expect(second.holds())
+    #expect(!first.holds())
+  }
+
+  @MainActor @Test func anAgentBeingStartedByAnAutomationIsBackgroundWork() throws {
+    let root = FileManager.default.temporaryDirectory
+      .appending(path: "otto-routines-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let office = OfficeStore(workspacePath: root.path)
+    let starting = UUID()
+    let other = UUID()
+    office.holdStartingRun(starting, owner: "routine-a")
+    office.holdStartingRun(other, owner: "routine-b")
+    #expect(office.boundSessionIDs == [starting, other])
+    // Never written down: a hold that outlived a crash would hide a session for good.
+    #expect(OfficeStore(workspacePath: root.path).boundSessionIDs.isEmpty)
+    office.releaseStartingRuns(owner: "routine-a")
+    #expect(office.boundSessionIDs == [other])
+  }
+
   @MainActor @Test func overlapGuardSkipsOrQueuesLatest() async throws {
     let root = FileManager.default.temporaryDirectory
       .appending(path: "otto-routines-\(UUID().uuidString)")
@@ -260,4 +323,8 @@ struct RoutineStoreTests {
 private actor FireCounter {
   private(set) var value = 0
   func increment() { value += 1 }
+}
+
+@MainActor private final class GateBox {
+  var open = false
 }

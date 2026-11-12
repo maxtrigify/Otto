@@ -399,12 +399,20 @@ public struct HermesOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .hermes)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line), let type = object["type"] as? String else {
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object, let type = object["type"] as? String else {
       return fallbackEvents(line)
     }
     let payload = object["payload"] as? [String: Any] ?? [:]
@@ -491,27 +499,100 @@ public struct HermesOutputParser: Sendable {
   }
 }
 
+/// The most recent `capacity` bytes an agent's terminal produced.
+///
+/// Appending is the hot path: a streaming agent appends many times a second for as long as it
+/// runs, so an append must cost about the size of the new bytes, never the size of what is already
+/// retained. The bytes are therefore held as a list of blocks rather than one contiguous buffer
+/// (which would be copied whole whenever a second copy of the ring is alive, and shifted whole to
+/// drop the oldest bytes), and the decoded `text` is built only when something asks for it.
 public struct TerminalScrollbackRing: Sendable, Equatable {
   public let capacity: Int
   public private(set) var startOffset = 0
   public private(set) var endOffset = 0
-  private var bytes = Data()
+  /// Retained bytes, oldest first. The first `headSkip` bytes of `blocks[0]` are already dropped.
+  private var blocks: [Data] = []
+  private var headSkip = 0
+  /// The decoded form of the retained bytes. Replaced, never mutated, when the bytes change, so
+  /// copies of the ring that still hold the old bytes keep the text that matches them.
+  private var decoded = DecodedText()
+
+  /// Small reads are gathered into blocks of at least this size so a ring full of tiny appends
+  /// stays a short list.
+  private static let blockSize = 16_384
 
   public init(capacity: Int = 1_048_576) {
     self.capacity = max(1, capacity)
   }
 
+  /// Number of bytes currently retained.
+  public var count: Int { endOffset - startOffset }
+
   public mutating func append(_ data: Data) {
-    bytes.append(data)
+    guard !data.isEmpty else { return }
+    decoded = DecodedText()
     endOffset += data.count
-    if bytes.count > capacity {
-      let overflow = bytes.count - capacity
-      bytes.removeFirst(overflow)
-      startOffset += overflow
+    if data.count >= capacity {
+      blocks = [Data(data.suffix(capacity))]
+      headSkip = 0
+      startOffset = endOffset - capacity
+      return
     }
+    if let last = blocks.indices.last, blocks[last].count < Self.blockSize {
+      blocks[last].append(data)
+    } else {
+      blocks.append(Data(data))
+    }
+    var overflow = count - capacity
+    guard overflow > 0 else { return }
+    startOffset += overflow
+    var dropped = 0
+    while overflow > 0 {
+      let available = blocks[dropped].count - headSkip
+      if available > overflow {
+        headSkip += overflow
+        break
+      }
+      overflow -= available
+      headSkip = 0
+      dropped += 1
+    }
+    if dropped > 0 { blocks.removeFirst(dropped) }
   }
 
-  public var text: String { String(decoding: bytes, as: UTF8.self) }
+  /// The retained bytes as one buffer. Costs a copy of everything retained.
+  public var bytes: Data {
+    var result = Data(capacity: count)
+    for (index, block) in blocks.enumerated() {
+      result.append(index == 0 ? block.dropFirst(headSkip) : block)
+    }
+    return result
+  }
+
+  /// The retained bytes decoded as UTF-8. Decoding costs the size of everything retained, so it
+  /// happens at most once per change to the ring; reading again before the next append is free.
+  public var text: String {
+    decoded.resolve { String(decoding: bytes, as: UTF8.self) }
+  }
+
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.capacity == rhs.capacity && lhs.startOffset == rhs.startOffset
+      && lhs.endOffset == rhs.endOffset && lhs.bytes == rhs.bytes
+  }
+
+  private final class DecodedText: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+
+    func resolve(_ decode: () -> String) -> String {
+      lock.lock()
+      defer { lock.unlock() }
+      if let value { return value }
+      let text = decode()
+      value = text
+      return text
+    }
+  }
 }
 
 public struct ClaudeOutputParser: Sendable {
@@ -524,12 +605,20 @@ public struct ClaudeOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .claudeCode)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line) else { return fallbackEvents(line) }
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object else { return fallbackEvents(line) }
     let type = object["type"] as? String
     switch type {
     case "system":
@@ -656,12 +745,20 @@ public struct CodexOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .codex)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line) else { return fallbackEvents(line) }
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object else { return fallbackEvents(line) }
     let type = object["type"] as? String
     switch type {
     case "thread.started":
@@ -790,12 +887,20 @@ public struct KimiOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .kimi)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line) else { return fallbackEvents(line) }
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object else { return fallbackEvents(line) }
     var events: [ParsedAgentEvent] = []
     // Print mode announces no session id, so the run reports the continuation token the adapter
     // translates into `--continue`; a real id is preferred if a future build emits one.
@@ -920,12 +1025,20 @@ public struct CursorOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .cursor)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line) else { return fallbackEvents(line) }
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object else { return fallbackEvents(line) }
     var events: [ParsedAgentEvent] = []
     let subtype = object["subtype"] as? String
 
@@ -1068,12 +1181,20 @@ public struct OpenCodeOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .openCode)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line) else { return fallbackEvents(line) }
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object else { return fallbackEvents(line) }
     var events: [ParsedAgentEvent] = []
 
     // Every event carries the session id, so the very first one is enough to make the run
@@ -1164,12 +1285,20 @@ public struct PiOutputParser: Sendable {
   private var nativeChildren = NativeChildEventParser(provider: .pi)
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
-    let children = nativeChildren.ingest(line)
-    return children.events + (children.nested ? [] : ingestParent(line: line))
+    ingest(line: line, object: providerJSONObject(line))
   }
 
-  private mutating func ingestParent(line: String) -> [ParsedAgentEvent] {
-    guard let object = jsonObject(line) else {
+  /// `object` is `line` already parsed, so a line is decoded once however many readers it has.
+  mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
+    let children = nativeChildren.ingest(object)
+    return children.events
+      + (children.nested ? [] : ingestParent(line: line, object: object))
+  }
+
+  private mutating func ingestParent(line: String, object: [String: Any]?)
+    -> [ParsedAgentEvent]
+  {
+    guard let object else {
       let noise = line.trimmingCharacters(in: .whitespacesAndNewlines)
       if !noise.isEmpty, !noise.hasPrefix("/") {
         diagnostics.append(String(noise.prefix(500)))
@@ -1342,43 +1471,53 @@ public enum ProviderParser: Sendable {
   }
 
   public mutating func ingest(line: String) -> [ParsedAgentEvent] {
+    ingest(line: line, object: providerJSONObject(line))
+  }
+
+  /// `object` is `line` already parsed (see `providerJSONObject`), for callers that also read
+  /// the record themselves and should not pay to decode it twice.
+  public mutating func ingest(line: String, object: [String: Any]?) -> [ParsedAgentEvent] {
     switch self {
     case .markers:
       return []
     case .claude(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .claude(parser)
       return events
     case .codex(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .codex(parser)
       return events
     case .hermes(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .hermes(parser)
       return events
     case .cursor(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .cursor(parser)
       return events
     case .kimi(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .kimi(parser)
       return events
     case .openCode(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .openCode(parser)
       return events
     case .pi(var parser):
-      let events = parser.ingest(line: line)
+      let events = parser.ingest(line: line, object: object)
       self = .pi(parser)
       return events
     }
   }
 }
 
-private func jsonObject(_ line: String) -> [String: Any]? {
-  guard let data = line.data(using: .utf8),
+/// A provider's output line as a JSON object, or nil when it is not one. Agents print a line per
+/// event and per streamed delta, so this runs constantly: a line that cannot be an object (terminal
+/// prose, a blank line) is turned away on its first character, before the decoder is involved.
+public func providerJSONObject(_ line: String) -> [String: Any]? {
+  let firstVisible = line.utf8.first { $0 != 0x20 && $0 != 0x09 && $0 != 0x0D && $0 != 0x0A }
+  guard firstVisible == UInt8(ascii: "{"), let data = line.data(using: .utf8),
     let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
   else { return nil }
   return object

@@ -141,12 +141,12 @@ public actor AgentSupervisor {
     for (id, relation) in delegatedChildren.sorted(by: { $0.key.uuidString < $1.key.uuidString })
     where relation.parentID == parentID && relation.completions > relation.handledCompletions {
       delegatedChildren[id]?.handledCompletions = relation.completions
-      guard deliverable, let child = agents[id]?.snapshot, Self.isFinal(child.state) else {
-        continue
-      }
+      guard deliverable, let childAgent = agents[id], Self.isFinal(childAgent.snapshot.state)
+      else { continue }
+      let child = childAgent.snapshot
       let excerpt =
         relation.kind == "command"
-        ? TerminalOutputSearch.sanitizedExcerpt(child.output, limit: 600)
+        ? TerminalOutputSearch.sanitizedExcerpt(childAgent.scrollback.text, limit: 600)
         : String((child.result ?? "").suffix(600))
       completions.append(
         DelegatedCompletion(
@@ -178,11 +178,24 @@ public actor AgentSupervisor {
     eventContinuation.yield(.transcriptChanged(agentID: relation.parentID))
   }
 
+  /// The agent's snapshot with its terminal output attached. The stored snapshot carries only the
+  /// output offsets; the text is decoded from the scrollback here, on demand, because rebuilding
+  /// it for every chunk an agent prints made a streaming agent cost a full core.
+  private func liveSnapshot(_ agent: ManagedAgent, includingOutput: Bool = true)
+    -> AgentRuntimeSnapshot
+  {
+    var snapshot = agent.snapshot
+    if includingOutput { snapshot.output = agent.scrollback.text }
+    snapshot.liveText = agent.liveText.text
+    return snapshot
+  }
+
   private func projectedSnapshot(_ snapshot: AgentRuntimeSnapshot) -> AgentRuntimeSnapshot {
     var result = snapshot
     for (id, relation) in delegatedChildren.sorted(by: { $0.key.uuidString < $1.key.uuidString })
     where relation.parentID == snapshot.id && relation.parentRunID == snapshot.runID {
-      guard let source = agents[id]?.snapshot else { continue }
+      guard let sourceAgent = agents[id] else { continue }
+      let source = sourceAgent.snapshot
       let state: AgentChildRunState
       switch source.state {
       case .created, .starting: state = .starting
@@ -202,7 +215,7 @@ public actor AgentSupervisor {
       child.kind = relation.kind
       child.activityLog =
         relation.kind == "command"
-        ? [TerminalOutputSearch.sanitizedExcerpt(source.output, limit: 2_000)]
+        ? [TerminalOutputSearch.sanitizedExcerpt(sourceAgent.scrollback.text, limit: 2_000)]
         : activity.map(\.text)
       result.childRuns.append(child)
     }
@@ -211,11 +224,17 @@ public actor AgentSupervisor {
 
   private struct ManagedAgent {
     let runID: UUID
+    /// Everything about the run except what is derived from its output: `output` and `liveText`
+    /// here are always empty and only the offsets are current. Read them from `scrollback` and
+    /// `liveText`, or hand out a snapshot through `liveSnapshot`.
     var snapshot: AgentRuntimeSnapshot
     let process: PTYProcess
     var pendingText: String
     var scrollback: TerminalScrollbackRing
     var parser: ProviderParser
+    /// The reply being streamed in the current turn, built from the same parsed records the
+    /// parser reads.
+    var liveText: ProviderLiveText
     let successfulExitState: AgentLifecycleState
     var outputEnded: Bool
     var pendingExitCode: Int32?
@@ -345,6 +364,7 @@ public actor AgentSupervisor {
       pendingText: "",
       scrollback: TerminalScrollbackRing(capacity: scrollbackCapacity),
       parser: parser,
+      liveText: ProviderLiveText(provider: provider),
       successfulExitState: successfulExitState,
       outputEnded: false,
       pendingExitCode: nil,
@@ -798,6 +818,7 @@ public actor AgentSupervisor {
     agent.snapshot.state = .working
     agent.snapshot.confidence = 1
     agent.snapshot.result = nil
+    agent.liveText.reset()
     if !PromptSubmission.isHiddenControlPrompt(prompt),
       let visible = PromptSubmission.visibleUserText(prompt)
     {
@@ -1313,13 +1334,18 @@ public actor AgentSupervisor {
     agents[agentID] = agent
   }
 
-  public func snapshot(agentID: UUID) throws -> AgentRuntimeSnapshot {
+  /// The agent's current snapshot. Pass `includingOutput: false` when the caller will not read
+  /// the terminal output: `output` then comes back empty (the offsets are still current) and the
+  /// scrollback is not decoded, which matters for callers that refresh many times a second.
+  public func snapshot(agentID: UUID, includingOutput: Bool = true) throws
+    -> AgentRuntimeSnapshot
+  {
     guard let agent = agents[agentID] else { throw RuntimeError.agentNotFound(agentID) }
-    return projectedSnapshot(agent.snapshot)
+    return projectedSnapshot(liveSnapshot(agent, includingOutput: includingOutput))
   }
 
   public func allSnapshots() -> [AgentRuntimeSnapshot] {
-    agents.values.map { projectedSnapshot($0.snapshot) }
+    agents.values.map { projectedSnapshot(liveSnapshot($0)) }
   }
 
   /// Pulls any provider-owned turns that reached disk after the runtime's first DONE event. Team
@@ -1346,7 +1372,7 @@ public actor AgentSupervisor {
     agents.values.compactMap { agent in
       guard agent.snapshot.exitCode == nil else { return nil }
       return ActiveProcess(
-        snapshot: agent.snapshot, processID: agent.process.processIdentifier)
+        snapshot: liveSnapshot(agent), processID: agent.process.processIdentifier)
     }
   }
 
@@ -1370,8 +1396,9 @@ public actor AgentSupervisor {
   private func ingest(_ data: Data, for id: UUID, runID: UUID) {
     guard var agent = agents[id], agent.runID == runID else { return }
     let text = String(decoding: data, as: UTF8.self)
+    // Only the offsets are kept current here. The decoded output is attached when a snapshot is
+    // handed out (`liveSnapshot`), so a chunk costs its own size rather than the whole scrollback.
     agent.scrollback.append(data)
-    agent.snapshot.output = agent.scrollback.text
     agent.snapshot.outputStartOffset = agent.scrollback.startOffset
     agent.snapshot.outputEndOffset = agent.scrollback.endOffset
     agent.pendingText += text
@@ -1427,7 +1454,9 @@ public actor AgentSupervisor {
     // blocking prompts only from InteractivePromptDetector, which keys on the menu's own
     // Enter/Esc footer, so the parser's text guesses must not raise a card nothing stands behind.
     let screenDriven = agent.snapshot.executionMode == .interactiveProvider
-    for event in agent.parser.ingest(line: line) {
+    let object = providerJSONObject(line)
+    agent.liveText.ingest(object)
+    for event in agent.parser.ingest(line: line, object: object) {
       if screenDriven, Self.isTextGuessedWait(event) { continue }
       switch event {
       case .sessionStarted(let sessionID):
@@ -1628,7 +1657,7 @@ public actor AgentSupervisor {
     let echoDisabled = !agent.process.echoesInput
     guard
       let prompt = TerminalInputWaitDetector.waitingPrompt(
-        in: agent.snapshot.output, echoDisabled: echoDisabled)
+        in: agent.scrollback.text, echoDisabled: echoDisabled)
     else { return }
     // Only the prompt the program printed is kept. Keystrokes never reach the snapshot: they go
     // straight to the PTY, and with echo off the program does not print them back either.
@@ -1687,7 +1716,7 @@ public actor AgentSupervisor {
       agent.snapshot.pendingChoice == nil,
       agent.snapshot.outputEndOffset == expectedEndOffset
     else { return }
-    let excerpt = InteractiveCompletionDetector.completionExcerpt(from: agent.snapshot.output)
+    let excerpt = InteractiveCompletionDetector.completionExcerpt(from: agent.scrollback.text)
     agent.snapshot.result = excerpt.isEmpty ? "Completed the requested task" : excerpt
     // The excerpt is scraped from a painted TUI screen. It informs the status footer and voice
     // summaries, but it is not conversational prose — it must never appear as an assistant chat
@@ -1996,7 +2025,7 @@ public actor AgentSupervisor {
       exitCode: agent.snapshot.exitCode,
       startedAt: agent.snapshot.startedAt,
       completedAt: completedAt,
-      output: String(agent.snapshot.output.suffix(historyOutputCapacity)),
+      output: String(agent.scrollback.text.suffix(historyOutputCapacity)),
       outputStartOffset: max(
         agent.snapshot.outputStartOffset,
         agent.snapshot.outputEndOffset - historyOutputCapacity

@@ -198,7 +198,7 @@ public struct DocsListTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "docs.list",
     description:
-      "Lists the user's Otto documents, spreadsheets and presentations (newest first). Use it to find the file the user means.",
+      "Lists the user's Otto documents, spreadsheets, presentations and whiteboards (newest first). Use it to find the file the user means.",
     inputSchema: .objectSchema(), outputSchema: .objectSchema(), requiredScopes: [.agentRead],
     riskLevel: .read)
   public struct Input: Codable, Sendable { public init() {} }
@@ -215,15 +215,16 @@ public struct DocsCreateTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "docs.create",
     description: """
-      Creates a document, spreadsheet or presentation in Otto's Documents page and opens nothing \
-      else. kind: document (default), spreadsheet or presentation. content: for a document, the \
-      first draft in light Markdown (# headings, - bullets, **bold**); for a spreadsheet, CSV \
-      (formulas like =SUM(B2:B9) are fine). Fill presentations with slides.add_slide.
+      Creates a document, spreadsheet, presentation or whiteboard in Otto's Documents page and \
+      opens nothing else. kind: document (default), spreadsheet, presentation or whiteboard. \
+      content: for a document, the first draft in light Markdown (# headings, - bullets, \
+      **bold**); for a spreadsheet, CSV (formulas like =SUM(B2:B9) are fine). Fill \
+      presentations with slides.add_slide and whiteboards with board.add.
       """,
     inputSchema: .objectSchema(
       properties: [
         "title": .stringSchema(description: "File name, e.g. Q4 plan"),
-        "kind": .stringSchema(description: "document, spreadsheet or presentation"),
+        "kind": .stringSchema(description: "document, spreadsheet, presentation or whiteboard"),
         "content": .stringSchema(description: "Optional first draft (Markdown or CSV)"),
       ], required: ["title"]),
     outputSchema: .objectSchema(), requiredScopes: [.canvasWrite], riskLevel: .reversible)
@@ -240,9 +241,10 @@ public struct DocsReadTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "docs.read",
     description: """
-      Reads an Otto document, spreadsheet or presentation. Documents come back as plain text \
-      (quote it exactly in docs.suggest_edit), spreadsheets as a cell list with raw input and \
-      value, presentations as a numbered slide outline. Pending suggestions are listed too.
+      Reads an Otto document, spreadsheet, presentation or whiteboard. Documents come back as \
+      plain text (quote it exactly in docs.suggest_edit), spreadsheets as a cell list with raw \
+      input and value, presentations as a numbered slide outline, whiteboards as a list of \
+      items with their ids, places and text. Pending suggestions are listed too.
       """,
     inputSchema: .objectSchema(properties: ["doc": docProperty], required: ["doc"]),
     outputSchema: .objectSchema(), requiredScopes: [.agentRead], riskLevel: .read)
@@ -551,6 +553,8 @@ extension ApplicationServices {
         "Read it with docs.read and change cells with sheet.set_cells; formulas are welcome. It can have several tabs (sheet.tabs); formulas read other tabs as Sales!B2."
       case .presentation:
         "Read slides.guide first and design with its components so every slide looks great: varied layouts, big type, charts and count-ups for numbers, motion and backdrops. Read the deck with docs.read; write a whole deck with slides.set_deck, change single slides with slides.update_slide (html), add with slides.add_slide, and set colours, fonts and logo with slides.set_theme (read the brand's website first when asked to match a brand)."
+      case .whiteboard:
+        "Read it with docs.read to see every item's id, place and text. Add sticky notes, text, shapes, frames and arrows with board.add, move, resize, recolour or reword them with board.update, and take them away with board.remove. Lay things out so they read at a glance: frames as columns or lanes with a short title, notes inside them on a tidy grid with 20 points between, one idea per note in a few words, arrows for order or dependency, and one colour per theme or owner. Mark work with status (todo, doing, done, blocked). When the user wants the board kept current on a schedule, set that up with board.keep_fresh."
       }
     return """
       You are the helper beside the user's Otto \(name). They are watching it while you work, \
@@ -622,16 +626,17 @@ extension ApplicationServices {
         guard let self else { throw ToolRegistryError.invalidInput("Otto unavailable") }
         return try await self.editSlides(input, action: .delete)
       })
+    try await registerBoardTools()
   }
 
   @MainActor
-  private func summary(_ file: OfficeFile) -> OfficeFileSummary {
+  func summary(_ file: OfficeFile) -> OfficeFileSummary {
     OfficeFileSummary(
       title: file.title, kind: file.kind.rawValue, path: file.path, modifiedAt: file.modifiedAt)
   }
 
   @MainActor
-  private func resolveOffice(_ reference: String, kind: OfficeKind? = nil) throws -> OfficeFile {
+  func resolveOffice(_ reference: String, kind: OfficeKind? = nil) throws -> OfficeFile {
     if let file = office.file(named: reference, kind: kind) { return file }
     if let other = office.file(named: reference), let kind {
       throw OfficeStore.OfficeError.wrongKind(other.title, kind)
@@ -661,7 +666,7 @@ extension ApplicationServices {
       case .spreadsheet:
         let sheet = SpreadsheetCSV.decode(content)
         try office.saveSheet(sheet, path: file.path, touched: Set(sheet.cells.keys))
-      case .presentation: break
+      case .presentation, .whiteboard: break
       }
     }
     return OfficeOutput(
@@ -708,6 +713,8 @@ extension ApplicationServices {
           .joined(separator: "\n\n")
     case .presentation:
       content = try office.loadDeck(path: file.path).outline
+    case .whiteboard:
+      content = try office.loadBoard(path: file.path).outline
     }
     return OfficeOutput(file: summary(file), content: content, applied: false, note: "")
   }

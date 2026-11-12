@@ -696,7 +696,7 @@ extension ApplicationServices {
   }
 
   @MainActor
-  private func homeCardTarget(_ agent: String?) throws -> RoutineTarget {
+  func homeCardTarget(_ agent: String?) throws -> RoutineTarget {
     let name = agent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if name.isEmpty { return .spawnProvider(provider: AgentProvider.claudeCode.rawValue) }
     if let provider = AgentProvider.allCases.first(where: {

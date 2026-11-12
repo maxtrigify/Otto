@@ -100,6 +100,8 @@ public enum BriefAction: Codable, Equatable, Sendable {
   case openURL(String)
   /// Stops a running agent; offered next to "Open" on items about an agent that looks stuck.
   case stopAgent(UUID)
+  /// Opens a file in Documents by its path in the space, e.g. the whiteboard a task came from.
+  case openDocument(String)
 }
 
 /// One line in the brief. Every item states why it is here; an item without a reason is noise.

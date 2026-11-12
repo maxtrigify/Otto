@@ -1,4 +1,5 @@
 import Foundation
+import OttoModels
 import OttoRuntime
 import Testing
 
@@ -749,6 +750,150 @@ struct ProviderOutputParserTests {
     #expect(ring.text == "34567890")
     #expect(ring.startOffset == 2)
     #expect(ring.endOffset == 10)
+  }
+
+  @Test("Live text built one record at a time matches the projection of the whole output")
+  func liveTextAccumulatesIncrementally() throws {
+    for (fixture, provider) in [
+      ("claude_success", AgentProvider.claudeCode), ("codex_success", .codex),
+      ("kimi_success", .kimi), ("grok_success", .grok),
+    ] {
+      let output = try fixtureText(fixture, extension: "jsonl")
+      var live = ProviderLiveText(provider: provider)
+      for line in output.split(whereSeparator: \.isNewline) {
+        live.ingest(providerJSONObject(String(line)))
+      }
+      #expect(live.text != nil)
+      #expect(live.text == ProviderConversationProjection.liveText(from: output, provider: provider))
+    }
+  }
+
+  @Test("Live text follows deltas, yields to the finished message, and clears for a new turn")
+  func liveTextLifecycle() {
+    func delta(_ text: String) -> [String: Any]? {
+      providerJSONObject(
+        #"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"\#(text)"}}}"#
+      )
+    }
+    var live = ProviderLiveText(provider: .claudeCode)
+    #expect(live.text == nil)
+    live.ingest(delta("Reading "))
+    live.ingest(delta("the file"))
+    #expect(live.text == "Reading the file")
+    // A subagent's records are not the parent's reply.
+    live.ingest(
+      providerJSONObject(
+        #"{"type":"stream_event","parent_tool_use_id":"toolu_1","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" child"}}}"#
+      ))
+    #expect(live.text == "Reading the file")
+    live.ingest(
+      providerJSONObject(
+        #"{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}"#))
+    #expect(live.text == "Done.")
+    live.ingest(delta("Next"))
+    #expect(live.text == "Next")
+    live.reset()
+    #expect(live.text == nil)
+
+    // A very long streamed reply keeps only a bounded tail.
+    let block = String(repeating: "x", count: 1_000)
+    for _ in 0..<100 { live.ingest(delta(block)) }
+    live.ingest(delta("tail-marker"))
+    #expect(live.text?.count == 4_000)
+    #expect(live.text?.hasSuffix("tail-marker") == true)
+    #expect(live == live)
+  }
+
+  @Test("Only lines that are JSON objects are decoded")
+  func jsonObjectLines() {
+    #expect(providerJSONObject(#"{"type":"result"}"#)?["type"] as? String == "result")
+    #expect(providerJSONObject("  \t{\"a\":1}\r")?["a"] as? Int == 1)
+    #expect(providerJSONObject("") == nil)
+    #expect(providerJSONObject("plain terminal prose {not json}") == nil)
+    #expect(providerJSONObject("[1,2,3]") == nil)
+    #expect(providerJSONObject("{broken") == nil)
+  }
+
+  @Test("Scrollback matches a plain byte buffer for any mix of append sizes")
+  func scrollbackMatchesReferenceBuffer() {
+    let capacity = 40_000
+    var ring = TerminalScrollbackRing(capacity: capacity)
+    var reference = Data()
+    var total = 0
+    var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+    func next(_ bound: Int) -> Int {
+      seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+      return Int((seed >> 33) % UInt64(bound))
+    }
+    // Tiny reads, block-sized reads, reads larger than the whole ring, and slices that do not
+    // start at index zero — the shapes a PTY actually delivers.
+    let sizes = [0, 1, 3, 17, 900, 16_383, 16_384, 16_385, 39_999, 40_000, 40_001, 95_000]
+    for step in 0..<400 {
+      let size = sizes[next(sizes.count)]
+      let padded = Data((0..<(size + 5)).map { UInt8(truncatingIfNeeded: $0 &+ step) })
+      let chunk = padded.dropFirst(5)
+      ring.append(chunk)
+      reference.append(chunk)
+      total += size
+      if reference.count > capacity { reference.removeFirst(reference.count - capacity) }
+      #expect(ring.endOffset == total)
+      #expect(ring.startOffset == total - reference.count)
+      #expect(ring.count == reference.count)
+      if step % 7 == 0 { #expect(ring.bytes == reference) }
+    }
+    #expect(ring.bytes == reference)
+    #expect(ring.text == String(decoding: reference, as: UTF8.self))
+  }
+
+  @Test("A copy of the scrollback keeps its own text after the original moves on")
+  func scrollbackCopiesStayIndependent() {
+    var ring = TerminalScrollbackRing(capacity: 16)
+    ring.append(Data("first".utf8))
+    let earlier = ring
+    #expect(earlier.text == "first")
+    ring.append(Data(" second".utf8))
+    #expect(ring.text == "first second")
+    #expect(earlier.text == "first")
+    #expect(earlier != ring)
+    var same = TerminalScrollbackRing(capacity: 16)
+    same.append(Data("first ".utf8))
+    same.append(Data("second".utf8))
+    #expect(same == ring)
+  }
+
+  /// Regression guard for the streaming hot path. The supervisor appends to a copy of the ring
+  /// while the stored copy is still alive, once per PTY read. With one contiguous buffer that
+  /// copied and shifted everything retained on every read, so a full one-megabyte scrollback
+  /// made each read cost a megabyte and pinned a core for as long as an agent streamed.
+  ///
+  /// The check compares a full 1 MB ring against a full 32 KB one rather than against the clock,
+  /// so a loaded machine slows both sides alike. Whole-buffer work per append would make the
+  /// large ring about thirty times slower; chunk-sized work keeps the two close.
+  @Test("Appending to a full scrollback costs the chunk, not the scrollback")
+  func scrollbackAppendStaysCheapWhenFull() {
+    let chunk = Data(repeating: 0x62, count: 64)
+    let appends = 1_500
+    func fastestRun(capacity: Int) -> Duration {
+      var stored = TerminalScrollbackRing(capacity: capacity)
+      stored.append(Data(repeating: 0x61, count: capacity))
+      var fastest = Duration.seconds(3_600)
+      for _ in 0..<3 {
+        let elapsed = ContinuousClock().measure {
+          for _ in 0..<appends {
+            var working = stored
+            working.append(chunk)
+            stored = working
+          }
+        }
+        fastest = min(fastest, elapsed)
+      }
+      #expect(stored.count == capacity)
+      #expect(stored.endOffset == capacity + 3 * appends * chunk.count)
+      return fastest
+    }
+    let small = fastestRun(capacity: 32_768)
+    let large = fastestRun(capacity: 1_048_576)
+    #expect(large < small * 8, "1 MB ring: \(large) for \(appends) appends; 32 KB ring: \(small)")
   }
 
   @Test("Sanitized excerpts strip terminal escapes, control bytes, and bound the tail")

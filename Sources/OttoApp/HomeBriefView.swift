@@ -308,6 +308,9 @@ struct HomeBriefView: View {
           if case .stopAgent(let id) = item.secondaryAction {
             Button("Stop it") { perform(.stopAgent(id)) }
           }
+          if case .openDocument(let path) = item.secondaryAction {
+            Button("Open the board it came from") { perform(.openDocument(path)) }
+          }
           Divider()
           if item.kind == .todo {
             Button(item.origin == .otto ? "Clear" : "Mark done") { complete(item) }
@@ -350,7 +353,7 @@ struct HomeBriefView: View {
 
   private func opensInPlace(_ item: BriefItem) -> Bool {
     switch item.action {
-    case .openAgent, .openActivity, .openRoutine, .stopAgent: true
+    case .openAgent, .openActivity, .openRoutine, .stopAgent, .openDocument: true
     case .openURL, nil: false
     }
   }

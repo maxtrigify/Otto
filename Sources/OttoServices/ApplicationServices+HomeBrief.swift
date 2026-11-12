@@ -19,6 +19,15 @@ extension ApplicationServices {
     func nodeName(_ id: UUID) -> String? { nodes.first { $0.id == id }?.displayName }
     func botName(_ id: UUID?) -> String? { id.flatMap { agentProfiles.profile(id: $0)?.name } }
 
+    // Work handed off from a whiteboard note says so, and offers the way back to the board.
+    func fromBoard(_ id: UUID?, finished: Bool = false) -> BoardTaskOrigin? {
+      id.flatMap { office.boardTaskOrigin(agentID: $0, includingFinished: finished) }
+    }
+    func withOrigin(_ reason: String?, _ origin: BoardTaskOrigin?) -> String? {
+      guard let origin else { return reason }
+      return [origin.sentence, reason].compactMap { $0 }.joined(separator: " ")
+    }
+
     var liveAttentionNodes = Set<UUID>()
     for attention in attentionItems
     where attention.state == .waitingPermission || attention.state == .waitingUser {
@@ -30,15 +39,19 @@ extension ApplicationServices {
         asking
         ? (Self.briefSnippet(attention.reason) ?? "Open the chat to reply.")
         : "It paused before doing something that needs your permission. Open the chat to allow or decline."
+      let board = fromBoard(attention.nodeID)
       items.append(
         BriefItem(
           id: "attention:\(attention.nodeID)", kind: .todo,
           title: asking ? "\(name) has a question for you" : "\(name) needs your OK",
-          reason: watchdogWaitingNote(nodeID: attention.nodeID).map { "\($0) \(reason)" }
-            ?? reason,
+          reason: withOrigin(
+            watchdogWaitingNote(nodeID: attention.nodeID).map { "\($0) \(reason)" } ?? reason,
+            board),
           source: name, needsYou: true,
           projectID: projectID(forNode: attention.nodeID), origin: .otto,
-          action: .openAgent(attention.nodeID), createdAt: attention.createdAt))
+          action: .openAgent(attention.nodeID),
+          secondaryAction: board.map { .openDocument($0.path) },
+          createdAt: attention.createdAt))
     }
 
     // Agents the watchdog flags as stuck or looping. A live question or approval already has
@@ -57,12 +70,15 @@ extension ApplicationServices {
       switch activity.state {
       case .needsUser:
         let name = botName(activity.profileID) ?? nodeID.flatMap(nodeName) ?? "A bot"
+        let board = fromBoard(nodeID)
         items.append(
           BriefItem(
             id: "activity:\(activity.id)", kind: .todo, title: "Decide on \(name)’s request",
-            reason: activity.detail ?? "It paused and is waiting for your decision.",
+            reason: withOrigin(
+              activity.detail ?? "It paused and is waiting for your decision.", board),
             source: name, needsYou: true, projectID: projectID, origin: .otto,
             action: nodeID.map(BriefAction.openAgent) ?? .openActivity,
+            secondaryAction: board.map { .openDocument($0.path) },
             createdAt: activity.updatedAt))
       case .completed, .failed:
         guard now.timeIntervalSince(activity.updatedAt) <= DailyBriefComposer.updateWindow
@@ -98,17 +114,20 @@ extension ApplicationServices {
         // A launch prompt can still carry Otto's context envelope; the title is the person's ask.
         let task = Self.briefSnippet(
           snapshot?.lastPrompt.map(PromptSubmission.originalUserText), limit: 70)
+        let board = fromBoard(nodeID, finished: true)
         items.append(
           BriefItem(
             id: "activity:\(activity.id)", kind: .update,
             title: failed
               ? "\(name) couldn’t finish"
               : task.map { "\(name) finished: \($0)" } ?? "\(name) finished a task",
-            reason: failed
-              ? "It stopped partway through. Open the chat to see what happened and try again."
-              : Self.briefSnippet(snapshot?.result),
+            reason: withOrigin(
+              failed
+                ? "It stopped partway through. Open the chat to see what happened and try again."
+                : Self.briefSnippet(snapshot?.result), board),
             source: name, needsYou: failed, projectID: projectID, origin: .otto,
             action: nodeID.map(BriefAction.openAgent) ?? .openActivity,
+            secondaryAction: board.map { .openDocument($0.path) },
             createdAt: activity.updatedAt))
       case .working, .cancelled:
         continue

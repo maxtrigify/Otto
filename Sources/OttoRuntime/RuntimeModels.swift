@@ -204,6 +204,9 @@ public struct AgentRuntimeSnapshot: Identifiable, Sendable, Equatable {
   public var output: String
   public var outputStartOffset: Int
   public var outputEndOffset: Int
+  /// The readable text of the reply the agent is producing right now, kept current by the
+  /// supervisor as records arrive. Nil when nothing readable has streamed in this turn.
+  public var liveText: String?
   public var providerSessionID: String?
   public var result: String?
   public var attentionReason: String?

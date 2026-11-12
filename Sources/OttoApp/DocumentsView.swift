@@ -4,12 +4,16 @@ import OttoServices
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Documents, spreadsheets and presentations, written with agents. Open one and a helper sits
+/// Documents, spreadsheets, presentations and whiteboards, made with agents. Open one and a helper sits
 /// beside it: right-click anything to ask about it, or chat more broadly in the side panel.
 struct DocumentsView<Conversation: View>: View {
   @ObservedObject var services: ApplicationServices
   @ObservedObject var office: OfficeStore
   let start: AssistantStarter
+  /// Whiteboards hand notes to agents as real work and show how that work is going.
+  var delegate: BoardDelegate?
+  var agentStatus: (UUID) -> NodeStatus? = { _ in nil }
+  var openAgent: (UUID) -> Void = { _ in }
   @ViewBuilder let conversation: (UUID) -> Conversation
   @Environment(\.ottoPalette) private var palette
   @AppStorage(AssistantTarget.defaultsKey) private var targetRaw = ""
@@ -24,6 +28,7 @@ struct DocumentsView<Conversation: View>: View {
   @StateObject private var sheetModel = SheetModel(sheet: Spreadsheet())
   @StateObject private var sheetTabs = SheetTabsModel()
   @State private var status: OttoStatusToast?
+  @StateObject private var boardSelection = BoardSelection()
 
   private var target: Binding<AssistantTarget> {
     Binding(
@@ -83,7 +88,7 @@ struct DocumentsView<Conversation: View>: View {
           VStack(alignment: .leading, spacing: 4) {
             Text("Documents").font(.ottoDisplay(26).weight(.semibold))
             Text(
-              "Docs, sheets and slides you write with your agents. Saved in this space’s Documents folder."
+              "Docs, sheets, slides and whiteboards you make with your agents. Saved in this space’s Documents folder."
             )
             .font(.ottoDisplay(13)).foregroundStyle(palette.muted)
           }
@@ -108,7 +113,8 @@ struct DocumentsView<Conversation: View>: View {
         }
         AssistantPromptBar(
           services: services,
-          placeholder: "Start with AI: “a one-page project brief for…”, “a budget sheet for…”",
+          placeholder:
+            "Start with AI: “a one-page project brief for…”, “a budget sheet for…”, “a whiteboard for…”",
           target: target
         ) { request in
           await startWithAI(request)
@@ -167,6 +173,8 @@ struct DocumentsView<Conversation: View>: View {
     case .spreadsheet: "Rows, columns and formulas. Exports to Excel."
     case .presentation:
       "Decks built like websites: motion, charts, 3D. Exports to PowerPoint and PDF."
+    case .whiteboard:
+      "Notes, shapes and arrows on an endless board. Box an area to ask AI about it."
     }
   }
 
@@ -245,6 +253,12 @@ struct DocumentsView<Conversation: View>: View {
           ).id(file.path)
         case .presentation:
           SlidesEditorView(office: office, file: file, ask: handleAsk, bots: bots).id(file.path)
+        case .whiteboard:
+          BoardEditorView(
+            office: office, services: services, file: file, ask: handleAsk, bots: bots,
+            delegate: delegate, agentStatus: agentStatus, openAgent: openAgent,
+            selected: boardSelection
+          ).id(file.path)
         }
       }
       if showsPanel {
@@ -358,6 +372,29 @@ struct DocumentsView<Conversation: View>: View {
       Button("Web page (.html) to share") {
         exportDeck(file, type: "html") { deck in
           Data(DeckRenderer.page(deck, mode: .present, title: file.title).utf8)
+        }
+      }
+    case .whiteboard:
+      Button("Turn into a document", systemImage: "doc.richtext") {
+        handleAsk(
+          OfficeAsk(
+            request:
+              "Turn this whiteboard into a document: read it with docs.read, then create a document with docs.create called “\(file.title) notes” that writes up each frame as a section, with decisions and action items (owner and date where the board gives them) at the end. Tell me its title."
+          ))
+      }
+      Button("Turn into a presentation", systemImage: "rectangle.on.rectangle.angled") {
+        handleAsk(
+          OfficeAsk(
+            request:
+              "Turn this whiteboard into a presentation: read it with docs.read, create one with docs.create (kind presentation) called “\(file.title) deck”, read slides.guide, then write one slide per frame or theme with slides.set_deck. Tell me its title."
+          ))
+      }
+      Divider()
+      Button("Picture (.png)") {
+        export(file, type: "png") {
+          guard let data = BoardPicture.png(try office.loadBoard(path: file.path), palette: palette)
+          else { throw CocoaError(.fileWriteUnknown) }
+          return data
         }
       }
     }
@@ -498,6 +535,12 @@ struct DocumentsView<Conversation: View>: View {
         "Match this deck to my company’s website brand",
         "Make every slide more visual: charts, stats and motion",
       ]
+    case .whiteboard:
+      [
+        "Lay out a project timeline here with owners and dates",
+        "Group the notes by theme and name each group",
+        "Write up this board as a document with action items",
+      ]
     }
   }
 
@@ -553,6 +596,8 @@ struct DocumentsView<Conversation: View>: View {
     // The agent reads from disk too, so make sure what's on screen is saved first.
     editors.controller(for: file.path)?.saveNow()
     var message = request
+    // On a whiteboard, whatever is selected travels with the message.
+    let quote = quote ?? (file.kind == .whiteboard ? boardSelection.quote : nil)
     if let quote, !quote.isEmpty {
       message += "\n\n> " + quote.prefix(4_000).replacingOccurrences(of: "\n", with: "\n> ")
     }
@@ -574,7 +619,9 @@ struct DocumentsView<Conversation: View>: View {
       }
       ? .spreadsheet
       : ["slide", "deck", "presentation", "pitch"].contains { lower.contains($0) }
-        ? .presentation : .document
+        ? .presentation
+        : ["whiteboard", "board", "brainstorm", "retro", "timeline", "mind map", "flowchart"]
+          .contains { lower.contains($0) } ? .whiteboard : .document
     let title = Self.title(from: request)
     do {
       let file = try office.create(kind, title: title)

@@ -12,6 +12,10 @@
   ///   permission:<agent UUID>:approve|deny:<report file>  what the chat card's Approve/Deny do
   ///   settings[:<page>]                        open the Settings window, optionally on a page
   ///   go:<place>                               show Home, or a Chat place: conversation, browser, files…
+  ///   brief:<output file>                      the lines Home derives from Otto's own state
+  ///   board:give:<item id>:<agent>             on the open whiteboard, what "Give this to…" does;
+  ///                                            agent is Claude Code, Codex or a bot's name
+  ///   home:open-document:<path>                what a brief line's "Open the board it came from" does
   ///   review:<output file>\n<approve|comment|reject|allow|deny|dismiss>\n<review UUID>[\n<text>]
   ///                                            what a Home review card's buttons do; text is the
   ///                                            comment, edited draft or reject reason
@@ -20,6 +24,8 @@
     static let shared = OttoDevProbe()
     static let openSettingsNotification = Notification.Name("io.openotto.dev.probe.openSettings")
     static let goNotification = Notification.Name("io.openotto.dev.probe.go")
+    static let boardNotification = Notification.Name("io.openotto.dev.probe.board")
+    static let homeNotification = Notification.Name("io.openotto.dev.probe.home")
     private weak var services: ApplicationServices?
     private var installed = false
 
@@ -51,6 +57,23 @@
         NSApp.activate()
         NotificationCenter.default.post(
           name: Self.goNotification, object: String(command.dropFirst(3)))
+      } else if command.hasPrefix("brief:") {
+        // brief:<output file>  the lines Home derives from Otto's own state right now.
+        let lines = (services?.derivedBriefItems() ?? []).map { item in
+          [
+            item.id, item.title, item.reason ?? "", "needsYou=\(item.needsYou)",
+            "action=\(String(describing: item.action))",
+            "secondary=\(String(describing: item.secondaryAction))",
+          ].joined(separator: " | ")
+        }
+        try? lines.joined(separator: "\n").write(
+          toFile: String(command.dropFirst(6)), atomically: true, encoding: .utf8)
+      } else if command.hasPrefix("board:") {
+        NotificationCenter.default.post(
+          name: Self.boardNotification, object: String(command.dropFirst(6)))
+      } else if command.hasPrefix("home:") {
+        NotificationCenter.default.post(
+          name: Self.homeNotification, object: String(command.dropFirst(5)))
       } else if command.hasPrefix("permission:") {
         // permission:<agent UUID>:approve|deny:<report file>
         let parts = command.dropFirst(11).split(separator: ":", maxSplits: 2).map(String.init)

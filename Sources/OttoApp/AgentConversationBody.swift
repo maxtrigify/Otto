@@ -44,6 +44,8 @@ struct AgentConversationBody: View {
   /// Otto's own workspace. Image attachments for providers that may run in a project's source
   /// folder are staged here instead, so Otto never writes into the user's repository.
   var ottoWorkspacePath: String? = nil
+  /// Where the raw terminal surface declares that it is drawing this agent's output.
+  var outputStore: AgentFleetStore? = nil
   /// Promotes this node into the canvas' full-width stage before showing an artifact inspector.
   let enterStage: () -> Void
   /// Selects the owning canvas node. Child buttons consume the card's outer tap gesture, so
@@ -2055,6 +2057,7 @@ struct AgentConversationBody: View {
         send: sendBytes,
         resize: resize
       )
+      .showsAgentOutput(of: node.id, in: outputStore)
       .padding(6 * scale)
     }
     .background(palette.ink)
@@ -2562,11 +2565,7 @@ struct AgentConversationBody: View {
   private var transcript: [AgentTranscriptEntry] { snapshot?.transcript ?? [] }
 
   private var liveText: String? {
-    guard let snapshot else { return nil }
-    let text = ProviderConversationProjection.liveText(
-      from: snapshot.output,
-      provider: snapshot.provider
-    )
+    guard let text = snapshot?.liveText else { return nil }
     // Completed messages already live in the transcript; only surface text that is still ahead
     // of it so the working row never repeats the last reply.
     let lastMessage = transcript.last { $0.role == .assistant && $0.kind == .text }?.text

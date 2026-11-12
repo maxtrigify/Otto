@@ -44,6 +44,8 @@ public final class RoutineEngine {
   /// Whether a retry may start now, checked when it comes due (for example, not while the Mac
   /// is going to sleep).
   public typealias RetryGate = @MainActor @Sendable (Routine) -> Bool
+  /// Whether this app may fire schedules right now. See `RoutineSchedulerLock`.
+  public typealias ScheduleGate = @MainActor @Sendable () -> Bool
 
   public nonisolated static let minimumIntervalSeconds = 60
   public nonisolated static let maximumPayloadBytes = 65_536
@@ -85,6 +87,7 @@ public final class RoutineEngine {
   private let retryDelaySeconds: Double
   private var pendingRetries: [UUID: PendingRetry] = [:]
   private let tickSeconds: Double
+  private let scheduleGate: ScheduleGate
   private var tickTask: Task<Void, Never>?
   private var eventTask: Task<Void, Never>?
   private var nextRunAt: [UUID: Date] = [:]
@@ -99,6 +102,7 @@ public final class RoutineEngine {
   public init(
     store: RoutineStore, eventBus: OttoEventBus,
     tickSeconds: Double,
+    scheduleGate: @escaping ScheduleGate = { true },
     readyCheck: @escaping ReadyCheck = { _ in true }, executor: @escaping Executor,
     resultProvider: @escaping ResultProvider,
     deliveryHandler: @escaping DeliveryHandler,
@@ -113,6 +117,7 @@ public final class RoutineEngine {
     self.retryGate = retryGate
     self.eventBus = eventBus
     self.tickSeconds = tickSeconds
+    self.scheduleGate = scheduleGate
     self.readyCheck = readyCheck
     self.executor = executor
     self.resultProvider = resultProvider
@@ -434,6 +439,9 @@ public final class RoutineEngine {
   }
 
   func tick(now: Date) async {
+    // Two Otto apps on one workspace share its automations. Only one of them fires schedules;
+    // the other still moves each due time on, so it has no backlog to replay if it takes over.
+    let firesSchedules = scheduleGate()
     for routine in store.routines where routine.enabled {
       guard case .schedule = routine.trigger else { continue }
       if let trigger = scheduledTrigger[routine.id], trigger != routine.trigger {
@@ -448,6 +456,7 @@ public final class RoutineEngine {
       let collapsed = now.timeIntervalSince(due) > Self.missedRunGrace(for: routine, from: due)
       // Fast-forward before execution so wake-from-sleep never burst-replays a backlog.
       nextRunAt[routine.id] = Self.nextScheduledFire(for: routine, after: now)
+      guard firesSchedules else { continue }
       _ = try? await fire(routine, collapsedMissedRuns: collapsed)
     }
   }

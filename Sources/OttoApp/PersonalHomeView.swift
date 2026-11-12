@@ -200,6 +200,14 @@ struct PersonalHomeView: View {
       content(now: timeline.date)
     }
     .onAppear(perform: applyProfileTheme)
+    #if DEBUG
+      .onReceive(NotificationCenter.default.publisher(for: OttoDevProbe.homeNotification)) { note in
+        let command = note.object as? String ?? ""
+        if command.hasPrefix("open-document:") {
+          perform(.openDocument(String(command.dropFirst(14))))
+        }
+      }
+    #endif
     // Accounts signed in since the brief was set up get their own morning run.
     .task(id: profile.id) {
       _ = try? await services.syncMorningBriefAccounts(profileID: profile.id)
@@ -606,6 +614,10 @@ struct PersonalHomeView: View {
     case .openActivity: openLibrary(.activity)
     case .openRoutine: openLibrary(.routines)
     case .stopAgent(let id): Task { try? await services.stop(agentID: id) }
+    case .openDocument(let path):
+      // Documents shows whichever file this names.
+      UserDefaults.standard.set(path, forKey: "otto.documents.open")
+      openLibrary(.documents)
     case .openURL(let raw):
       if let url = URL(string: raw), url.scheme == "https" { NSWorkspace.shared.open(url) }
     }

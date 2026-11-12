@@ -9,6 +9,11 @@ public final class CanvasStore: ObservableObject {
   @Published public private(set) var lastReceipt = "Workspace ready"
   @Published public private(set) var persistenceError: String?
 
+  /// Told about an agent an automation creates, in the same main-actor turn as the creation, so
+  /// the owner can mark it as background work before any view draws it. The string is the
+  /// creating actor's ID.
+  public var automationAgentCreated: ((UUID, String) -> Void)?
+
   private let persistence: SQLiteWorkspaceStore?
   private var persistIsDirty = false
   /// Set when the saved workspace exists but could not be read. Saving the in-memory starter

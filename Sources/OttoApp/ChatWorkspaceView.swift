@@ -126,6 +126,7 @@ struct ChatWorkspaceView: View {
   @State private var showingSidebar = true
   @State private var showingEnvironment = false
   @State private var conversationsWithWorkPanel: Set<String> = []
+  @StateObject private var sessionOrder = SessionOrderStore()
 
   /// Visibility belongs to the conversation, not the shared Chat workspace view. Bot keys
   /// survive runtime replacement and cannot collide with sessions backed by the same node.
@@ -435,6 +436,9 @@ struct ChatWorkspaceView: View {
       {
         applyTerminalReveal(request)
       }
+    }
+    .task(id: services.defaultWorkspacePath) {
+      sessionOrder.load(workspacePath: services.defaultWorkspacePath)
     }
     .onChange(of: services.terminalRevealRequest) { _, request in
       if let request { applyTerminalReveal(request) }
@@ -947,7 +951,8 @@ struct ChatWorkspaceView: View {
   }
 
   private var filteredSessions: [OttoNode] {
-    sessionAgents.filter { sidebarMatches($0.displayName) }
+    let matches = sessionAgents.filter { sidebarMatches($0.displayName) }
+    return SessionOrderStore.arrange(matches, storedOrder: sessionOrder.order)
   }
 
   /// The session creator, kept inside the window. A `.popover` is a separate
@@ -1143,8 +1148,22 @@ struct ChatWorkspaceView: View {
         start: startAssistant, openAutomations: { destination = .routines },
         conversation: { nodeID in assistantConversation(nodeID) })
     case .documents:
-      DocumentsView(services: services, office: services.office, start: startAssistant) {
-        nodeID in
+      DocumentsView(
+        services: services, office: services.office, start: startAssistant,
+        delegate: delegateBoardTask,
+        agentStatus: { id in allAgentNodes.first { $0.id == id }?.status },
+        openAgent: { id in
+          // A note handed to a bot opens that bot's chat; anything else opens the session.
+          if let entry = roster.first(where: { $0.nodeID == id }) {
+            selectedProfileID = entry.profile.id
+            selectedTeamID = nil
+            destination = .conversation
+            Task { await openEntry(entry) }
+          } else if let node = allAgentNodes.first(where: { $0.id == id }) {
+            selectSession(node)
+          }
+        }
+      ) { nodeID in
         assistantConversation(nodeID)
       }
     case .skills:
@@ -1307,6 +1326,7 @@ struct ChatWorkspaceView: View {
           } : nil
       )
     }
+    .showsAgentOutput(of: terminal.id, in: services.fleetStore)
     .id(terminal.id)
   }
 
@@ -1458,6 +1478,27 @@ struct ChatWorkspaceView: View {
     } else {
       try await services.sendPrompt(agentID: id, prompt: message)
     }
+    return id
+  }
+
+  /// Starts real work from a whiteboard note: a fresh session, or the bot's own chat. Unlike a
+  /// file's helper it is not bound to the file, so it shows in Chat like any other work.
+  private func delegateBoardTask(_ target: AssistantTarget, _ message: String, _ brief: String)
+    async throws -> UUID
+  {
+    let id: UUID
+    switch target {
+    case .provider(let provider):
+      id = try await quickLaunchAgent(provider, nil)
+    case .bot(let profileID):
+      guard let entry = services.botRoster().first(where: { $0.profile.id == profileID }) else {
+        throw NSError(
+          domain: "Otto", code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "That bot is no longer available."])
+      }
+      id = try await services.openBotChannel(entry.profile, at: launchPoint)
+    }
+    try await services.sendPrompt(agentID: id, prompt: message, hiddenContext: brief)
     return id
   }
 
@@ -1757,6 +1798,7 @@ struct ChatWorkspaceView: View {
             workspaceRoot: node.agentDefinition?.workingDirectory ?? services.documents.rootPath)
         },
         ottoWorkspacePath: services.defaultWorkspacePath,
+        outputStore: services.fleetStore,
         enterStage: {},
         focus: { store.dispatch(.focusNode(node.id)) },
         setPresentation: {
@@ -2568,6 +2610,7 @@ struct ChatWorkspaceView: View {
           }
         }
       )
+      .showsAgentOutput(of: node.id, in: services.fleetStore)
       .padding(8)
       .background(palette.ink)
     }
@@ -2766,6 +2809,13 @@ struct ChatWorkspaceView: View {
         pendingClear = ClearChatTarget(id: node.id, name: node.displayName, isBot: false)
       }
       Divider()
+      Button("Move up", systemImage: "chevron.up") { moveSession(node, by: -1) }
+        .disabled(filteredSessions.firstIndex(where: { $0.id == node.id }) == 0)
+      Button("Move down", systemImage: "chevron.down") { moveSession(node, by: 1) }
+        .disabled(
+          filteredSessions.firstIndex(where: { $0.id == node.id })
+            == filteredSessions.count - 1)
+      Divider()
       Button("Close session", systemImage: "xmark", role: .destructive) {
         closeSession(node)
       }
@@ -2778,6 +2828,10 @@ struct ChatWorkspaceView: View {
     Binding(
       get: { renamingSessionID != nil },
       set: { if !$0 { renamingSessionID = nil } })
+  }
+
+  private func moveSession(_ node: OttoNode, by delta: Int) {
+    sessionOrder.move(node.id, by: delta, among: filteredSessions.map(\.id))
   }
 
   private func beginSessionRename(_ node: OttoNode) {
@@ -5666,6 +5720,12 @@ private struct WorkFileEditor: View {
   }
   @State private var dirty = false
   @State private var errorMessage: String?
+  /// Set when the file turns out not to be readable text, so Quick Look shows it instead.
+  @State private var unreadableAsText = false
+  private var previewKind: WorkFilePreviewKind {
+    WorkFilePreviewKind.kind(forPath: path, decodesAsText: !unreadableAsText)
+  }
+  private var isMedia: Bool { previewKind != .text }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -5673,6 +5733,10 @@ private struct WorkFileEditor: View {
         Text((path as NSString).lastPathComponent)
           .font(.ottoMono(8, weight: .bold))
         Spacer()
+        if isMedia {
+          Button("Open") { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+            .font(.ottoMono(8, weight: .bold))
+        }
         if isMarkdown {
           Button(editing ? "Preview" : "Edit") { editing.toggle() }
             .font(.ottoMono(8, weight: .bold))
@@ -5688,7 +5752,12 @@ private struct WorkFileEditor: View {
       if let errorMessage {
         Text(errorMessage).font(.ottoMono(7)).foregroundStyle(palette.red).padding(.horizontal, 12)
       }
-      if isMarkdown && !editing {
+      if previewKind == .image {
+        WorkFileImagePreview(path: path)
+      } else if previewKind == .media {
+        WorkFileQuickLookPreview(path: path)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else if isMarkdown && !editing {
         ScrollView {
           MarkdownMessageView(
             text: text, scale: 1, palette: palette,
@@ -5713,6 +5782,13 @@ private struct WorkFileEditor: View {
   }
 
   private func load() {
+    guard !isMedia else {
+      text = ""
+      loadedPath = path
+      dirty = false
+      errorMessage = nil
+      return
+    }
     do {
       text = try String(contentsOfFile: path, encoding: .utf8)
       loadedPath = path
@@ -5722,7 +5798,8 @@ private struct WorkFileEditor: View {
       text = ""
       loadedPath = path
       dirty = false
-      errorMessage = "Could not read this file as text."
+      errorMessage = nil
+      unreadableAsText = true
     }
   }
 

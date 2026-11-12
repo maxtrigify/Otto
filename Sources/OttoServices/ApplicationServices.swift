@@ -115,6 +115,54 @@ public final class AgentFleetStore: ObservableObject {
   public func model(for id: UUID) -> AgentRuntimeModel? { models[id] }
   public func snapshot(for id: UUID) -> AgentRuntimeSnapshot? { models[id]?.snapshot }
 
+  /// How many views are drawing each agent's terminal output right now. While nothing draws it,
+  /// streaming refreshes leave the output out, so an agent working in the background does not
+  /// have its whole scrollback decoded and published many times a second for nobody.
+  private var outputViewers: [UUID: Int] = [:]
+  /// Asks for a refresh that carries output, the moment the first view starts drawing it.
+  fileprivate var outputWanted: ((UUID) -> Void)?
+
+  public func isShowingOutput(of id: UUID) -> Bool { outputViewers[id, default: 0] > 0 }
+
+  /// A view that draws the agent's terminal output is on screen. Balance with
+  /// `endShowingOutput(of:)`.
+  public func beginShowingOutput(of id: UUID) {
+    outputViewers[id, default: 0] += 1
+    if outputViewers[id] == 1 { outputWanted?(id) }
+  }
+
+  public func endShowingOutput(of id: UUID) {
+    guard let count = outputViewers[id] else { return }
+    outputViewers[id] = count > 1 ? count - 1 : nil
+  }
+
+  /// Completes a snapshot fetched without output so it stays self-consistent: the output last
+  /// published for the same process is kept with the offsets that belong to it, and when there
+  /// is none the snapshot reports that no output is retained.
+  fileprivate func carryingPublishedOutput(_ snapshot: AgentRuntimeSnapshot)
+    -> AgentRuntimeSnapshot
+  {
+    Self.completing(snapshot, published: models[snapshot.id]?.snapshot)
+  }
+
+  static func completing(
+    _ snapshot: AgentRuntimeSnapshot, published previous: AgentRuntimeSnapshot?
+  ) -> AgentRuntimeSnapshot {
+    var result = snapshot
+    if let previous,
+      previous.processID == snapshot.processID,
+      previous.outputEndOffset <= snapshot.outputEndOffset
+    {
+      result.output = previous.output
+      result.outputStartOffset = previous.outputStartOffset
+      result.outputEndOffset = previous.outputEndOffset
+    } else {
+      result.output = ""
+      result.outputStartOffset = snapshot.outputEndOffset
+    }
+    return result
+  }
+
   fileprivate func update(_ snapshot: AgentRuntimeSnapshot) {
     if let model = models[snapshot.id] {
       model.snapshot = snapshot
@@ -460,6 +508,7 @@ public final class ApplicationServices: ObservableObject {
       store: routines,
       eventBus: supervisor.eventBus,
       tickSeconds: 30,
+      scheduleGate: RoutineSchedulerLock(workspacePath: workspacePath).gate,
       readyCheck: { [weak self] routine in
         guard case .existingAgent(let nodeID) = routine.target else { return true }
         guard let snapshot = try? await self?.supervisor.snapshot(agentID: nodeID) else {
@@ -679,6 +728,9 @@ public final class ApplicationServices: ObservableObject {
         _ = try? await syncMorningBriefAccounts(profileID: profile.id)
       }
       startCardRunCleanup()
+      store.automationAgentCreated = { [weak self] nodeID, owner in
+        self?.office.holdStartingRun(nodeID, owner: owner)
+      }
       routineEngine.start()
       startAgentWatchdog()
       observeWebhookRoutines()
@@ -3459,6 +3511,9 @@ public final class ApplicationServices: ObservableObject {
 
   private func startFleetConsumption() {
     guard fleetTask == nil else { return }
+    fleetStore.outputWanted = { [weak self] agentID in
+      self?.scheduleRenderRefresh(agentID: agentID)
+    }
     let supervisor = supervisor
     fleetTask = Task { [weak self] in
       for await event in supervisor.events {
@@ -3625,7 +3680,14 @@ public final class ApplicationServices: ObservableObject {
       try? await Task.sleep(for: .milliseconds(40))
       guard !Task.isCancelled, let self else { return }
       self.renderRefreshTasks[agentID] = nil
-      guard let snapshot = try? await self.supervisor.snapshot(agentID: agentID) else { return }
+      // Streaming refreshes carry the terminal output only while a terminal is drawing it. The
+      // conversation reads the transcript and live text, which are always current.
+      let showsOutput = self.fleetStore.isShowingOutput(of: agentID)
+      guard
+        var snapshot = try? await self.supervisor.snapshot(
+          agentID: agentID, includingOutput: showsOutput)
+      else { return }
+      if !showsOutput { snapshot = self.fleetStore.carryingPublishedOutput(snapshot) }
       self.fleetStore.update(snapshot)
       _ = try? self.updatePrivateContextProjection(snapshot, nodeID: agentID)
     }

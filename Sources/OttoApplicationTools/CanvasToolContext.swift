@@ -44,7 +44,13 @@ extension CanvasStore {
 
   @MainActor
   func dispatch(_ command: CanvasCommand, context: ToolContext) throws -> CommandReceipt {
-    dispatch(command, targetCanvasID: try resolvedCanvasID(for: context))
+    let receipt = dispatch(command, targetCanvasID: try resolvedCanvasID(for: context))
+    if context.source == .automation, case .createNode(.agent, _, nil) = command,
+      let nodeID = receipt.affectedNodeIDs.first
+    {
+      automationAgentCreated?(nodeID, context.actorID)
+    }
+    return receipt
   }
 
   @MainActor

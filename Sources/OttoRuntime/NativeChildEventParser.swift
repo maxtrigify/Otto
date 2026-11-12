@@ -16,9 +16,11 @@ struct NativeChildEventParser: Sendable {
   init(provider: AgentProvider) { self.provider = provider }
 
   mutating func ingest(_ line: String) -> (events: [ParsedAgentEvent], nested: Bool) {
-    guard let data = line.data(using: .utf8),
-      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-    else { return ([], false) }
+    ingest(providerJSONObject(line))
+  }
+
+  mutating func ingest(_ object: [String: Any]?) -> (events: [ParsedAgentEvent], nested: Bool) {
+    guard let object else { return ([], false) }
     changed = []
     let parent = string(object, "parent_tool_use_id")
     switch provider {

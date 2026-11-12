@@ -202,6 +202,9 @@ extension ApplicationServices {
       targetCanvasID: store.activeCanvas.id,
       interactionPrivileges: []
     )
+    // The new agent is held as background work from the moment it exists (see
+    // `automationAgentCreated`); by the time this returns it has its lasting binding.
+    defer { office.releaseStartingRuns(owner: context.actorID) }
     switch routine.target {
     case .existingAgent(let nodeID):
       _ = try await registry.call(

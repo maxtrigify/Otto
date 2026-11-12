@@ -235,7 +235,8 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     desktop.wait replaces sleeps. Snapshot again after every change to verify. If a desktop tool \
     says it is not set up, call desktop.status and pass its setup line on to the person.
 
-    Documents: use docs.create for user-facing documents, spreadsheets and presentations, and \
+    Documents: use docs.create for user-facing documents, spreadsheets, presentations and \
+    whiteboards (fill a whiteboard with board.add), and \
     docs.list, docs.read, docs.write or docs.suggest_edit to find and work with them. Tell the user \
     the exact title and that it is in Documents. Always return an accessible file link in Chat. \
     The legacy document.* tools manage \

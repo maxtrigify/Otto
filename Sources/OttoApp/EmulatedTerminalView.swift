@@ -1,8 +1,24 @@
 import AppKit
 import OttoModels
 import OttoRuntime
+import OttoServices
 import SwiftTerm
 import SwiftUI
+
+extension View {
+  /// Declares that this view draws an agent's terminal output while it is on screen, so the
+  /// output is kept current for it. Without a store (previews) it does nothing.
+  func showsAgentOutput(of agentID: UUID, in store: AgentFleetStore?) -> some View {
+    task(id: agentID) {
+      guard let store else { return }
+      store.beginShowingOutput(of: agentID)
+      defer { store.endShowingOutput(of: agentID) }
+      // Holds the registration until the view goes away or shows a different agent.
+      let untilCancelled = AsyncStream<Never> { _ in }
+      for await _ in untilCancelled {}
+    }
+  }
+}
 
 struct EmulatedTerminalView: NSViewRepresentable {
   @Environment(\.ottoPalette) private var palette

@@ -4,6 +4,23 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## Unreleased
+
+### New
+
+- **Whiteboards.** Documents has a fourth kind of file: a board of sticky notes, text, shapes, frames and arrows. Ask the helper to lay out a plan, a timeline or a retro and watch it appear, start from a template, or build it by hand. Draw a box around part of the board with "Ask about an area" to ask about just that part, and whatever you have selected travels with your message. Right-click a note and choose "Give this to…" to hand it to a new session or one of your bots: the note shows who has it and how it is going, and is marked done when they finish. "Keep fresh" has an agent update the board on a schedule. On Home, a question from an agent working on a note says which board and note it came from. Boards are saved as files in the space's Documents folder and export as a picture.
+- **Mac session approvals reach Telegram too.** When a session or routine on your Mac asks for approval, it now shows in the paired Telegram chat with Approve and Deny buttons, matching the switch bots already use (Settings → Connectors → Telegram → Approvals, still off by default). Bot approvals stay in the chat that started them, so each request is offered once (issue #49). Thanks to Sukhpal Gill (onlinegill) for PR #65.
+- **Put your sessions in the order you want.** Right-click a session in the sidebar and choose Move up or Move down. Each space remembers its own order, and new sessions still appear where they always did (issue #37). Thanks to Sukhpal Gill (onlinegill) for PR #75.
+
+### Fixed
+
+- **Otto stays light while agents are working.** Otto could use a whole processor core, and make the Mac feel slow, for as long as agents were printing output — worse the longer they had been running and the more of them there were. Each new piece of output is now handled once, at its own size, and an agent's terminal output is only prepared for display while a terminal showing it is open.
+- **Automations no longer flash up in Sessions.** A card update or automation run could appear in the Sessions list for a few seconds while its agent started, then vanish. Its agent is now background work from the moment it is created.
+- **A schedule fires once when two Otto apps share a workspace.** With Otto and Otto Dev (or two copies of Otto) open on the same workspace, every scheduled automation ran twice. One app now fires the schedules, and another takes over if it quits.
+- **Memory and saving build on Linux.** Two more pieces of the headless Linux build (#47); nothing changes on Mac. Thanks to Justin Philip Flores (GospelNerd) for PRs #76 and #77.
+
+- **Photos, videos, sounds and PDFs open in the Files panel.** Clicking a link to an image, video or audio file in a chat showed "Could not read this file as text." It now shows a preview, with playback for video and sound, and an Open button for the default app. Other files that are not text, such as Word documents and zips, open in Quick Look too (issue #73).
+
 ## 0.2.17 — 2026-11-09
 
 ### New

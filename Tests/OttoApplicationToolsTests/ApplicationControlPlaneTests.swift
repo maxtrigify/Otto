@@ -51,6 +51,47 @@ struct ApplicationControlPlaneTests {
     try await supervisor.stop(agentID: created.agentID)
   }
 
+  @Test("An automation's agent is reported the moment it is created; a person's is not")
+  func automationAgentsAreReportedAtCreation() async throws {
+    let directory = FileManager.default.temporaryDirectory.appending(
+      path: "otto-automation-agent-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let canvas = OttoCanvas(name: "Automation agents")
+    let store = await CanvasStore(
+      snapshot: WorkspaceSnapshot(canvases: [canvas], activeCanvasID: canvas.id))
+    let supervisor = AgentSupervisor()
+    let spawn = AgentSpawnTool(store: store, supervisor: supervisor, workspacePath: directory.path)
+    let reports = CreationReports()
+    await MainActor.run {
+      store.automationAgentCreated = { nodeID, owner in
+        // Seen in the same turn as the creation: nothing has had the chance to draw the agent
+        // as a session, and it has no provider content yet.
+        let node = store.activeCanvas.nodes.first { $0.id == nodeID }
+        reports.entries.append((nodeID, owner, node?.agentDefinition == nil))
+      }
+    }
+    let input = AgentSpawnProviderInput(
+      provider: .shell, x: 10, y: 20, permissionMode: .workspaceWrite)
+
+    let person = try await spawn.call(
+      input, context: ToolContext(actorID: "person", scopes: [.canvasWrite, .agentControl]))
+    #expect(await MainActor.run { reports.entries.isEmpty })
+
+    let automated = try await spawn.call(
+      input,
+      context: ToolContext(
+        actorID: "routine-1", scopes: [.canvasWrite, .agentControl], source: .automation,
+        sourceCanvasID: canvas.id, targetCanvasID: canvas.id))
+    let entries = await MainActor.run { reports.entries }
+    #expect(entries.count == 1)
+    #expect(entries.first?.0 == automated.agentID)
+    #expect(entries.first?.1 == "routine-1")
+    #expect(entries.first?.2 == true)
+    try await supervisor.stop(agentID: person.agentID)
+    try await supervisor.stop(agentID: automated.agentID)
+  }
+
   @Test("Background agents mutate their owning canvas without stealing user focus")
   func backgroundAgentCanvasIsolation() async throws {
     let foreground = OttoCanvas(name: "Foreground")
@@ -1476,4 +1517,8 @@ private struct PersistedSessionRestartAdapter: AgentAdapter {
       workingDirectory: request.workspacePath
     )
   }
+}
+
+@MainActor private final class CreationReports {
+  var entries: [(UUID, String, Bool)] = []
 }
