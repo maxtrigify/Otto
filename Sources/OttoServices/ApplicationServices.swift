@@ -248,6 +248,7 @@ public final class ApplicationServices: ObservableObject {
   public lazy var telegram = TelegramConnector(services: self)
   public lazy var smtp = SMTPConnector(workspacePath: defaultWorkspacePath)
   public lazy var connectorAccess = ConnectorAccessStore(workspacePath: defaultWorkspacePath)
+  public lazy var repos = ReposStore(workspacePath: defaultWorkspacePath)
   lazy var privatePhone = PrivatePhoneConnection()
   public lazy var websiteAccounts = WebsiteAccountService(
     workspacePath: workspacePath,
