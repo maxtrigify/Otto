@@ -1162,10 +1162,9 @@ struct ChatWorkspaceView: View {
           } else if let node = allAgentNodes.first(where: { $0.id == id }) {
             selectSession(node)
           }
-        }
-      ) { nodeID in
-        assistantConversation(nodeID)
-      }
+        },
+        conversation: { nodeID in assistantConversation(nodeID) }
+      )
     case .skills:
       SkillsView(services: services, library: services.skills)
     case .browser:
@@ -3845,7 +3844,9 @@ struct ChatWorkspaceView: View {
                     .frame(width: 38, height: 38)
                     .background(palette.signal.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                   VStack(alignment: .leading, spacing: 4) {
-                    Text(item.node.displayName).font(.ottoDisplay(15).weight(.semibold))
+                    Text(LibraryItemTitle.title(for: item.node))
+                      .font(.ottoDisplay(15).weight(.semibold))
+                      .lineLimit(1)
                     Text(resourceKindLabel(item.node.kind))
                       .font(.ottoMono(7))
                       .foregroundStyle(palette.muted)

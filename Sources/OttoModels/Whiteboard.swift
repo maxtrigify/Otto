@@ -53,7 +53,8 @@ public struct Whiteboard: Codable, Equatable, Sendable {
   /// stored start and end when it is free-standing. Nil when a joined item has gone.
   public func arrowEnds(_ arrow: BoardItem) -> (start: CGPoint, end: CGPoint)? {
     let stored = (
-      start: CGPoint(x: arrow.x, y: arrow.y), end: CGPoint(x: arrow.x + arrow.w, y: arrow.y + arrow.h)
+      start: CGPoint(x: arrow.x, y: arrow.y),
+      end: CGPoint(x: arrow.x + arrow.w, y: arrow.y + arrow.h)
     )
     let source = arrow.from.flatMap(item)
     let target = arrow.to.flatMap(item)
@@ -61,9 +62,11 @@ public struct Whiteboard: Codable, Equatable, Sendable {
     if arrow.to != nil, target == nil { return nil }
     let startCentre = source.map { CGPoint(x: $0.rect.midX, y: $0.rect.midY) } ?? stored.start
     let endCentre = target.map { CGPoint(x: $0.rect.midX, y: $0.rect.midY) } ?? stored.end
-    let start = source.map { Self.edgePoint(of: $0.rect.insetBy(dx: -6, dy: -6), toward: endCentre) }
+    let start =
+      source.map { Self.edgePoint(of: $0.rect.insetBy(dx: -6, dy: -6), toward: endCentre) }
       ?? stored.start
-    let end = target.map { Self.edgePoint(of: $0.rect.insetBy(dx: -6, dy: -6), toward: startCentre) }
+    let end =
+      target.map { Self.edgePoint(of: $0.rect.insetBy(dx: -6, dy: -6), toward: startCentre) }
       ?? stored.end
     return (start, end)
   }
@@ -129,7 +132,8 @@ public struct Whiteboard: Codable, Equatable, Sendable {
     case .note: parts.append("note" + (item.tint.map { " \($0.rawValue)" } ?? ""))
     case .text: parts.append("text")
     case .shape:
-      parts.append((item.shape ?? .rectangle).rawValue + (item.tint.map { " \($0.rawValue)" } ?? ""))
+      parts.append(
+        (item.shape ?? .rectangle).rawValue + (item.tint.map { " \($0.rawValue)" } ?? ""))
     case .frame: parts.append("frame")
     case .arrow:
       parts.append("arrow \(item.from ?? "(free)") → \(item.to ?? "(free)")")

@@ -116,6 +116,13 @@ struct WorkspaceView: View {
       .ignoresSafeArea(.container, edges: .top)
       .zIndex(6)
 
+      VoiceShorelineGlow(voice: voice)
+        .ignoresSafeArea()
+        .zIndex(7)
+        .onChange(of: showingPersonalHome, initial: true) { _, showing in
+          voice.noteShowingHome(showing)
+        }
+
       if showingOnboarding {
         FirstRunWelcomeView(services: services, complete: finishWelcome)
           .transition(.opacity)
@@ -215,6 +222,10 @@ struct WorkspaceView: View {
     }
     .onChange(of: services.botNavigationRequest) { _, request in
       if request != nil { showingPersonalHome = false }
+    }
+    .onChange(of: services.placeNavigationRequest) { _, request in
+      guard let request else { return }
+      showPlace(request)
     }
     #if DEBUG
       .onReceive(NotificationCenter.default.publisher(for: OttoDevProbe.goNotification)) { note in
@@ -443,6 +454,26 @@ struct WorkspaceView: View {
     uiState.requestsBrowser = false
     uiState.showsCommandPalette = false
     openChatDestination(.browser)
+  }
+
+  /// Voice or an agent asked for somewhere to be shown: Home, a place, or one file in Documents.
+  private func showPlace(_ request: PlaceNavigationRequest) {
+    NSApp.activate()
+    if request.place == "home" {
+      showingPersonalHome = true
+      return
+    }
+    let destinations: [String: ChatSurfaceDestination] = [
+      "chat": .conversation, "documents": .documents, "dashboards": .dashboards,
+      "browser": .browser, "activity": .activity, "automations": .routines, "skills": .skills,
+      "files": .files,
+    ]
+    guard let destination = destinations[request.place] else { return }
+    if let path = request.documentPath {
+      // Documents shows whichever file this names.
+      UserDefaults.standard.set(path, forKey: "otto.documents.open")
+    }
+    openChatDestination(destination)
   }
 
   private func openChatDestination(_ destination: ChatSurfaceDestination) {

@@ -179,7 +179,8 @@ struct BoardToolsTests {
     #expect(ends.start.x == 206)
     #expect(ends.end.x == 594)
     #expect(ends.start.y == 120)
-    #expect(board.items(in: CGRect(x: 550, y: 0, width: 300, height: 300)).map(\.id) == ["b", "ab"])
+    #expect(
+      board.items(in: CGRect(x: 550, y: 0, width: 300, height: 300)).map(\.id) == ["b", "ab"])
     #expect(board.issueID() == "i1")
     #expect(board.bounds == CGRect(x: 0, y: 0, width: 780, height: 300))
 

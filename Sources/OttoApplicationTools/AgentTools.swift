@@ -1273,12 +1273,16 @@ public struct AgentGetStatusTool: OttoTool {
   )
 
   private let supervisor: AgentSupervisor
-  public init(supervisor: AgentSupervisor) { self.supervisor = supervisor }
+  private let dormant: DormantAgentLookup?
+  public init(supervisor: AgentSupervisor, dormant: DormantAgentLookup? = nil) {
+    self.supervisor = supervisor
+    self.dormant = dormant
+  }
 
   public func call(_ input: AgentStatusInput, context: ToolContext) async throws
     -> AgentStatusOutput
   {
-    try await output(for: input.agentID, supervisor: supervisor)
+    try await output(for: input.agentID, supervisor: supervisor, dormant: dormant)
   }
 }
 
@@ -1394,16 +1398,21 @@ public struct AgentGetResultTool: OttoTool {
   )
   private let supervisor: AgentSupervisor
   private let brain: ProjectBrainStore?
+  private let dormant: DormantAgentLookup?
 
-  public init(supervisor: AgentSupervisor, brain: ProjectBrainStore? = nil) {
+  public init(
+    supervisor: AgentSupervisor, brain: ProjectBrainStore? = nil,
+    dormant: DormantAgentLookup? = nil
+  ) {
     self.supervisor = supervisor
     self.brain = brain
+    self.dormant = dormant
   }
 
   public func call(_ input: AgentStatusInput, context: ToolContext) async throws
     -> AgentStatusOutput
   {
-    let result = try await output(for: input.agentID, supervisor: supervisor)
+    let result = try await output(for: input.agentID, supervisor: supervisor, dormant: dormant)
     // Reading a finished child's result inside the turn replaces the background notice.
     await supervisor.markDelegatedCompletionConsumed(
       childID: input.agentID, by: context.sourceNodeID)
@@ -1479,8 +1488,23 @@ private func agentPromptSchema(promptDescription: String) -> JSONValue {
   )
 }
 
-private func output(for id: UUID, supervisor: AgentSupervisor) async throws -> AgentStatusOutput {
-  let snapshot = try await supervisor.snapshot(agentID: id)
+/// Finds a session that is not running: one whose conversation was saved by an earlier launch
+/// of Otto and has not been continued since.
+public typealias DormantAgentLookup = @Sendable (UUID) async -> AgentRuntimeSnapshot?
+
+/// A session that has not run since Otto opened is unknown to the supervisor, which only knows
+/// live processes, so its result could be read on screen but not by a tool: asking for a summary
+/// of it failed unless it had just been used. Its saved conversation is read instead.
+private func output(
+  for id: UUID, supervisor: AgentSupervisor, dormant: DormantAgentLookup? = nil
+) async throws -> AgentStatusOutput {
+  let snapshot: AgentRuntimeSnapshot
+  do {
+    snapshot = try await supervisor.snapshot(agentID: id)
+  } catch {
+    guard let saved = await dormant?(id) else { throw error }
+    snapshot = saved
+  }
   return AgentStatusOutput(
     agentID: id,
     state: snapshot.state,

@@ -289,6 +289,9 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 
   /// Wires the microphone into the engine and starts it. Must run on `audioQueue`.
   ///
+  /// Leaves the voice-processing block early when Otto has its own microphone.
+  private struct VoiceProcessingSkipped: Error {}
+
   /// Every AVFoundation call here can raise an Objective-C exception for an unusable input
   /// device or format, so the whole block runs under the exception guard and reports a voice
   /// error instead of terminating the app.
@@ -296,10 +299,24 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
     do {
       try ObjectiveCExceptions.catching {
         let input = self.engine.inputNode
+        // Record from the microphone chosen for Otto, when there is one and it is connected.
+        //
+        // macOS voice processing (echo cancellation) always builds itself around the system's
+        // default microphone and ignores any other choice. So a microphone that is not the
+        // system default is used without it; playback then falls back to taking turns, which
+        // the forwarding policy below already does whenever voice processing is unavailable.
+        let chosenDevice = AudioInputDevices.preferredDeviceID()
+        let usesOwnMicrophone =
+          chosenDevice != nil && chosenDevice != AudioInputDevices.systemDefaultDeviceID()
         var voiceProcessingActive = false
         // Voice processing supplies acoustic echo cancellation so Otto does not transcribe its own
         // speaker output or nearby nonvoice audio as a new user turn.
         do {
+          if usesOwnMicrophone, let chosenDevice {
+            if input.isVoiceProcessingEnabled { try input.setVoiceProcessingEnabled(false) }
+            try input.auAudioUnit.setDeviceID(chosenDevice)
+            throw VoiceProcessingSkipped()
+          }
           if !input.isVoiceProcessingEnabled {
             try input.setVoiceProcessingEnabled(true)
           }
@@ -375,6 +392,8 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 
     try await performAudioOperation { [self] in
       try self.preparePlaybackGraph()
+      VoiceActivityLevels.shared.queueOutput(
+        pcm16: data, sampleRate: VoiceActivityLevels.providerSampleRate)
       if !self.engine.isRunning {
         do {
           try ObjectiveCExceptions.catching {
@@ -486,6 +505,7 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
     lock.withLock {
       guard let inputHandler else { return }
       let rms = rootMeanSquare(input)
+      VoiceActivityLevels.shared.noteInput(manualInputEnabled ? rms : 0)
       let classifierAllowsSpeech = soundAnalyzer == nil || soundGate.isOpen
       if voiceProcessingActive, playbackActive, !interruptionReported, classifierAllowsSpeech {
         if rms >= Self.speechRMSFloor {
@@ -501,6 +521,7 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
           playbackEpoch &+= 1
           interruptionReported = true
           detectedSpeech = speechActivityHandler
+          VoiceActivityLevels.shared.clearOutput()
           // The real-time audio callback never mutates the player directly. Queueing the stop keeps
           // it ordered with any engine start, playback scheduling, or shutdown already in flight.
           audioQueue.async { [weak self] in self?.stopPlayerIfAttached() }
@@ -591,6 +612,7 @@ public final class AVFoundationVoiceAudioTransport: @unchecked Sendable, VoiceAu
 
   /// Must only be called from `audioQueue`.
   private func resetPlaybackState() {
+    VoiceActivityLevels.shared.clearOutput()
     lock.withLock {
       playbackEpoch &+= 1
       pendingPlaybackBuffers = 0

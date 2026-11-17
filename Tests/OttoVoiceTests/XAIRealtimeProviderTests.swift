@@ -313,7 +313,7 @@ struct XAIRealtimeProviderTests {
     let request = try #require(await socket.request)
     #expect(
       request.url?.absoluteString
-        == "wss://voice.test/v1/realtime?model=grok-voice-think-fast-2.0"
+        == "wss://voice.test/v1/realtime?model=grok-voice-3.0"
     )
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer xai-test-secret")
     try await waitUntil { await socket.sent.count == 1 }

@@ -67,12 +67,19 @@ public actor ParakeetWarmRecognizer {
   }
 
   public func transcribe(_ audioURL: URL) async throws -> ParakeetTranscription {
+    let audio = try Self.readAudio(audioURL)
+    return try await transcribe(samples: audio.samples, sampleRate: audio.sampleRate)
+  }
+
+  /// Transcribes audio already in memory, as the local voice engine captures it.
+  public func transcribe(samples: [Float], sampleRate: Int32) async throws
+    -> ParakeetTranscription
+  {
     try await prepare()
     guard let socket else {
       throw ParakeetRuntimeError.warmWorker("The local recognizer did not open a connection")
     }
-    let audio = try Self.readAudio(audioURL)
-    let payload = Self.makePayload(samples: audio.samples, sampleRate: audio.sampleRate)
+    let payload = Self.makePayload(samples: samples, sampleRate: sampleRate)
     do {
       for start in stride(from: 0, to: payload.count, by: 10_240) {
         let end = min(start + 10_240, payload.count)
@@ -235,5 +242,18 @@ public actor ParakeetWarmRecognizer {
       payload.append(Data(bytes: &bits, count: MemoryLayout<UInt32>.size))
     }
     return payload
+  }
+}
+
+/// What does the hearing for the local voice engine.
+public protocol LocalSpeechRecognizing: Sendable {
+  func prepare() async throws
+  func text(samples: [Float], sampleRate: Int) async throws -> String
+  func shutdown() async
+}
+
+extension ParakeetWarmRecognizer: LocalSpeechRecognizing {
+  public func text(samples: [Float], sampleRate: Int) async throws -> String {
+    try await transcribe(samples: samples, sampleRate: Int32(sampleRate)).text
   }
 }

@@ -190,6 +190,7 @@ build_app() {
     --package-path "$repository_root" \
     --scratch-path "$scratch_path" \
     --disable-automatic-resolution \
+    --disable-keychain \
     --jobs "${OTTO_DEV_BUILD_JOBS:-${MUSE_DEV_BUILD_JOBS:-4}}" \
     -c debug
   do
@@ -206,6 +207,7 @@ build_app() {
     --package-path "$repository_root" \
     --scratch-path "$scratch_path" \
     --disable-automatic-resolution \
+    --disable-keychain \
     --jobs "${OTTO_DEV_BUILD_JOBS:-${MUSE_DEV_BUILD_JOBS:-4}}" \
     -c debug \
       --show-bin-path

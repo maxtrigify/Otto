@@ -205,6 +205,9 @@ swift_args=(
   --scratch-path "$scratch_path"
   --cache-path "$cache_path"
   --manifest-cache local
+  # SwiftPM looks in the keychain before fetching a binary dependency. From a script that
+  # lookup can wait for ever on a prompt nobody sees; Otto's dependencies are all public.
+  --disable-keychain
 )
 
 if [[ $command_name == resolve ]]; then

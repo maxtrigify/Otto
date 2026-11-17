@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.openotto.build-gc</string>
+  <!-- REPO_ROOT is rewritten by `scripts/otto-gc --install-schedule`. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPO_ROOT/scripts/otto-gc</string>
+    <string>--days</string>
+    <string>7</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+  <!-- Build output only; never worth waking or competing with the user for. -->
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>HOME_DIR/Library/Logs/otto-build-gc.log</string>
+  <key>StandardErrorPath</key>
+  <string>HOME_DIR/Library/Logs/otto-build-gc.log</string>
+</dict>
+</plist>

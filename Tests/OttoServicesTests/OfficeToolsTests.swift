@@ -33,6 +33,34 @@ struct OfficeToolsTests {
     func apply(_ change: DocSuggestion.Change) -> Bool { OfficeStore.apply(change, to: text) }
   }
 
+  @Test("Opening a file or a place asks the interface to show it, which creating alone does not")
+  func showingOnScreen() async throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let services = ApplicationServices(store: CanvasStore(), workspacePath: root.path)
+    await services.start()
+    defer { services.stop() }
+
+    _ = try await call(services, "docs.create", OfficeCreateInput(title: "Launch notes"))
+    #expect(services.placeNavigationRequest == nil)
+
+    let opened = try await call(services, "docs.open", OfficeDocRef(doc: "Launch notes"))
+    #expect(opened.file?.path == "Documents/Launch notes.docx")
+    #expect(services.placeNavigationRequest?.place == "documents")
+    #expect(services.placeNavigationRequest?.documentPath == "Documents/Launch notes.docx")
+
+    let shown = try await call(
+      services, "app.open", AppOpenInput(place: "Home"), as: AppOpenOutput.self)
+    #expect(shown.showing == "home")
+    #expect(services.placeNavigationRequest?.place == "home")
+    #expect(services.placeNavigationRequest?.documentPath == nil)
+
+    await #expect(throws: (any Error).self) {
+      _ = try await call(
+        services, "app.open", AppOpenInput(place: "the moon"), as: AppOpenOutput.self)
+    }
+  }
+
   @Test("A document is a real .docx; agents draft into it, then suggest edits the user accepts")
   func documentFlow() async throws {
     let root = root()

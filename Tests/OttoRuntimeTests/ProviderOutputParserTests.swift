@@ -764,7 +764,8 @@ struct ProviderOutputParserTests {
         live.ingest(providerJSONObject(String(line)))
       }
       #expect(live.text != nil)
-      #expect(live.text == ProviderConversationProjection.liveText(from: output, provider: provider))
+      #expect(
+        live.text == ProviderConversationProjection.liveText(from: output, provider: provider))
     }
   }
 

@@ -1,6 +1,11 @@
 import Foundation
 import OttoModels
 import OttoTools
+import os
+
+/// Voice failures were only ever shown as one short line on screen, so nothing remained to say
+/// what had actually gone wrong. They are written here with their technical detail.
+private let voiceSessionLog = Logger(subsystem: "io.openotto.desktop", category: "Voice")
 
 public actor VoiceSession {
   private let registry: ToolRegistry
@@ -134,6 +139,9 @@ public actor VoiceSession {
       await audioTransport?.stop()
       await provider.disconnect()
       self.provider = nil
+      voiceSessionLog.error(
+        "voice connection failed: \(VoiceFailureText.technicalDetail(for: error), privacy: .public)"
+      )
       current.lastError = VoiceFailureText.message(for: error)
       appendTrace(
         kind: .error,
@@ -197,6 +205,8 @@ public actor VoiceSession {
       do {
         try await startMicrophoneInput(provider: streamingProvider)
       } catch {
+        voiceSessionLog.error(
+          "microphone failed: \(VoiceFailureText.technicalDetail(for: error), privacy: .public)")
         current.lastError = VoiceFailureText.message(for: error)
         appendTrace(
           kind: .error,
@@ -365,6 +375,7 @@ public actor VoiceSession {
     case .failed(let message):
       cancelDelegations()
       await audioTransport?.stop()
+      voiceSessionLog.error("voice provider error: \(message, privacy: .public)")
       current.lastError = message
       appendTrace(kind: .error, title: "Voice provider error", detail: message, succeeded: false)
       transition(to: .error)
@@ -706,10 +717,11 @@ public actor VoiceSession {
     do {
       let resolvedArguments =
         name == "agent.spawn"
-        ? Self.applyingPermissionDefault(
-          toAgentSpawnArguments: arguments,
-          defaults: permissionDefaults
-        )
+        ? try VoiceModelCheck.checked(
+          spawnArguments: Self.applyingPermissionDefault(
+            toAgentSpawnArguments: arguments,
+            defaults: permissionDefaults
+          ), context: latestContext)
         : arguments
       let output = try await callDelegatedTool(
         name: name,

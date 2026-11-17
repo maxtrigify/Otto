@@ -3,6 +3,7 @@ import Foundation
 import OttoCore
 import OttoModels
 import OttoObservability
+import OttoRuntime
 import OttoSecurity
 import OttoServices
 import OttoTools
@@ -10,29 +11,39 @@ import OttoVoice
 import os
 
 enum VoiceEngine: String, CaseIterable, Hashable, Identifiable {
+  /// Hearing, thinking and speaking without an API key: Parakeet, the person's own Claude Code
+  /// sign-in, and a voice on this Mac.
+  case local
   case xai
   case openai
+  /// GPT-Live holds the conversation; the person's own harness does the work.
+  case openaiLive = "openai-live"
 
   var id: String { rawValue }
 
   var displayName: String {
     switch self {
+    case .local: "On this Mac"
     case .xai: "xAI Grok Voice"
     case .openai: "GPT Realtime"
+    case .openaiLive: "GPT-Live"
     }
   }
 
   var modelName: String {
     switch self {
-    case .xai: "grok-voice-think-fast-2.0"
+    case .local: "Parakeet · Claude Code · Kokoro"
+    case .xai: "grok-voice-3.0"
     case .openai: "gpt-realtime-2.1"
+    case .openaiLive: "gpt-live-1 · your own harness"
     }
   }
 
   var keychainKey: String? {
     switch self {
+    case .local: nil
     case .xai: "xai.api-key"
-    case .openai: "openai.api-key"
+    case .openai, .openaiLive: "openai.api-key"
     }
   }
 
@@ -40,17 +51,29 @@ enum VoiceEngine: String, CaseIterable, Hashable, Identifiable {
 
   var providerKind: VoiceProviderKind? {
     switch self {
+    case .local: nil
     case .xai: .xai
     case .openai: .openai
+    // GPT-Live has voices of its own, none shared with GPT Realtime; it speaks in its default
+    // until Otto offers a choice of them.
+    case .openaiLive: nil
     }
   }
 
+  /// Whether the engine bills for every second it stays connected, so that it must only be
+  /// connected while a conversation is actually happening.
+  var billsWhileConnected: Bool { self == .openaiLive }
+
   var privacySummary: String {
     switch self {
+    case .local:
+      "Microphone audio stays on this Mac. Only the words you say are sent, as text, to your Claude Code account."
     case .xai:
       "Microphone audio is streamed to xAI for cloud processing while voice is awake."
     case .openai:
       "Microphone audio is streamed to OpenAI for cloud processing while voice is awake."
+    case .openaiLive:
+      "Microphone audio is streamed to OpenAI only while a conversation is open. The work itself is done by your own harness, on this Mac."
     }
   }
 }
@@ -215,9 +238,11 @@ final class VoiceController: ObservableObject {
     didSet {
       UserDefaults.standard.set(engine.rawValue, forKey: "otto.voice.engine")
       selectedVoiceID = Self.savedVoiceID(for: engine)
+      prewarmLocalVoice()
       Task {
         await stopVoicePreview()
         await refreshCredentialStatus()
+        await moveLiveVoiceToChosenEngine()
       }
     }
   }
@@ -261,6 +286,77 @@ final class VoiceController: ObservableObject {
       Task { await reconcileOperatingMode() }
     }
   }
+  /// Whether local voice turns away voices other than the one it has learned.
+  @Published var onlyMyVoice: Bool =
+    UserDefaults.standard.object(forKey: "otto.voice.onlyMyVoice")
+    as? Bool ?? true
+  {
+    didSet { UserDefaults.standard.set(onlyMyVoice, forKey: "otto.voice.onlyMyVoice") }
+  }
+  @Published private(set) var voiceprintStatus = VoiceprintStatus.unavailable
+  /// The microphone Otto listens through; empty means whatever macOS has as its default.
+  @Published var inputDeviceUID: String =
+    UserDefaults.standard.string(forKey: AudioInputDevices.preferenceKey) ?? ""
+  {
+    didSet {
+      guard inputDeviceUID != oldValue else { return }
+      UserDefaults.standard.set(inputDeviceUID, forKey: AudioInputDevices.preferenceKey)
+      Task { await restartVoiceForMicrophoneChange() }
+    }
+  }
+  @Published private(set) var inputDevices: [AudioInputDevice] = []
+  @Published private(set) var outputDeviceName = "Unknown"
+  @Published private(set) var speakerTestIsPlaying = false
+  @Published private(set) var microphoneTest = MicrophoneTestState.idle
+  @Published private(set) var kokoroState = LocalVoiceModelState.notDownloaded
+  @Published private(set) var voiceLearningState = VoiceLearningState.idle
+  private let voiceSampleRecorder = VoiceSampleRecorder()
+
+  /// What the person is asked to read so Otto can learn their voice in one go.
+  static let voiceLearningLine =
+    "Otto, this is my voice. Listen only to me, and ignore the television, the radio, and anyone else in the room."
+
+  /// The person's consent to download the open-source voice models for "On this Mac".
+  private var localModelsApproved: Bool {
+    get { UserDefaults.standard.bool(forKey: "otto.voice.localModelsApproved") }
+    set { UserDefaults.standard.set(newValue, forKey: "otto.voice.localModelsApproved") }
+  }
+
+  /// Which harness does the thinking for local voice, and with which of its models. An empty
+  /// model means the harness's own default, or the fastest one for Claude Code.
+  @Published var thinkingProvider: AgentProvider =
+    UserDefaults.standard.string(forKey: "otto.voice.thinkingProvider")
+    .flatMap(AgentProvider.init(rawValue:)) ?? .claudeCode
+  {
+    didSet {
+      UserDefaults.standard.set(thinkingProvider.rawValue, forKey: "otto.voice.thinkingProvider")
+      thinkingModel =
+        UserDefaults.standard.string(
+          forKey: "otto.voice.thinkingModel.\(thinkingProvider.rawValue)") ?? ""
+    }
+  }
+  @Published var thinkingModel: String =
+    UserDefaults.standard.string(
+      forKey:
+        "otto.voice.thinkingModel.\(UserDefaults.standard.string(forKey: "otto.voice.thinkingProvider") ?? AgentProvider.claudeCode.rawValue)"
+    ) ?? ""
+  {
+    didSet {
+      UserDefaults.standard.set(
+        thinkingModel, forKey: "otto.voice.thinkingModel.\(thinkingProvider.rawValue)")
+    }
+  }
+  @Published private(set) var installedThinkingProviders: Set<AgentProvider> =
+    ExecutableLocator.candidates("claude").isEmpty ? [] : [.claudeCode]
+
+  /// Whether the Kokoro voice still has to be fetched before it can speak.
+  var kokoroNeedsDownload: Bool { !KokoroSpeechSynthesizer.isDownloaded() }
+
+  /// Whether choosing local voice would mean downloading anything.
+  var localVoiceNeedsDownloads: Bool { !isParakeetInstalled || kokoroNeedsDownload }
+
+  /// Hearing and thinking are required; the Kokoro voice is optional because macOS can speak.
+  var localVoiceIsSetUp: Bool { isParakeetInstalled && thinkingIsAvailable }
   @Published var announceCompletions: Bool {
     didSet { saveNotificationPolicy() }
   }
@@ -300,6 +396,8 @@ final class VoiceController: ObservableObject {
   private var parakeetInstallerTask: Task<Void, Never>?
   private var whistleInstallerTask: Task<Void, Never>?
   private var parakeetRecognizer: ParakeetWarmRecognizer?
+  private var kokoroSynthesizer: KokoroSpeechSynthesizer?
+  private var voiceFilter: OnDeviceVoiceFilter?
   private var parakeetPrewarmTask: Task<Void, Never>?
   private var wakeWordDetector: (any AcousticWakeWordDetecting)?
   private var wakeWordTask: Task<Void, Never>?
@@ -314,6 +412,18 @@ final class VoiceController: ObservableObject {
   private var previewTransport: (any VoiceAudioTransport)?
   private var canvasCancellable: AnyCancellable?
   private var servicesCancellable: AnyCancellable?
+  private var modelCatalogCancellable: AnyCancellable?
+  private var preferencesCancellable: AnyCancellable?
+  /// The recogniser of the current local voice conversation, kept so it can be told Otto's names
+  /// as bots, sessions and models change.
+  private var boostedRecognizer: BoostedSpeechRecognizer?
+  @Published private(set) var sharperHearingState: LocalVoiceModelState =
+    BoostedSpeechRecognizer.isDownloaded() ? .ready : .notDownloaded
+  private var sharperHearingWatch: Task<Void, Never>?
+  private var sharperHearingApproved: Bool {
+    get { UserDefaults.standard.bool(forKey: "otto.voice.sharperHearingApproved") }
+    set { UserDefaults.standard.set(newValue, forKey: "otto.voice.sharperHearingApproved") }
+  }
   private var lastVoiceContext: VoiceContext?
   private var knownNodeStatuses: [UUID: NodeStatus] = [:]
   private var pushToTalkMonitor: VoicePushToTalkMonitor?
@@ -393,9 +503,11 @@ final class VoiceController: ObservableObject {
       }
     }
     actionsTask = Task { [weak self, session] in
-      // Tool calls are already audited by the registry; drain the stream so it never buffers.
-      for await _ in session.actions {
-        guard !Task.isCancelled, self != nil else { break }
+      // Tool calls are already audited by the registry. Each one that changed something the
+      // person can look at takes the screen there.
+      for await action in session.actions {
+        guard !Task.isCancelled, let self else { break }
+        await self.follow(action)
       }
     }
     traceTask = Task { [weak self, session] in
@@ -455,6 +567,23 @@ final class VoiceController: ObservableObject {
         }
         self.publishVoiceContext(snapshot: snapshot, canvas: canvas)
       }
+    modelCatalogCancellable = ProviderModelCatalogStore.shared.$catalogs
+      .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self else { return }
+        let snapshot = self.store.snapshot
+        guard
+          let canvas = snapshot.canvases.first(where: { $0.id == snapshot.activeCanvasID })
+            ?? snapshot.canvases.first
+        else { return }
+        self.publishVoiceContext(snapshot: snapshot, canvas: canvas)
+      }
+    // Which document is open is kept in preferences, not in the workspace, so a change there is
+    // what says the person has opened another one.
+    preferencesCancellable = NotificationCenter.default
+      .publisher(for: UserDefaults.didChangeNotification)
+      .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
+      .sink { [weak self] _ in self?.republishVoiceContext() }
     servicesCancellable = services.objectWillChange
       .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
       .sink { [weak self] _ in
@@ -468,8 +597,13 @@ final class VoiceController: ObservableObject {
       }
     Task { [weak self] in
       guard let self else { return }
+      // First, because nothing below it should hold up a minute of model loading.
+      prewarmLocalVoice()
       await refreshCredentialStatus()
       installPushToTalkMonitor()
+      // Voice can start a session on any installed harness, so it has to know which those are
+      // and what models they offer from launch, not only once Voice settings has been opened.
+      await refreshThinkingProviders()
       saveNotificationPolicy()
     }
     Task { await reconcileWakeWord() }
@@ -501,6 +635,10 @@ final class VoiceController: ObservableObject {
     let context = makeVoiceContext(snapshot: snapshot, canvas: canvas)
     guard context != lastVoiceContext else { return }
     lastVoiceContext = context
+    if let boostedRecognizer {
+      let names = Self.spokenNames(in: context)
+      Task { await boostedRecognizer.listen(for: names) }
+    }
     Task { await session.updateContext(context) }
     Task { await command?.updateContext(context) }
   }
@@ -549,7 +687,194 @@ final class VoiceController: ObservableObject {
         orchestratorHandle: channel.orchestratorProfileID.flatMap { profilesByID[$0]?.handle }
       )
     }
+    let catalogs = ProviderModelCatalogStore.shared
+    let harnessModels = HarnessVoiceBrain.providers.compactMap { provider -> VoiceHarnessModels? in
+      guard installedThinkingProviders.contains(provider),
+        let models = catalogs.catalog(for: provider), !models.isEmpty
+      else { return nil }
+      return VoiceHarnessModels(
+        harness: provider.rawValue,
+        models: models.prefix(24).map { VoiceModelName(id: $0.id, name: $0.displayName) })
+    }
+    context.models = harnessModels.isEmpty ? nil : harnessModels
+    let defaults = UserDefaults.standard
+    context.screen = Self.screen(
+      onHome: showingHome,
+      navigation: snapshot.chatNavigation,
+      context: context,
+      canvases: snapshot.canvases,
+      openDocumentPath: defaults.string(forKey: "otto.documents.open") ?? "",
+      browserNodeID: defaults.string(
+        forKey: "otto.chatBrowserNodeID.\(services.documents.rootPath)"
+      ).flatMap(UUID.init(uuidString:)))
     return context
+  }
+
+  /// Brings what voice has just acted on to the front, using the same open tools the assistant
+  /// has, so the screen follows what was asked for without it having to remember to.
+  private func follow(_ action: VoiceActionEvent) async {
+    guard
+      let destination = VoiceFollow.destination(afterTool: action.toolName, output: action.output)
+    else { return }
+    let call: (name: String, input: JSONValue)
+    switch destination {
+    case .conversation(let id):
+      // A bot's conversation is opened as the bot; any other agent is a session.
+      if let bot = lastVoiceContext?.bots.first(where: { $0.nodeID == id }) {
+        call = ("bot.open", .object(["bot": .string(bot.name)]))
+      } else {
+        call = ("session.open", .object(["session": .string(id.uuidString)]))
+      }
+    case .document(let path):
+      call = ("docs.open", .object(["doc": .string(path)]))
+    case .place(let place):
+      call = ("app.open", .object(["place": .string(place)]))
+    }
+    let context = ToolContext(
+      actorID: "otto-voice", scopes: Set(ToolScope.allCases), source: .voice)
+    do {
+      _ = try await registry.call(name: call.name, input: call.input, context: context)
+      Self.logger.notice(
+        "took the screen to what \(action.toolName, privacy: .public) acted on")
+    } catch {
+      Self.logger.error(
+        "could not show what \(action.toolName, privacy: .public) acted on: \(error.localizedDescription, privacy: .public)"
+      )
+    }
+  }
+
+  /// What is in front of the person, read with the same tools an agent would use, so voice
+  /// starts each request already knowing what "this" is.
+  func readScreen() async -> String? {
+    guard let screen = lastVoiceContext?.screen else { return nil }
+    var reads: [(name: String, input: JSONValue)] = []
+    switch (screen.place, screen.kind) {
+    case ("Home", _):
+      reads = [("home.list_approvals", .object([:])), ("home.list_cards", .object([:]))]
+    case ("Activity", _):
+      reads = [("home.list_approvals", .object([:]))]
+    case ("Dashboards", _):
+      reads = [("home.list_cards", .object([:]))]
+    case (_, "session"?), (_, "bot"?):
+      if let id = screen.nodeID {
+        reads = [("agent.get_result", .object(["agentID": .string(id.uuidString)]))]
+      }
+    case (_, "document"?):
+      if let path = screen.path { reads = [("docs.read", .object(["doc": .string(path)]))] }
+    case (_, "web page"?):
+      if let id = screen.nodeID {
+        reads = [("browser.get_state", .object(["nodeID": .string(id.uuidString)]))]
+      }
+    default:
+      break
+    }
+    let context = ToolContext(
+      actorID: "otto-voice", scopes: Set(ToolScope.allCases), source: .voice)
+    var parts = [screen.summary]
+    for read in reads {
+      guard
+        let output = try? await registry.call(
+          name: read.name, input: read.input, context: context),
+        let data = try? JSONEncoder().encode(output)
+      else { continue }
+      parts.append("\(read.name): " + String(decoding: data, as: UTF8.self))
+    }
+    return VoiceScreen.excerpt(parts.joined(separator: "\n"))
+  }
+
+  /// Whether Home is in front. Home is a view of its own, not a place in Chat's navigation, so
+  /// the window says when it is showing.
+  private var showingHome = true
+
+  func noteShowingHome(_ showing: Bool) {
+    guard showing != showingHome else { return }
+    showingHome = showing
+    republishVoiceContext()
+  }
+
+  private func republishVoiceContext() {
+    let snapshot = store.snapshot
+    guard
+      let canvas = snapshot.canvases.first(where: { $0.id == snapshot.activeCanvasID })
+        ?? snapshot.canvases.first
+    else { return }
+    publishVoiceContext(snapshot: snapshot, canvas: canvas)
+  }
+
+  /// Where the person is and what is open in front of them.
+  nonisolated static func screen(
+    onHome: Bool,
+    navigation: ChatSurfaceNavigationState,
+    context: VoiceContext,
+    canvases: [OttoCanvas],
+    openDocumentPath: String,
+    browserNodeID: UUID?
+  ) -> VoiceScreenContext {
+    if onHome { return VoiceScreenContext(place: "Home") }
+    let nodes = canvases.flatMap(\.nodes)
+    switch navigation.destination {
+    case .conversation:
+      if let teamID = navigation.selectedTeamID,
+        let team = context.teams.first(where: { $0.id == teamID })
+      {
+        return VoiceScreenContext(place: "Chat", kind: "team", showing: team.name)
+      }
+      if let profileID = navigation.selectedProfileID,
+        let bot = context.bots.first(where: { $0.id == profileID })
+      {
+        return VoiceScreenContext(place: "Chat", kind: "bot", showing: bot.name, nodeID: bot.nodeID)
+      }
+      if let id = navigation.selectedSessionID ?? navigation.selectedAgentID,
+        let node = nodes.first(where: { $0.id == id })
+      {
+        return VoiceScreenContext(
+          place: "Chat", kind: "session", showing: node.displayName, nodeID: node.id)
+      }
+      return VoiceScreenContext(place: "Chat")
+    case .documents:
+      guard !openDocumentPath.isEmpty else { return VoiceScreenContext(place: "Documents") }
+      return VoiceScreenContext(
+        place: "Documents", kind: "document",
+        showing: URL(fileURLWithPath: openDocumentPath).lastPathComponent, path: openDocumentPath)
+    case .browser:
+      guard let node = nodes.first(where: { $0.id == browserNodeID }),
+        case .browser(let url) = node.content
+      else { return VoiceScreenContext(place: "Browser") }
+      return VoiceScreenContext(
+        place: "Browser", kind: "web page", showing: node.displayName, nodeID: node.id, url: url)
+    case .activity, .files, .routines, .dashboards, .skills:
+      return VoiceScreenContext(place: navigation.destination.rawValue)
+    }
+  }
+
+  /// Every name the person might say that no speech model has heard: Otto's own words, the
+  /// harnesses, and whatever this workspace's models, bots, sessions and projects are called.
+  static func spokenNames(in context: VoiceContext) -> [SpokenName] {
+    // Only mishearings that are not themselves everyday words are listed: "cloud" for Claude or
+    // "open code" for OpenCode would rewrite ordinary sentences.
+    var names = [
+      SpokenName("Otto", isOttosOwn: true),
+      SpokenName("Codex", soundsLike: ["Codecs", "Kodex", "Codec's"], isOttosOwn: true),
+      SpokenName("Claude Code", soundsLike: ["Clawed Code", "Claud Code"], isOttosOwn: true),
+      SpokenName("Claude", soundsLike: ["Clawed", "Claud"], isOttosOwn: true),
+      SpokenName("Cursor", isOttosOwn: true),
+      SpokenName("Grok", soundsLike: ["Grock"], isOttosOwn: true),
+      SpokenName("Kimi", soundsLike: ["Kimmy"], isOttosOwn: true),
+      SpokenName("OpenCode", isOttosOwn: true),
+      SpokenName("Hermes", isOttosOwn: true),
+    ]
+    // A model is taught by its whole name. Its parts ("Sol", "Ling") are ordinary sounds, and
+    // the assistant matches a spoken family name to the real model itself.
+    for harness in context.models ?? [] {
+      names += harness.models.map { SpokenName($0.name) }
+    }
+    names += context.bots.map { SpokenName($0.name) }
+    names += context.teams.map { SpokenName($0.name) }
+    names += context.sessions.map { SpokenName($0.name) }
+    names += context.knownWorkspaces.map {
+      SpokenName(URL(fileURLWithPath: $0).lastPathComponent)
+    }
+    return names
   }
 
   /// Establishes the persistent voice connection for the saved operating mode. Must run after
@@ -806,14 +1131,22 @@ final class VoiceController: ObservableObject {
       releaseCapture(owner: "talk")
       if isCloudVoiceActive { await session.sleep() }
     case .pushToTalk, .outputOnly:
+      // An engine that bills by the second is connected when the person talks, not before.
+      guard !engine.billsWhileConnected else { return }
       await connectCloudVoice(microphoneEnabled: false)
     case .alwaysListening:
+      guard !engine.billsWhileConnected else { return }
       await connectCloudVoice(microphoneEnabled: true)
     }
   }
 
   func beginPushToTalk() async {
-    guard operatingMode == .pushToTalk || operatingMode == .outputOnly else { return }
+    // An engine that bills by the second is never left listening, so holding the key is how a
+    // conversation starts whatever the microphone mode.
+    guard
+      operatingMode == .pushToTalk || operatingMode == .outputOnly
+        || (engine.billsWhileConnected && operatingMode == .alwaysListening)
+    else { return }
     guard !pushToTalkHeld else { return }
     pushToTalkHeld = true
     lastLocalResultMode = nil
@@ -843,6 +1176,26 @@ final class VoiceController: ObservableObject {
     if !enabled { releaseCapture(owner: "talk") }
   }
 
+  /// The engine the live conversation was started on, which is not always the one now chosen.
+  private var connectedEngine: VoiceEngine?
+
+  /// Voice stays connected between requests, so choosing another engine in Settings did nothing
+  /// until voice was next put to sleep: the old engine went on answering while Settings said the
+  /// new one was in use. A live conversation now moves to the chosen engine straight away.
+  private func moveLiveVoiceToChosenEngine() async {
+    guard isCloudVoiceActive, let connectedEngine, connectedEngine != engine else { return }
+    let microphone = cloudMicrophoneEnabled
+    Self.logger.notice(
+      "moving voice from \(connectedEngine.rawValue, privacy: .public) to \(self.engine.rawValue, privacy: .public)"
+    )
+    await session.sleep()
+    for _ in 0..<60 where isCloudVoiceActive { try? await Task.sleep(for: .milliseconds(50)) }
+    guard !isCloudVoiceActive else { return }
+    // An engine whose key is missing cannot answer; voice stays asleep and Settings says why.
+    guard !engine.requiresKey || configuredVoiceEngines.contains(engine) else { return }
+    await connectCloudVoice(microphoneEnabled: microphone)
+  }
+
   private func connectCloudVoice(microphoneEnabled: Bool) async {
     if isCloudVoiceActive {
       await setCloudMicrophoneEnabled(microphoneEnabled)
@@ -859,7 +1212,12 @@ final class VoiceController: ObservableObject {
     }
     activeMode = .talk
     cloudMicrophoneEnabled = microphoneEnabled
+    connectedEngine = engine
+    Self.logger.notice("connecting voice on \(self.engine.rawValue, privacy: .public)")
     switch engine {
+    case .local:
+      await session.connect(
+        provider: makeLocalVoiceProvider(), microphoneEnabled: microphoneEnabled)
     case .xai:
       await session.connect(
         provider: XAIRealtimeProvider(
@@ -881,6 +1239,20 @@ final class VoiceController: ObservableObject {
             instructions: Self.supervisorInstructions
           )
         ),
+        microphoneEnabled: microphoneEnabled
+      )
+    case .openaiLive:
+      let executable = URL(
+        fileURLWithPath: ExecutableLocator.candidates("claude").first ?? "/usr/local/bin/claude")
+      await session.connect(
+        provider: GPTLiveProvider(
+          secrets: secrets,
+          brain: localVoiceBrain(
+            claude: executable,
+            instructions: Self.supervisorInstructions + "\n\n" + Self.liveBackendInstructions),
+          configuration: GPTLiveConfiguration(
+            instructions: Self.liveConversationInstructions),
+          screenReader: { [weak self] in await self?.readScreen() }),
         microphoneEnabled: microphoneEnabled
       )
     }
@@ -1208,6 +1580,295 @@ final class VoiceController: ObservableObject {
     }
   }
 
+  /// The engine that needs no API key. Each missing piece reports itself in words the person
+  /// can act on when Talk starts, rather than the engine being hidden from Settings.
+  private func makeLocalVoiceProvider() -> LocalVoiceProvider {
+    let installed: any LocalSpeechRecognizing =
+      if let configuration = ParakeetRuntimeConfiguration.installed() {
+        sharedParakeetRecognizer(configuration: configuration)
+      } else {
+        MissingLocalRecognizer()
+      }
+    let recognizer = sharperRecognizer(fallback: installed)
+    let names = lastVoiceContext.map(Self.spokenNames(in:)) ?? []
+    Task { await recognizer.listen(for: names) }
+    let executable = URL(
+      fileURLWithPath: ExecutableLocator.candidates("claude").first ?? "/usr/local/bin/claude")
+    return LocalVoiceProvider(
+      recognizer: recognizer,
+      brain: localVoiceBrain(claude: executable),
+      synthesizer: localSpeechSynthesizer(),
+      filter: localVoiceFilter(),
+      onlyThePersonsVoice: onlyMyVoice,
+      screenReader: { [weak self] in await self?.readScreen() }
+    )
+  }
+
+  /// One recogniser for the life of the app, so its models load once and stay warm.
+  private func sharperRecognizer(fallback: (any LocalSpeechRecognizing)? = nil)
+    -> BoostedSpeechRecognizer
+  {
+    if let boostedRecognizer {
+      if let fallback { Task { await boostedRecognizer.use(fallback: fallback) } }
+      return boostedRecognizer
+    }
+    let recognizer = BoostedSpeechRecognizer(
+      fallback: fallback, mayDownload: sharperHearingApproved)
+    boostedRecognizer = recognizer
+    return recognizer
+  }
+
+  /// The person has agreed to download Parakeet Ultra. Voice keeps working on the older
+  /// recogniser while it arrives, and switches over on the next request once it has loaded.
+  func downloadSharperHearing() async {
+    sharperHearingApproved = true
+    sharperHearingState = .downloading
+    let recognizer = sharperRecognizer()
+    await recognizer.approveDownload()
+    sharperHearingWatch?.cancel()
+    sharperHearingWatch = Task { [weak self] in
+      while !Task.isCancelled {
+        switch await recognizer.readiness {
+        case .ready:
+          self?.sharperHearingState = .ready
+          return
+        case .failed(let message):
+          self?.sharperHearingState = .failed(message)
+          return
+        case .preparing, .notStarted:
+          try? await Task.sleep(for: .seconds(1))
+        }
+      }
+    }
+  }
+
+  /// One filter for the life of the app: its models load once, and what it has learned of the
+  /// person's voice is shared by every conversation.
+  private func localVoiceFilter() -> OnDeviceVoiceFilter {
+    if let voiceFilter { return voiceFilter }
+    let filter = OnDeviceVoiceFilter(mayDownload: localModelsApproved)
+    voiceFilter = filter
+    Task { await filter.prepare() }
+    return filter
+  }
+
+  func refreshVoiceprintStatus() async {
+    voiceprintStatus = await localVoiceFilter().status()
+    switch await localSpeechSynthesizer().readiness {
+    case .ready: kokoroState = .ready
+    case .preparing: kokoroState = .downloading
+    case .failed(let message): kokoroState = .failed(message)
+    case .notStarted:
+      kokoroState = KokoroSpeechSynthesizer.isDownloaded() ? .downloading : .notDownloaded
+    }
+  }
+
+  /// The person has agreed to download the open-source voice models.
+  func downloadLocalVoiceModels() async {
+    localModelsApproved = true
+    kokoroState = .downloading
+    await localSpeechSynthesizer().download()
+    await localVoiceFilter().approveDownload()
+    await refreshVoiceprintStatus()
+  }
+
+  /// Listens for ten seconds while the person reads a line aloud, then learns their voice from
+  /// it. The recording is used once and discarded; only the voiceprint is kept.
+  func learnMyVoice() async {
+    if case .listening = voiceLearningState { return }
+    guard voiceLearningState != .working else { return }
+    let microphoneWasOn = cloudMicrophoneEnabled
+    if isCloudVoiceActive { await setCloudMicrophoneEnabled(false) }
+    await stopWakeWord(nextStatus: .paused)
+    await stopLocalCapture()
+    do {
+      try await voiceSampleRecorder.start()
+      var loudest = 0.0
+      for tick in 0..<100 {
+        voiceLearningState = .listening(secondsLeft: 10 - tick / 10)
+        try? await Task.sleep(for: .milliseconds(100))
+        loudest = max(loudest, voiceSampleRecorder.level)
+      }
+      voiceLearningState = .working
+      let samples = await voiceSampleRecorder.stop()
+      if await localVoiceFilter().enroll(samples) {
+        voiceLearningState = .learned
+      } else if loudest < Self.silentMicrophoneLevel {
+        // Not a quiet voice: nothing reached Otto at all, which is a microphone problem.
+        voiceLearningState = .failed(Self.silentMicrophoneMessage)
+      } else {
+        voiceLearningState = .failed(
+          "I couldn't hear enough of your voice. Try again, a little closer to the microphone.")
+      }
+    } catch {
+      voiceLearningState = .failed(error.localizedDescription)
+    }
+    if isCloudVoiceActive, microphoneWasOn { await setCloudMicrophoneEnabled(true) }
+    await reconcileWakeWord()
+    await refreshVoiceprintStatus()
+  }
+
+  /// Below this a microphone is delivering nothing: switched off, muted, or the built-in one on
+  /// a MacBook whose lid is closed.
+  static let silentMicrophoneLevel = 0.0005
+  static let silentMicrophoneMessage =
+    "Your microphone is silent. Choose another one under Microphone above. A MacBook's built-in microphone switches off when the lid is closed."
+
+  func refreshInputDevices() {
+    inputDevices = AudioInputDevices.all()
+    outputDeviceName = AudioInputDevices.systemOutputName() ?? "Unknown"
+  }
+
+  /// Says a short line through the same voice and the same output Otto's replies use, so the
+  /// person can tell at once whether they can hear it.
+  func testSpeaker() async {
+    guard !speakerTestIsPlaying else { return }
+    speakerTestIsPlaying = true
+    defer { speakerTestIsPlaying = false }
+    refreshInputDevices()
+    guard
+      let audio = try? await localSpeechSynthesizer().speech(
+        for: "This is Otto. If you can hear me, the speaker is working.")
+    else { return }
+    let transport = AVFoundationVoiceAudioTransport()
+    try? await transport.play(audio)
+    await transport.waitForPlaybackToFinish(timeout: .seconds(8))
+    await transport.stop()
+  }
+
+  /// True when Otto listens through a microphone the rest of the Mac does not use. macOS only
+  /// cancels echo on its own default microphone, so talking over Otto is unavailable then.
+  var microphoneDiffersFromSystem: Bool {
+    !inputDeviceUID.isEmpty
+      && inputDevices.first(where: { $0.id == inputDeviceUID })?.isSystemDefault == false
+  }
+
+  /// The person asked for the chosen microphone to become the Mac's own default input.
+  func makeChosenMicrophoneSystemDefault() async {
+    guard AudioInputDevices.makeSystemDefault(uid: inputDeviceUID) else { return }
+    refreshInputDevices()
+    await restartVoiceForMicrophoneChange()
+  }
+
+  /// Listens for five seconds and reports whether the chosen microphone picks anything up.
+  func testMicrophone() async {
+    if case .listening = microphoneTest { return }
+    let microphoneWasOn = cloudMicrophoneEnabled
+    if isCloudVoiceActive { await setCloudMicrophoneEnabled(false) }
+    await stopWakeWord(nextStatus: .paused)
+    await stopLocalCapture()
+    do {
+      try await voiceSampleRecorder.start()
+      var loudest = 0.0
+      for _ in 0..<50 {
+        let level = voiceSampleRecorder.level
+        loudest = max(loudest, level)
+        microphoneTest = .listening(level: level)
+        try? await Task.sleep(for: .milliseconds(100))
+      }
+      _ = await voiceSampleRecorder.stop()
+      if loudest < Self.silentMicrophoneLevel {
+        microphoneTest = .silent
+      } else if loudest < 0.02 {
+        microphoneTest = .faint
+      } else {
+        microphoneTest = .heard
+      }
+    } catch {
+      microphoneTest = .failed(error.localizedDescription)
+    }
+    if isCloudVoiceActive, microphoneWasOn { await setCloudMicrophoneEnabled(true) }
+    await reconcileWakeWord()
+  }
+
+  /// A new microphone only takes effect when listening starts again, so restart it now.
+  private func restartVoiceForMicrophoneChange() async {
+    microphoneTest = .idle
+    guard isCloudVoiceActive else { return }
+    await session.sleep()
+    releaseCapture(owner: "talk")
+    activeMode = nil
+    await reconcileOperatingMode()
+  }
+
+  func forgetVoiceprint() async {
+    voiceLearningState = .idle
+    await localVoiceFilter().forget()
+    await refreshVoiceprintStatus()
+  }
+
+  /// What does the thinking. Claude Code keeps one assistant open for the whole conversation,
+  /// which is why it answers fastest; every other harness is started for each request.
+  private func localVoiceBrain(claude executable: URL, instructions: String? = nil)
+    -> any LocalVoiceThinking
+  {
+    let instructions =
+      instructions ?? Self.supervisorInstructions + "\n\n" + Self.localSpeechInstructions
+    let model = thinkingModel.isEmpty ? nil : thinkingModel
+    if thinkingProvider == .claudeCode {
+      return ClaudeCodeVoiceBrain(
+        configuration: LocalVoiceBrainConfiguration(
+          executable: executable, model: model ?? "haiku", instructions: instructions))
+    }
+    return HarnessVoiceBrain(provider: thinkingProvider, model: model, instructions: instructions)
+  }
+
+  /// Finds which harnesses are installed, and picks one if the person has not chosen yet.
+  func refreshThinkingProviders() async {
+    var installed: Set<AgentProvider> = []
+    for provider in HarnessVoiceBrain.providers {
+      if case .installed = await HarnessVoiceBrain.adapter(for: provider).detectInstallation() {
+        installed.insert(provider)
+      }
+    }
+    installedThinkingProviders = installed
+    // Asking each installed harness for its models lets a spoken model name be matched to a real
+    // one. The answers arrive later and are published with the rest of the workspace.
+    for provider in installed { ProviderModelCatalogStore.shared.load(provider) }
+    let chosen = UserDefaults.standard.string(forKey: "otto.voice.thinkingProvider")
+    if chosen == nil, !installed.contains(thinkingProvider),
+      let first = HarnessVoiceBrain.providers.first(where: installed.contains)
+    {
+      thinkingProvider = first
+    }
+  }
+
+  var thinkingIsAvailable: Bool { installedThinkingProviders.contains(thinkingProvider) }
+
+  /// The three parts of local voice, as shown under the engine's name.
+  var localVoiceSummary: String {
+    "Parakeet · \(Self.thinkingName(thinkingProvider)) · Kokoro"
+  }
+
+  static func thinkingName(_ provider: AgentProvider) -> String {
+    provider == .openAI ? "Otto (API keys and local models)" : provider.rawValue
+  }
+
+  /// Loads the voice and the hearing models as Otto opens, when voice on this Mac is the chosen
+  /// engine. They take the best part of a minute, and someone who holds the Talk key for the
+  /// first time should be heard and answered at once, not after that minute.
+  private func prewarmLocalVoice() {
+    Self.logger.notice(
+      "voice models at launch: engine \(self.engine.rawValue, privacy: .public)")
+    guard engine == .local else { return }
+    _ = localSpeechSynthesizer()
+    _ = localVoiceFilter()
+    let installed: (any LocalSpeechRecognizing)? =
+      ParakeetRuntimeConfiguration.installed().map(sharedParakeetRecognizer(configuration:))
+    let recognizer = sharperRecognizer(fallback: installed)
+    Task { try? await recognizer.prepare() }
+  }
+
+  /// One Kokoro voice for the life of the app, so its model is loaded once and stays warm
+  /// between conversations.
+  private func localSpeechSynthesizer() -> KokoroSpeechSynthesizer {
+    if let kokoroSynthesizer { return kokoroSynthesizer }
+    let synthesizer = KokoroSpeechSynthesizer(mayDownload: localModelsApproved)
+    kokoroSynthesizer = synthesizer
+    Task { await synthesizer.prepare() }
+    return synthesizer
+  }
+
   private func sharedParakeetRecognizer(
     configuration: ParakeetRuntimeConfiguration
   ) -> ParakeetWarmRecognizer {
@@ -1503,6 +2164,8 @@ final class VoiceController: ObservableObject {
 
     let provider: any VoicePreviewProvider
     switch engine {
+    case .local, .openaiLive:
+      return
     case .xai:
       provider = XAIRealtimeProvider(
         secrets: secrets,
@@ -1680,6 +2343,74 @@ final class VoiceController: ObservableObject {
     }
   }
 
+  /// The cloud engines produce audio themselves. Here the reply is text that a speech engine on
+  /// this Mac reads out, so it has to be written the way it should sound.
+  /// What GPT-Live is told. It only converses; Otto's own assistant is told the rest.
+  private static let liveConversationInstructions = """
+    You are Otto, a calm, capable British assistant who works beside the user in their desktop
+    workspace: dry, warm and unhurried, in natural everyday sentences. You hold the conversation.
+    You cannot open, start, change or look up anything yourself, and you know nothing about the
+    user's workspace: whenever they ask for something to be done, opened, started, sent, checked
+    or found out, hand it to your backend at once, and keep them company with a few natural words
+    while it works. Never say something has been done, and never state a fact about their
+    workspace, until the backend has told you so. When the backend reports, say it in your own
+    words, briefly; if it reports that something failed or does not exist, say so plainly and
+    pass on any choices it offers. Chat, greetings and thanks you answer yourself. Never read out
+    identifiers, paths or raw output. If the user starts speaking, stop and listen.
+    """
+
+  /// What Otto's own assistant is told when GPT-Live is doing the talking.
+  private static let liveBackendInstructions = """
+    For this conversation you are the backend of a voice model, not the voice. The voice model
+    talks with the user and hands you each request as text from speech recognition, which has
+    never heard this workspace's names and writes the nearest ordinary words instead ("codecs" for
+    Codex). Match what you are given by sound against the harnesses, models, bots, sessions and
+    workspaces in the structured context, and act on the real name. Carry the request out with
+    the tools, then reply with one or two plain sentences stating what actually happened, for the
+    voice model to put into its own words. Ignore the rules above about staying silent: always
+    report the outcome, including when it is simply that the thing is now open. Report a failure
+    plainly with its reason. If the request cannot be carried out as asked, such as a model that
+    harness does not have, say what the choices are. Only say something happened when a tool
+    result confirms it. No markdown, lists, identifiers or paths.
+    """
+
+  private static let localSpeechInstructions = """
+    This is a live spoken conversation, and for it the rules above about silence and terseness are
+    relaxed. Speak as a calm, capable British butler-engineer would: dry, warm and unhurried, in
+    natural everyday sentences rather than clipped fragments. Answer a question in one to three
+    short sentences, leading with the answer. When asked to do something that takes more than a
+    moment, say what you are about to do first. This is the most important rule of all: every time
+    you are going to call a tool, write one short spoken sentence before the tool call, in the same
+    turn, such as "Opening a Codex session now" or "Let me look at what Coder found". It is spoken
+    while the tool runs, so the user is never left in silence. When the action then succeeds and
+    the user can see it on screen, say nothing more; only speak again to give a result worth
+    hearing, or to say plainly that it failed. Vary your wording; never read out identifiers,
+    paths or raw tool output.
+    You are Otto, and you know how long your own work takes. Opening a place or a document is
+    instant, so just do it. Looking something up or reading a session's result takes a few seconds,
+    so say you are checking. Starting an agent, browsing the web or anything a bot does takes
+    minutes: say so plainly, start it, and tell the user you will let them know, rather than
+    leaving them waiting in silence. If several steps are needed, say a few words between them.
+    When you cannot do what was asked as asked, say why in one short sentence and offer at most
+    two choices in a second; never explain at length or list everything that exists.
+    When an agent or bot finishes and you pass on its result, give the gist in one or two
+    sentences and stop; say there is more if there is, and read further only when asked.
+    The instant the user finishes speaking, Otto may already have said a bare "Hmm", "Right" or
+    "Sure" for you. Do not open with another filler of that kind; carry straight on with something
+    that fits what they actually said, such as "Good point, let me check" or the answer itself.
+    Everything you write is read aloud by a speech engine. Write plain spoken English only: no
+    markdown, lists, emoji, code, URLs, symbols or identifiers, and numbers the way they are said.
+    Your words reach you through speech recognition, which has never heard this workspace's names
+    and writes the nearest ordinary words instead: "codecs" for Codex, "cloud" for Claude, a model
+    name as loose words and numbers. Before acting, match what you were given by sound against the
+    harnesses, models, bots, sessions and workspaces in the structured context, and use the real
+    name. When the user names a model for a new session, find it under that harness in the
+    context's models and pass its id as agent.spawn's model; if nothing there sounds like it, say
+    which models that harness has rather than starting a session on a different one. If a request
+    is genuinely unclear, ask one short question instead of guessing. Only say something happened
+    when a tool result confirms it.
+    """
+
   private static let supervisorInstructions = """
     You are Otto, working beside the user in their spatial coding workspace. Be terse. No greetings,
     politeness, filler, preambles, offers to help, capability tours, or closing remarks. Do not
@@ -1700,6 +2431,15 @@ final class VoiceController: ObservableObject {
     Operating rules:
     Resolve natural language and pronouns from current canvas context. A window/card/panel is a node.
     To open Codex or Claude without a task, call agent.spawn with no prompt for an interactive node.
+    The structured context's screen says where the user is in Otto and what is open in front of
+    them. "This", "here", "that page", "this chat" and "what I'm looking at" mean that thing.
+    A request may also arrive with what is on their screen attached: use that first. When it is
+    missing or cut short and you need more, read it with the matching tool using the nodeID, path
+    or url given there: agent.get_result for a session or bot, docs.read for a document,
+    browser.inspect for a web page. Act on what is on screen without asking which one they mean.
+    Pass agent.spawn a model only when the user names one, and only an id listed for that harness
+    under models in the structured context. Never invent or guess a model id: if what they said
+    matches none of that harness's models, tell them which models it has and ask.
     To continue a completed agent, call agent.send_prompt; it resumes automatically. Use a matching
     knownWorkspaces path when the user names a repository or asks an agent to work there. Repository
     names may be spoken phonetically; match them against normalized workspace folder names.
@@ -1711,6 +2451,14 @@ final class VoiceController: ObservableObject {
     Use session.list when the target is uncertain, session.open to switch to an existing session,
     and session.send_prompt only when the user also asked to send work. Use chat.open with section
     "bots" or "sessions" when the user asks to show or switch between those roster tabs.
+    Otto takes the screen to whatever you start, change or send to, so you need not open it
+    yourself afterwards, and a session you cannot see on screen can still be read: agent.get_result
+    works for any session or bot in the context, running or not, so never say you cannot read one.
+    To take the user somewhere in the app, call app.open with home, chat, documents, dashboards,
+    browser, activity, automations, skills or files. When the user asks you to open, show, make or
+    take them to a document, spreadsheet, presentation or whiteboard, create it if needed and then
+    call docs.open so it is on screen: creating a file does not show it. When asked to explain or
+    walk through something, show the place you are talking about first, then talk.
     Use team.new_session for "new team session" and team.compact_session for compaction. To switch
     between the top-level Chat and Canvas surfaces, call surface.set. Never use bot.message for the
     human user: that tool is only for attributed bot-to-bot messages.
@@ -1838,4 +2586,37 @@ private final class UnavailableSpeechTranscriber: SpeechTranscriber, @unchecked 
 struct ChatVoiceInsertion: Equatable {
   let id = UUID()
   let text: String
+}
+
+/// Stands in for the recogniser until Parakeet is installed, so starting Talk explains what to do.
+private struct MissingLocalRecognizer: LocalSpeechRecognizing {
+  func prepare() async throws { throw LocalVoiceError.recognizerMissing }
+  func text(samples: [Float], sampleRate: Int) async throws -> String {
+    throw LocalVoiceError.recognizerMissing
+  }
+  func shutdown() async {}
+}
+
+enum LocalVoiceModelState: Equatable {
+  case notDownloaded
+  case downloading
+  case ready
+  case failed(String)
+}
+
+enum VoiceLearningState: Equatable {
+  case idle
+  case listening(secondsLeft: Int)
+  case working
+  case learned
+  case failed(String)
+}
+
+enum MicrophoneTestState: Equatable {
+  case idle
+  case listening(level: Double)
+  case heard
+  case faint
+  case silent
+  case failed(String)
 }

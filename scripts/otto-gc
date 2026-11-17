@@ -1,0 +1,196 @@
+#!/bin/zsh
+# Reclaims build output that nothing is using any more.
+#
+# Usage:
+#   scripts/otto-gc [--days N] [--dry-run] [--quiet]
+#   scripts/otto-gc --install-schedule | --uninstall-schedule
+#
+# scripts/otto-swift already prunes its own task caches, but only once the whole
+# cache root passes OTTO_SWIFT_CACHE_LIMIT_MB (30 GB by default), and only those
+# caches. Two gaps let a machine fill anyway:
+#
+#   - A cache root sitting just under the limit is never pruned, however long
+#     every task in it has been idle.
+#   - A .build inside a worktree is not otto-swift's at all. It builds into its
+#     own scratch directory, so .build comes from Xcode or a direct swift build,
+#     and nothing prunes those.
+#
+# This prunes both by age instead of size: anything not touched for --days (7 by
+# default) goes, so routine use reclaims space before a limit is ever reached.
+# It only ever removes build output — directories named .build, and task caches
+# under the otto-swift state root. It never touches sources, git data or a
+# directory whose lock belongs to a live process.
+set -euo pipefail
+
+script_dir=${0:A:h}
+repository_root=${script_dir:h}
+
+days=7
+dry_run=0
+quiet=0
+install_schedule=0
+uninstall_schedule=0
+while (( $# )); do
+  case $1 in
+    --days) shift; days=${1:?--days needs a number}; shift ;;
+    --dry-run) dry_run=1; shift ;;
+    --quiet) quiet=1; shift ;;
+    --install-schedule) install_schedule=1; shift ;;
+    --uninstall-schedule) uninstall_schedule=1; shift ;;
+    -h|--help) /usr/bin/sed -n '2,28p' "$0"; exit 0 ;;
+    *) print -u2 "Unknown option: $1"; exit 2 ;;
+  esac
+done
+if [[ $days != <-> ]]; then
+  print -u2 "--days must be a non-negative integer."
+  exit 2
+fi
+
+agent_label=io.openotto.build-gc
+agent_plist=$HOME/Library/LaunchAgents/$agent_label.plist
+
+if (( uninstall_schedule )); then
+  /bin/launchctl bootout "gui/$UID/$agent_label" 2>/dev/null || true
+  /bin/rm -f "$agent_plist"
+  print "Removed the daily schedule ($agent_label)."
+  exit 0
+fi
+
+if (( install_schedule )); then
+  template=$repository_root/packaging/$agent_label.plist
+  if [[ ! -f $template ]]; then
+    print -u2 "Missing $template"
+    exit 1
+  fi
+  /bin/mkdir -p "${agent_plist:h}" "$HOME/Library/Logs"
+  /usr/bin/sed -e "s|REPO_ROOT|$repository_root|g" -e "s|HOME_DIR|$HOME|g" \
+    "$template" > "$agent_plist"
+  # bootout first so re-installing picks up a changed path instead of failing.
+  /bin/launchctl bootout "gui/$UID/$agent_label" 2>/dev/null || true
+  /bin/launchctl bootstrap "gui/$UID" "$agent_plist"
+  print "Scheduled daily at 04:30 ($agent_label)."
+  print "  script: $repository_root/scripts/otto-gc --days 7"
+  print "  log:    $HOME/Library/Logs/otto-build-gc.log"
+  print "  remove: scripts/otto-gc --uninstall-schedule"
+  exit 0
+fi
+
+default_state_root=$HOME/Library/Caches/Otto/SwiftPM
+legacy_state_root=$HOME/Library/Caches/Muse/SwiftPM
+if [[ ! -e $default_state_root && -d $legacy_state_root ]]; then
+  default_state_root=$legacy_state_root
+fi
+state_root=${OTTO_SWIFT_STATE_ROOT:-${MUSE_SWIFT_STATE_ROOT:-$default_state_root}}
+
+say() { (( quiet )) || print -r -- "$@" }
+
+before_kb=$(/bin/df -k / | /usr/bin/awk 'NR == 2 {print $4}' || true)
+removed_kb=0
+removed_count=0
+
+# A lock whose pid is still alive means a build is using this directory now.
+in_use() {
+  local lock=$1 owner
+  [[ -e $lock ]] || return 1
+  owner=$(/bin/cat "$lock/pid" 2>/dev/null || /bin/cat "$lock" 2>/dev/null || true)
+  if [[ $owner != <-> ]]; then
+    return 1
+  fi
+  /bin/kill -0 "$owner" 2>/dev/null
+}
+
+reclaim() {
+  local target=$1 label=$2 kb
+  kb=$(/usr/bin/du -sk "$target" 2>/dev/null | /usr/bin/awk '{print $1}' || true)
+  [[ $kb == <-> ]] || kb=0
+  if (( dry_run )); then
+    say "  would remove $(( kb / 1024 )) MB  $label"
+  else
+    /bin/chmod -R u+w "$target" 2>/dev/null || true
+    if /bin/rm -rf "$target"; then
+      say "  removed $(( kb / 1024 )) MB  $label"
+    else
+      print -u2 "  could not remove: $target"
+      return 0
+    fi
+  fi
+  removed_kb=$(( removed_kb + kb ))
+  removed_count=$(( removed_count + 1 ))
+}
+
+# --- 1. otto-swift task caches idle for longer than the window --------------
+if [[ -d $state_root ]]; then
+  say "Idle SwiftPM task caches (older than $days days):"
+  for candidate in "$state_root"/*(N/); do
+    if [[ ${candidate:t} == .* ]]; then
+      continue
+    fi
+    if in_use "$candidate/active.lock"; then
+      say "  in use, keeping: ${candidate:t}"
+      continue
+    fi
+    if [[ -z $(/usr/bin/find "$candidate" -maxdepth 0 -mtime +$days -print 2>/dev/null) ]]; then
+      continue
+    fi
+    reclaim "$candidate" "${candidate:t}"
+  done
+fi
+
+# --- 2. .build directories in worktrees, which otto-swift never owns --------
+# Ask git where the worktrees are rather than guessing from paths: it is
+# authoritative, and it keeps this correct when the script itself runs from
+# inside a worktree.
+typeset -U scan_dirs
+scan_dirs=()
+if git_common=$(/usr/bin/git -C "$repository_root" rev-parse --git-common-dir 2>/dev/null); then
+  main_checkout=${git_common:h}
+  if [[ -d $main_checkout ]]; then
+    scan_dirs+=("${main_checkout:A}")
+  fi
+  while read -r line; do
+    if [[ $line == worktree\ * ]]; then
+      wt=${line#worktree }
+      if [[ -d $wt ]]; then
+        scan_dirs+=("${wt:A}")
+      fi
+    fi
+  done < <(/usr/bin/git -C "$repository_root" worktree list --porcelain 2>/dev/null)
+fi
+# Worktree roots that git may not know about (other clones, stray checkouts).
+for extra in "${repository_root:h}" "$HOME/Developer" "${OTTO_WORKTREES_ROOT:-}" "${MUSE_WORKTREES_ROOT:-}"; do
+  if [[ -n $extra && -d $extra ]]; then
+    for child in "$extra"/*(N/); do
+      scan_dirs+=("${child:A}")
+    done
+  fi
+done
+
+say "Idle .build directories (older than $days days):"
+for dir in $scan_dirs; do
+  build=$dir/.build
+  if [[ ! -d $build ]]; then
+    continue
+  fi
+  if in_use "$build/.lock"; then
+    say "  in use, keeping: ${dir:t}/.build"
+    continue
+  fi
+  if [[ -z $(/usr/bin/find "$build" -maxdepth 0 -mtime +$days -print 2>/dev/null) ]]; then
+    continue
+  fi
+  reclaim "$build" "${dir:t}/.build"
+done
+
+after_kb=$(/bin/df -k / | /usr/bin/awk 'NR == 2 {print $4}' || true)
+say ""
+if (( removed_kb >= 1048576 )); then
+  total="$(( removed_kb / 1048576 )) GB"
+else
+  total="$(( removed_kb / 1024 )) MB"
+fi
+if (( dry_run )); then
+  say "Dry run: $removed_count directories, $total would be reclaimed."
+else
+  say "Reclaimed $total from $removed_count directories."
+  say "Free space: $(( before_kb / 1048576 )) GB -> $(( after_kb / 1048576 )) GB."
+fi

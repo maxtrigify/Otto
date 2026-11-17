@@ -635,7 +635,7 @@ private enum OttoVoiceBenchmark {
       let median = sorted[sorted.count / 2]
       let p95 = sorted[Int(Double(sorted.count - 1) * 0.95)]
 
-      print("provider=xAI model=grok-voice-think-fast-2.0 voice=eve")
+      print("provider=xAI model=grok-voice-3.0 voice=eve")
       print("exact=\(correct)/\(cases.count)")
       print("latency_ms=\(latencies.map { Int($0.rounded()) })")
       print("median_ms=\(Int(median.rounded())) p95_ms=\(Int(p95.rounded()))")

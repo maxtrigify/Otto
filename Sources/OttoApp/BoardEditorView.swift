@@ -1647,7 +1647,8 @@ struct BoardScrollCatcher: NSViewRepresentable {
         if event.type == .magnify {
           self.onZoom?(1 + event.magnification, point)
         } else if event.modifierFlags.contains(.command) {
-          let amount = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 8
+          let amount =
+            event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 8
           self.onZoom?(exp(amount * 0.01), point)
         } else {
           let factor: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10

@@ -55,6 +55,8 @@ let package = Package(
     .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.15.0"),
     .package(url: "https://github.com/apple/swift-log.git", exact: "1.14.0"),
     .package(url: "https://github.com/apple/swift-nio-ssl.git", exact: "2.37.2"),
+    // Kokoro speech on Core ML for the local voice engine. Apache 2.0, no GPL parts.
+    .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7"),
     .package(
       url: "https://github.com/livekit/livekit-wakeword",
       revision: "95448a7559c453fcd87645bd67b247ffb45f85b0"
@@ -191,6 +193,8 @@ let package = Package(
       dependencies: [
         "OttoModels", "OttoObjCSupport", "OttoSecurity", "OttoTools",
         .product(name: "LiveKitWakeWord", package: "livekit-wakeword"),
+        .product(
+          name: "FluidAudio", package: "FluidAudio", condition: .when(platforms: [.macOS])),
       ],
       linkerSettings: [.linkedFramework("AVFoundation")]
     ),

@@ -149,13 +149,16 @@ build_app() {
   trap "/bin/rm -rf ${(q)stage}; /bin/rmdir ${(q)lock_directory} 2>/dev/null || true" \
     EXIT INT TERM
 
+  # Without --disable-keychain SwiftPM hangs fetching FluidAudio's binary artifact.
   /usr/bin/swift build \
+    --disable-keychain \
     --package-path "$checkout_path" \
     --scratch-path "$scratch_path" \
     --jobs "${OTTO_PROD_BUILD_JOBS:-${MUSE_PROD_BUILD_JOBS:-4}}" \
     -c release
   binary_dir=$(
     /usr/bin/swift build \
+      --disable-keychain \
       --package-path "$checkout_path" \
       --scratch-path "$scratch_path" \
       --jobs "${OTTO_PROD_BUILD_JOBS:-${MUSE_PROD_BUILD_JOBS:-4}}" \

@@ -11,6 +11,12 @@ public struct VoiceContext: Codable, Equatable, Sendable {
   public var sessions: [VoiceSessionContext]
   public var bots: [VoiceBotContext]
   public var teams: [VoiceTeamContext]
+  /// The models each installed harness offers, so a spoken model name can be matched to a real
+  /// one. Absent until the harnesses have been asked.
+  public var models: [VoiceHarnessModels]?
+  /// Where the person is in Otto and what they are looking at, so "this", "here" and "that
+  /// page" mean something. Absent when Otto has not said.
+  public var screen: VoiceScreenContext?
 
   public init(
     activeCanvas: VoiceCanvasContext,
@@ -61,6 +67,61 @@ public struct VoiceContext: Codable, Equatable, Sendable {
     sessions = []
     bots = []
     teams = []
+  }
+}
+
+/// What is in front of the person right now.
+public struct VoiceScreenContext: Codable, Equatable, Sendable {
+  /// The place in Otto: Home, Chat, Documents, Browser, Activity and so on.
+  public var place: String
+  /// What kind of thing is open there: a bot, session, team, document or web page.
+  public var kind: String?
+  /// Its name, as the person sees it.
+  public var showing: String?
+  /// The session, bot conversation or browser page, for the tools that read one.
+  public var nodeID: UUID?
+  /// The open document's path, for the tools that read one.
+  public var path: String?
+  public var url: String?
+
+  public init(
+    place: String, kind: String? = nil, showing: String? = nil, nodeID: UUID? = nil,
+    path: String? = nil, url: String? = nil
+  ) {
+    self.place = place
+    self.kind = kind
+    self.showing = showing
+    self.nodeID = nodeID
+    self.path = path
+    self.url = url
+  }
+
+  /// One line a voice model can be told, with nothing in it that should not be said aloud.
+  public var summary: String {
+    guard let showing, !showing.isEmpty else { return "The user is looking at \(place) in Otto." }
+    let what = kind.map { "the \($0) \"\(showing)\"" } ?? "\"\(showing)\""
+    return "The user is in \(place) in Otto, looking at \(what)."
+  }
+}
+
+/// The models one harness can run, by the name the person sees and the id a tool call takes.
+public struct VoiceHarnessModels: Codable, Equatable, Sendable {
+  public var harness: String
+  public var models: [VoiceModelName]
+
+  public init(harness: String, models: [VoiceModelName]) {
+    self.harness = harness
+    self.models = models
+  }
+}
+
+public struct VoiceModelName: Codable, Equatable, Sendable {
+  public var id: String
+  public var name: String
+
+  public init(id: String, name: String) {
+    self.id = id
+    self.name = name
   }
 }
 

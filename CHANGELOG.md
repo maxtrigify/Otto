@@ -14,6 +14,7 @@ lead with what they can now do, not how it was implemented.
 
 ### Fixed
 
+- **Files & notes shows real names.** Notes and media created by agents all read "Notes 1", "Notes 2" and so on. They now show the file name or the note's first heading, so you can tell them apart; names you chose are kept (issue #86).
 - **Otto stays light while agents are working.** Otto could use a whole processor core, and make the Mac feel slow, for as long as agents were printing output — worse the longer they had been running and the more of them there were. Each new piece of output is now handled once, at its own size, and an agent's terminal output is only prepared for display while a terminal showing it is open.
 - **Automations no longer flash up in Sessions.** A card update or automation run could appear in the Sessions list for a few seconds while its agent started, then vanish. Its agent is now background work from the moment it is created.
 - **A schedule fires once when two Otto apps share a workspace.** With Otto and Otto Dev (or two copies of Otto) open on the same workspace, every scheduled automation ran twice. One app now fires the schedules, and another takes over if it quits.

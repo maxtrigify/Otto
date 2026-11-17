@@ -38,7 +38,8 @@ public enum ApplicationToolBootstrap {
     subagentResolver: BotSubagentResolver? = nil,
     accountBoundary: AgentAccountBoundary? = nil,
     emailOriginal: EmailApprovalSummary.OriginalLookup? = nil,
-    desktopControl: (any DesktopCommandRunning)? = nil
+    desktopControl: (any DesktopCommandRunning)? = nil,
+    dormantAgent: DormantAgentLookup? = nil
   ) async throws {
     let worktreeManager = worktrees ?? GitWorktreeManager(repositoryPath: workspacePath)
     let orchestration = orchestration ?? .live(workspacePath: workspacePath)
@@ -91,7 +92,7 @@ public enum ApplicationToolBootstrap {
         supervisor: supervisor,
         worktreeSessions: worktreeSessions
       ))
-    try await registry.register(AgentGetStatusTool(supervisor: supervisor))
+    try await registry.register(AgentGetStatusTool(supervisor: supervisor, dormant: dormantAgent))
     try await registry.register(
       AgentRequestPermissionTool(supervisor: supervisor, emailOriginal: emailOriginal))
     try await registry.register(AgentAskUserTool(supervisor: supervisor))
@@ -114,7 +115,8 @@ public enum ApplicationToolBootstrap {
       ContextualTool { context in
         AgentGetResultTool(
           supervisor: supervisor,
-          brain: brainResolver == nil ? brainStore : (try? await brainResolver?(context)))
+          brain: brainResolver == nil ? brainStore : (try? await brainResolver?(context)),
+          dormant: dormantAgent)
       })
     if let brainStore {
       // Writes maintain the existing index. An unconditional background rebuild still holds

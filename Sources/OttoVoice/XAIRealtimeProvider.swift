@@ -13,7 +13,7 @@ public struct XAIRealtimeConfiguration: Sendable, Equatable {
 
   public init(
     endpoint: URL = URL(string: "wss://api.x.ai/v1/realtime")!,
-    model: String = "grok-voice-think-fast-2.0",
+    model: String = "grok-voice-3.0",
     voice: String = "eve",
     instructions: String,
     reasoningEffort: String = "high",

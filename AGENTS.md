@@ -16,6 +16,13 @@
 - Normal builds and tests must use `Package.resolved` without remote updates. Use `scripts/otto-swift resolve` only as a deliberate integration task and commit any resulting `Package.resolved` change.
 - Set `OTTO_SWIFT_TIMEOUT=0` only for an intentionally unbounded interactive run.
 - If SwiftPM appears stuck, run `scripts/otto-swift-doctor`. Do not use broad commands such as `pkill swift` or `killall git`.
+- `scripts/otto-gc` reclaims build output nothing is using: otto-swift task caches and the
+  `.build` directories that Xcode and direct `swift build` leave in worktrees, which otto-swift
+  does not own. It goes by age (`--days`, 7 by default), not by size, so space comes back before
+  `OTTO_SWIFT_CACHE_LIMIT_MB` is ever reached. It skips any directory whose lock belongs to a
+  live process and never touches sources or git data. `--dry-run` first if in doubt;
+  `--install-schedule` runs it daily at 04:30 and `--uninstall-schedule` stops it.
+
 - The old `scripts/muse-swift`, `muse-worktree` and `muse-swift-doctor` names are thin wrappers kept for agents that still call them. The pre-rename `MUSE_SWIFT_*` variables are still read when the `OTTO_SWIFT_*` one is unset, and SwiftPM state stays in an existing `~/Library/Caches/Muse/SwiftPM` until the app migrates it to `~/Library/Caches/Otto/SwiftPM`.
 
 ## Handoff

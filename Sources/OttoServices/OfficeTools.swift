@@ -194,6 +194,61 @@ public struct OfficeOutput: Codable, Sendable, Equatable {
 private let docProperty = JSONValue.stringSchema(
   description: "The file's title (e.g. Q4 plan) or its path from docs.list")
 
+public struct AppOpenInput: Codable, Sendable {
+  public var place: String
+  public init(place: String) { self.place = place }
+}
+
+public struct AppOpenOutput: Codable, Sendable, Equatable {
+  public var showing: String
+  public init(showing: String) { self.showing = showing }
+}
+
+/// Takes the person to a place in Otto. Without it an assistant can change things but cannot
+/// show them, which is the difference between being told a whiteboard exists and seeing it.
+public struct AppOpenTool: OttoTool {
+  public static let places = [
+    "home", "chat", "documents", "dashboards", "browser", "activity", "automations", "skills",
+    "files",
+  ]
+  public static let definition = ToolDefinition(
+    name: "app.open",
+    description:
+      "Shows a place in Otto on screen so the user is looking at it: home, chat, documents, "
+      + "dashboards, browser, activity, automations, skills or files. Use docs.open instead to "
+      + "show one particular document, spreadsheet, presentation or whiteboard.",
+    inputSchema: .objectSchema(
+      properties: [
+        "place": .stringSchema(description: "One of: \(places.joined(separator: ", "))")
+      ], required: ["place"]),
+    outputSchema: .objectSchema(), requiredScopes: [.canvasWrite], riskLevel: .reversible)
+  private let handler: @Sendable (AppOpenInput) async throws -> AppOpenOutput
+  public init(handler: @escaping @Sendable (AppOpenInput) async throws -> AppOpenOutput) {
+    self.handler = handler
+  }
+  public func call(_ input: AppOpenInput, context: ToolContext) async throws -> AppOpenOutput {
+    try await handler(input)
+  }
+}
+
+public struct DocsOpenTool: OttoTool {
+  public static let definition = ToolDefinition(
+    name: "docs.open",
+    description:
+      "Shows one Otto document, spreadsheet, presentation or whiteboard on screen, in Documents, "
+      + "so the user is looking at it. Call it after docs.create when the user asked to open, "
+      + "see or be taken to the file.",
+    inputSchema: .objectSchema(properties: ["doc": docProperty], required: ["doc"]),
+    outputSchema: .objectSchema(), requiredScopes: [.canvasWrite], riskLevel: .reversible)
+  private let handler: @Sendable (OfficeDocRef) async throws -> OfficeOutput
+  public init(handler: @escaping @Sendable (OfficeDocRef) async throws -> OfficeOutput) {
+    self.handler = handler
+  }
+  public func call(_ input: OfficeDocRef, context: ToolContext) async throws -> OfficeOutput {
+    try await handler(input)
+  }
+}
+
 public struct DocsListTool: OttoTool {
   public static let definition = ToolDefinition(
     name: "docs.list",
@@ -564,7 +619,37 @@ extension ApplicationServices {
       """
   }
 
+  /// Asks the interface to show a place. The interface owns navigation; this only requests it.
+  func openPlace(_ input: AppOpenInput) throws -> AppOpenOutput {
+    let place = input.place.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard AppOpenTool.places.contains(place) else {
+      throw ToolRegistryError.invalidInput(
+        "Unknown place. Use one of: \(AppOpenTool.places.joined(separator: ", ")).")
+    }
+    placeNavigationRequest = PlaceNavigationRequest(place: place)
+    return AppOpenOutput(showing: place)
+  }
+
+  func openOffice(_ input: OfficeDocRef) throws -> OfficeOutput {
+    let file = try resolveOffice(input.doc)
+    placeNavigationRequest = PlaceNavigationRequest(place: "documents", documentPath: file.path)
+    var output = try readOffice(input)
+    output.content = nil
+    output.note = "Now showing on screen."
+    return output
+  }
+
   func registerOfficeTools() async throws {
+    try await registry.register(
+      AppOpenTool { [weak self] input in
+        guard let self else { throw ToolRegistryError.invalidInput("Otto unavailable") }
+        return try await self.openPlace(input)
+      })
+    try await registry.register(
+      DocsOpenTool { [weak self] input in
+        guard let self else { throw ToolRegistryError.invalidInput("Otto unavailable") }
+        return try await self.openOffice(input)
+      })
     try await registry.register(
       DocsListTool { [weak self] in
         guard let self else { throw ToolRegistryError.invalidInput("Otto unavailable") }

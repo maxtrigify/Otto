@@ -72,6 +72,22 @@ public struct BotNavigationRequest: Identifiable, Equatable, Sendable {
   }
 }
 
+/// A request to show somewhere in Otto on screen, made by voice or an agent on the person's
+/// behalf: Home, one of the places in the sidebar, or one file in Documents.
+public struct PlaceNavigationRequest: Identifiable, Equatable, Sendable {
+  public let id: UUID
+  /// "home", or the name of a place such as "Documents".
+  public let place: String
+  /// The file to show, when the place is Documents and one file was asked for.
+  public let documentPath: String?
+
+  public init(place: String, documentPath: String? = nil) {
+    id = UUID()
+    self.place = place
+    self.documentPath = documentPath
+  }
+}
+
 public struct TerminalRevealRequest: Identifiable, Equatable, Sendable {
   public let id: UUID
   public let terminalID: UUID
@@ -209,6 +225,7 @@ public final class ApplicationServices: ObservableObject {
   /// Navigation requested by voice/control-plane tools. ChatWorkspace consumes the latest request
   /// even when it mounts after switching to the Chat surface, so team selection is never lost.
   @Published public private(set) var botNavigationRequest: BotNavigationRequest?
+  @Published public internal(set) var placeNavigationRequest: PlaceNavigationRequest?
   /// The latest browser opened by an agent. Chat consumes this to bind the browser to the
   /// initiating conversation's work panel instead of presenting it as an unrelated resource preview.
   @Published public private(set) var agentBrowserOpenRequest: AgentBrowserOpenRequest?
@@ -629,7 +646,8 @@ public final class ApplicationServices: ObservableObject {
         },
         emailOriginal: { [weak self] toolName, input, context in
           await self?.emailOriginal(toolName: toolName, input: input, context: context)
-        }
+        },
+        dormantAgent: { [weak self] id in await self?.dormantAgentSnapshot(id) }
       )
       try await registry.register(
         AgentProfileOpenTool { [weak self] name, forceNew in
@@ -3738,6 +3756,13 @@ public final class ApplicationServices: ObservableObject {
         profileID: profileID, nodeID: node.id, sessionID: sessionID)
     }
     for id in ids { await restorePersistedAgentTranscript(nodeID: id) }
+  }
+
+  /// The saved conversation of a session that is not running, read from disk first if this
+  /// launch of Otto has not looked at it yet.
+  func dormantAgentSnapshot(_ id: UUID) async -> AgentRuntimeSnapshot? {
+    await restorePersistedAgentTranscript(nodeID: id)
+    return fleet[id]
   }
 
   /// A mobile snapshot can restore its own history without waiting for every other session.

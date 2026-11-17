@@ -1,3 +1,5 @@
+import OttoModels
+import OttoRuntime
 import OttoVoice
 import SwiftUI
 
@@ -13,6 +15,7 @@ struct VoiceSettingsView: View {
   @State private var relayExpectedTranscript = "Tell Chase verbatim don't paraphrase me"
   @State private var relayExpectedPayload = "don't paraphrase me"
   @State private var showingWhistleTerms = false
+  @ObservedObject private var modelCatalog = ProviderModelCatalogStore.shared
 
   var body: some View {
     Form {
@@ -28,19 +31,30 @@ struct VoiceSettingsView: View {
         }
         .pickerStyle(.menu)
         .disabled(voice.availableVoiceEngines.isEmpty)
+        .modifier(LocalVoiceDownloadPrompt(voice: voice))
         selectedEngineStatus
+        if voice.engine == .openaiLive {
+          Text(
+            "GPT-Live does the talking and \(VoiceController.thinkingName(voice.thinkingProvider)) does the work, on your own sign-in. OpenAI bills about 5 cents for each minute a conversation is open, so Otto opens one when you hold the Talk key and closes it after 45 seconds of quiet. It uses your OpenAI key."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
 
         Divider()
 
         Picker("Configure provider", selection: $configurationEngine) {
-          ForEach(VoiceEngine.allCases) { engine in
+          // GPT-Live uses the same OpenAI key as GPT Realtime, so it has no key of its own to set.
+          ForEach(VoiceEngine.allCases.filter { $0.requiresKey && $0 != .openaiLive }) { engine in
             Text(engine.displayName).tag(engine)
           }
         }
         .pickerStyle(.segmented)
-        Text("Only providers with a stored key appear in “Run voice on”.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        Text(
+          "“On this Mac” needs no key. A cloud provider appears in “Run voice on” once its key is stored."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
         SecureField("\(configurationEngine.displayName) API key", text: $apiKey)
           .textFieldStyle(.roundedBorder)
         HStack {
@@ -74,6 +88,197 @@ struct VoiceSettingsView: View {
         }
         if let error = voice.credentialError {
           Text(error).foregroundStyle(.red)
+        }
+      }
+
+      Section("Microphone and speaker") {
+        Picker("Listen through", selection: $voice.inputDeviceUID) {
+          Text(systemDefaultMicrophoneLabel).tag("")
+          ForEach(voice.inputDevices) { device in
+            Text(device.name).tag(device.id)
+          }
+        }
+        .pickerStyle(.menu)
+        HStack(spacing: 12) {
+          Button("Test microphone") { Task { await voice.testMicrophone() } }
+            .disabled(microphoneIsBeingTested)
+          if case .listening(let level) = voice.microphoneTest {
+            ProgressView(value: min(1, level * 8))
+              .frame(maxWidth: 180)
+            Text("Say something…").foregroundStyle(.secondary)
+          } else {
+            microphoneTestResult
+          }
+        }
+        LabeledContent("Speaks through") {
+          HStack(spacing: 10) {
+            Text(voice.outputDeviceName)
+            Button(voice.speakerTestIsPlaying ? "Playing…" : "Test speaker") {
+              Task { await voice.testSpeaker() }
+            }
+            .disabled(voice.speakerTestIsPlaying)
+          }
+        }
+        Text(
+          "Otto speaks through your Mac's sound output. Change it in System Settings › Sound › Output."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        if voice.microphoneDiffersFromSystem {
+          HStack(alignment: .top) {
+            Text(
+              "macOS only cancels echo on its own default microphone. With a different one Otto still hears you, but it waits until it has finished speaking, so you cannot talk over it."
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+            Spacer(minLength: 12)
+            Button("Use for the whole Mac") {
+              Task { await voice.makeChosenMicrophoneSystemDefault() }
+            }
+          }
+        }
+        Text(
+          "This choice is for Otto only and leaves the rest of your Mac as it is. A MacBook's built-in microphone switches off when the lid is closed."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+      .task {
+        // Devices are plugged in and switched while this is open, so keep the names current.
+        while !Task.isCancelled {
+          voice.refreshInputDevices()
+          try? await Task.sleep(for: .seconds(2))
+        }
+      }
+
+      if !voice.engine.requiresKey {
+        Section("Set up voice on this Mac") {
+          localSetupRow(
+            title: "Hearing",
+            detail: "Parakeet, open-source speech recognition by Nvidia. About 490 MB.",
+            ready: voice.isParakeetInstalled,
+            status: voice.isParakeetInstalled ? "Installed" : voice.parakeetInstallationState.detail
+          ) {
+            if !voice.isParakeetInstalled {
+              Button("Install…") { Task { await voice.installParakeet() } }
+                .disabled(voice.parakeetInstallationState.isBusy)
+            }
+          }
+          localSetupRow(
+            title: "Sharper hearing",
+            detail:
+              "Parakeet Ultra, a more accurate open-source model that also listens for the names of your harnesses, models, bots and projects. Optional. About 800 MB, kept on this Mac.",
+            ready: voice.sharperHearingState == .ready,
+            status: sharperHearingStatusText
+          ) {
+            if voice.sharperHearingState == .notDownloaded {
+              Button("Download…") { Task { await voice.downloadSharperHearing() } }
+            } else if case .failed = voice.sharperHearingState {
+              Button("Try again") { Task { await voice.downloadSharperHearing() } }
+            }
+          }
+          localSetupRow(
+            title: "Thinking",
+            detail:
+              "Whichever harness you already use, on your own sign-in, so there is no extra bill. Claude Code answers fastest because Otto keeps it open between requests.",
+            ready: voice.thinkingIsAvailable,
+            status: voice.thinkingIsAvailable
+              ? "Ready" : "\(VoiceController.thinkingName(voice.thinkingProvider)) is not installed"
+          ) { EmptyView() }
+          Picker("Think with", selection: $voice.thinkingProvider) {
+            ForEach(HarnessVoiceBrain.providers, id: \.self) { provider in
+              Text(
+                voice.installedThinkingProviders.contains(provider)
+                  ? VoiceController.thinkingName(provider)
+                  : "\(VoiceController.thinkingName(provider)) · not installed"
+              )
+              .tag(provider)
+            }
+          }
+          .pickerStyle(.menu)
+          Picker("Model", selection: $voice.thinkingModel) {
+            Text(
+              voice.thinkingProvider == .claudeCode ? "Fastest (Haiku)" : "The harness's default"
+            )
+            .tag("")
+            ForEach(thinkingModels, id: \.id) { model in
+              Text(model.displayName).tag(model.id)
+            }
+          }
+          .pickerStyle(.menu)
+          .onChange(of: voice.thinkingProvider, initial: true) { _, provider in
+            modelCatalog.load(provider)
+          }
+          Text("A change takes effect the next time Talk to Otto starts.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          localSetupRow(
+            title: "Speaking",
+            detail:
+              "Kokoro, an open-source voice (Apache 2.0), with a small model that recognises your voice. About 450 MB, downloaded once and kept on this Mac. Until then Otto speaks with the built-in macOS voice.",
+            ready: voice.kokoroState == .ready,
+            status: kokoroStatusText
+          ) {
+            if voice.kokoroState == .notDownloaded {
+              Button("Download…") { Task { await voice.downloadLocalVoiceModels() } }
+            } else if case .failed = voice.kokoroState {
+              Button("Try again") { Task { await voice.downloadLocalVoiceModels() } }
+            }
+          }
+          Text(
+            "Nothing you say is sent anywhere as audio. Only the words reach your Claude Code account."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+        .task { await voice.refreshThinkingProviders() }
+        .task {
+          // Downloads and learning progress while this is on screen, so keep it current.
+          while !Task.isCancelled {
+            await voice.refreshVoiceprintStatus()
+            try? await Task.sleep(for: .seconds(1))
+          }
+        }
+
+        Section("Your voice") {
+          Toggle("Only respond to my voice", isOn: $voice.onlyMyVoice)
+          LabeledContent("Status") { Text(voiceprintStatusText) }
+          if case .listening(let secondsLeft) = voice.voiceLearningState {
+            VStack(alignment: .leading, spacing: 6) {
+              Text("Read this aloud (\(secondsLeft)s)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              Text("“\(VoiceController.voiceLearningLine)”")
+                .font(.title3)
+            }
+            .padding(.vertical, 4)
+          } else {
+            HStack {
+              Button(voice.voiceprintStatus == .ready ? "Learn my voice again" : "Learn my voice") {
+                Task { await voice.learnMyVoice() }
+              }
+              .disabled(voice.kokoroState != .ready || voice.voiceLearningState == .working)
+              if voice.voiceprintStatus != .unavailable,
+                voice.voiceprintStatus != .learning(heard: 0, needed: Voiceprint.sentencesNeeded)
+              {
+                Button("Forget my voice", role: .destructive) {
+                  Task { await voice.forgetVoiceprint() }
+                }
+              }
+            }
+            if case .failed(let message) = voice.voiceLearningState {
+              Text(message).foregroundStyle(.red)
+            } else if voice.kokoroState != .ready {
+              Text("Download the voice models above first.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          Text(
+            "Press “Learn my voice” and read one sentence for ten seconds. After that Otto ignores other voices while it is listening continuously. It keeps a short list of numbers, not a recording, and it never leaves this Mac. Anything you say with the Talk key held is always heard."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
       }
 
@@ -117,29 +322,31 @@ struct VoiceSettingsView: View {
         .foregroundStyle(.secondary)
       }
 
-      Section("Live delegation") {
-        LabeledContent("Conversation") {
-          Text(voice.engine == .openai ? "GPT Realtime 2.1" : "xAI Grok Voice")
-        }
-        LabeledContent("Multi-task reasoning") {
-          Text("GPT-5.6")
-        }
-        HStack {
-          Label(
-            voice.hasAPIKey(for: .openai) ? "Ready" : "OpenAI key required",
-            systemImage: voice.hasAPIKey(for: .openai)
-              ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+      if voice.engine.requiresKey {
+        Section("Live delegation") {
+          LabeledContent("Conversation") {
+            Text(voice.engine == .openai ? "GPT Realtime 2.1" : "xAI Grok Voice")
+          }
+          LabeledContent("Multi-task reasoning") {
+            Text("GPT-5.6")
+          }
+          HStack {
+            Label(
+              voice.hasAPIKey(for: .openai) ? "Ready" : "OpenAI key required",
+              systemImage: voice.hasAPIKey(for: .openai)
+                ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(voice.hasAPIKey(for: .openai) ? .green : .orange)
+            Spacer()
+            Text("Up to 6 parallel tasks")
+              .foregroundStyle(.secondary)
+          }
+          Text(
+            "Otto keeps the live voice connection responsive while GPT-5.6 splits compound requests and starts independent local workers. Results return through spoken agent updates."
           )
-          .foregroundStyle(voice.hasAPIKey(for: .openai) ? .green : .orange)
-          Spacer()
-          Text("Up to 6 parallel tasks")
-            .foregroundStyle(.secondary)
+          .font(.caption)
+          .foregroundStyle(.secondary)
         }
-        Text(
-          "Otto keeps the live voice connection responsive while GPT-5.6 splits compound requests and starts independent local workers. Results return through spoken agent updates."
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
       }
 
       Section("Local speech recognition") {
@@ -456,6 +663,92 @@ struct VoiceSettingsView: View {
     }
   }
 
+  /// The chosen harness's models, with a saved choice kept even while the list is loading.
+  private var thinkingModels: [AgentModel] {
+    var models = modelCatalog.catalog(for: voice.thinkingProvider) ?? []
+    if !voice.thinkingModel.isEmpty, !models.contains(where: { $0.id == voice.thinkingModel }) {
+      models.append(AgentModel(id: voice.thinkingModel, displayName: voice.thinkingModel))
+    }
+    return models
+  }
+
+  private var systemDefaultMicrophoneLabel: String {
+    let name = voice.inputDevices.first(where: \.isSystemDefault)?.name
+    return name.map { "System default (\($0))" } ?? "System default"
+  }
+
+  private var microphoneIsBeingTested: Bool {
+    if case .listening = voice.microphoneTest { return true }
+    return false
+  }
+
+  @ViewBuilder private var microphoneTestResult: some View {
+    switch voice.microphoneTest {
+    case .heard:
+      Label("Heard you clearly", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+    case .faint:
+      Label(
+        "Very quiet. Move closer or raise the input level.",
+        systemImage: "exclamationmark.triangle.fill"
+      )
+      .foregroundStyle(.orange)
+    case .silent:
+      Label("Nothing heard. Choose another microphone.", systemImage: "mic.slash.fill")
+        .foregroundStyle(.red)
+    case .failed(let message):
+      Text(message).foregroundStyle(.red)
+    case .idle, .listening:
+      EmptyView()
+    }
+  }
+
+  private var voiceprintStatusText: String {
+    if voice.voiceLearningState == .working { return "Learning…" }
+    switch voice.voiceprintStatus {
+    case .unavailable: return "Not learned yet"
+    case .learning(let heard, let needed):
+      return heard == 0 ? "Not learned yet" : "Learning your voice (\(heard) of \(needed))"
+    case .ready: return "Knows your voice"
+    }
+  }
+
+  private var kokoroStatusText: String {
+    switch voice.kokoroState {
+    case .notDownloaded: "Not downloaded"
+    case .downloading: "Getting ready…"
+    case .ready: "Ready"
+    case .failed(let message): message
+    }
+  }
+
+  private var sharperHearingStatusText: String {
+    switch voice.sharperHearingState {
+    case .notDownloaded: "Not downloaded"
+    case .downloading: "Downloading and preparing. Voice keeps working meanwhile."
+    case .ready: "Installed"
+    case .failed(let message): "Could not download: \(message)"
+    }
+  }
+
+  private func localSetupRow(
+    title: String, detail: String, ready: Bool, status: String,
+    @ViewBuilder action: () -> some View
+  ) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(systemName: ready ? "checkmark.circle.fill" : "circle.dashed")
+        .foregroundStyle(ready ? .green : .orange)
+        .padding(.top, 2)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title).font(.body.weight(.semibold))
+        Text(detail).font(.caption).foregroundStyle(.secondary)
+        Text(status).font(.caption).foregroundStyle(ready ? .green : .orange)
+      }
+      Spacer(minLength: 12)
+      action()
+    }
+    .padding(.vertical, 2)
+  }
+
   private var selectedEngineStatus: some View {
     HStack(spacing: 10) {
       Image(systemName: "waveform.circle.fill")
@@ -467,7 +760,7 @@ struct VoiceSettingsView: View {
           .foregroundStyle(.secondary)
         Text(voice.engine.displayName)
           .font(.body.weight(.semibold))
-        Text(voice.engine.modelName)
+        Text(voice.engine.requiresKey ? voice.engine.modelName : voice.localVoiceSummary)
           .font(.system(.caption, design: .monospaced))
           .foregroundStyle(.secondary)
         Text(selectedEngineDetail)
@@ -488,10 +781,14 @@ struct VoiceSettingsView: View {
 
   private var selectedEngineBadge: String {
     if voice.selectedEngineIsRunning { return "In use" }
+    if !voice.engine.requiresKey { return voice.localVoiceIsSetUp ? "Ready" : "Setup needed" }
     return voice.hasAPIKey ? "Ready" : "Key required"
   }
 
   private var selectedEngineBadgeColor: Color {
+    if !voice.engine.requiresKey, !voice.selectedEngineIsRunning {
+      return voice.localVoiceIsSetUp ? .green : .orange
+    }
     if voice.selectedEngineIsRunning || voice.hasAPIKey { return .green }
     return .orange
   }
@@ -499,6 +796,11 @@ struct VoiceSettingsView: View {
   private var selectedEngineDetail: String {
     if voice.selectedEngineIsRunning {
       return "Talk to Otto is connected with this engine."
+    }
+    if !voice.engine.requiresKey {
+      return voice.localVoiceIsSetUp
+        ? "No API key needed. Everything except the thinking runs on this Mac."
+        : "No API key needed. Finish the setup below before Talk to Otto can start."
     }
     if voice.hasAPIKey {
       return "Ready when Talk to Otto starts."
@@ -589,5 +891,63 @@ private struct WhistleTermsSheet: View {
     .padding(22)
     .frame(width: 480)
     .onAppear { agreed = alreadyAccepted }
+  }
+}
+
+/// Asks about the downloads at the moment someone first chooses voice on this Mac, so they
+/// know what is being fetched, how big it is and that it is open source, before any of it starts.
+private struct LocalVoiceDownloadPrompt: ViewModifier {
+  @ObservedObject var voice: VoiceController
+  @State private var isPresented = false
+
+  func body(content: Content) -> some View {
+    content
+      .onChange(of: voice.engine) { _, engine in
+        if !engine.requiresKey, voice.localVoiceNeedsDownloads { isPresented = true }
+      }
+      .sheet(isPresented: $isPresented) {
+        VStack(alignment: .leading, spacing: 14) {
+          Text("Download the voice models?").font(.title2.weight(.semibold))
+          Text(
+            "Voice on this Mac runs on open-source models that Otto downloads once and keeps on this Mac. Nothing you say is sent anywhere as audio."
+          )
+          .foregroundStyle(.secondary)
+          VStack(alignment: .leading, spacing: 8) {
+            if !voice.isParakeetInstalled {
+              Label(
+                "Parakeet, speech recognition by Nvidia · about 490 MB",
+                systemImage: "ear")
+            }
+            if voice.kokoroNeedsDownload {
+              Label(
+                "Kokoro, the voice Otto speaks with (Apache 2.0) · about 430 MB",
+                systemImage: "waveform")
+              Label(
+                "A small model that recognises your voice · about 15 MB",
+                systemImage: "person.wave.2")
+            }
+          }
+          Text(
+            "If you skip this, Otto speaks with the built-in macOS voice, and you can download the models later in Voice settings."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          HStack {
+            Spacer()
+            Button("Not now") { isPresented = false }
+              .keyboardShortcut(.cancelAction)
+            Button("Download") {
+              isPresented = false
+              Task {
+                if !voice.isParakeetInstalled { await voice.installParakeet() }
+                await voice.downloadLocalVoiceModels()
+              }
+            }
+            .keyboardShortcut(.defaultAction)
+          }
+        }
+        .padding(24)
+        .frame(width: 460)
+      }
   }
 }
