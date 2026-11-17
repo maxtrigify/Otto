@@ -96,6 +96,10 @@ Apache License 2.0:
 - hummingbird-project/hummingbird, hummingbird-websocket and swift-websocket
 - adam-fowler/compress-nio
 - livekit/livekit-wakeword
+- FluidInference/FluidAudio (on-device speech recognition, speech synthesis and voice
+  activity detection). It includes VBx (Apache License 2.0), fastcluster (BSD 2-Clause) and
+  the NemoTextProcessing text normaliser (Apache License 2.0); their licence texts are in FluidAudio's
+  `ThirdPartyLicenses` folder: <https://github.com/FluidInference/FluidAudio>
 
 swift-nio-ssl and swift-crypto include BoringSSL, which is covered by the OpenSSL and ISC
 licenses.
@@ -109,6 +113,14 @@ MIT License:
 The optional messaging bridge (`Sources/OttoServices/Resources/PhotonBridge`) installs
 spectrum-ts and the @photon-ai packages from npm at runtime. They are not redistributed in
 this repository.
+
+## Voice models
+
+"On this Mac" voice downloads its models from Hugging Face at the user's request. They are not
+redistributed in this repository or in the Otto app, and each is offered under the licence on
+its own model page: Kokoro-82M (the voice), NVIDIA Parakeet and Parakeet Ultra (speech
+recognition), Parakeet CTC (name recognition), Silero VAD (speech detection) and the speaker
+models used to recognise the user's own voice.
 
 ## Brand marks
 
