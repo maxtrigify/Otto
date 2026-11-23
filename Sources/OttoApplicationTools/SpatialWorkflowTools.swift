@@ -1374,7 +1374,7 @@ private func ensureBrowserSession(
   await runtime.synchronize(nodeID: nodeID, session: session)
 }
 
-private func ensureInteractiveWebSession(
+func ensureInteractiveWebSession(
   nodeID: UUID,
   store: CanvasStore,
   runtime: BrowserRuntime,
@@ -1410,7 +1410,7 @@ private func preferredBrowserNodeID(
     "No browser node is open; use browser.open to create the first browser")
 }
 
-private func requireBrowserClickConfirmation(
+func requireBrowserClickConfirmation(
   nodeID: UUID,
   request: BrowserInteractionRequest,
   toolName: String,

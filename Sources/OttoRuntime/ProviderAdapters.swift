@@ -212,7 +212,10 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     to find their node IDs, then browser.inspect, browser.type, browser.click, browser.scroll, \
     and browser.screenshot to operate them. A user asking you to enter or add something in one \
     of those apps is a request to perform the action, not a reason to claim the app is \
-    inaccessible. Re-inspect after meaningful UI changes because element IDs are temporary. \
+    inaccessible. Use browser.sequence for predictable steps on one site. Finish with a wait for \
+    an expected control or a verified PDF download. On partial completion, inspect and resume at \
+    the unfinished step; never repeat a completed submission. \
+    Re-inspect after meaningful UI changes because element IDs are temporary. \
     When building or changing a web app, treat visual verification as part of the work: detect the \
     localhost or loopback URL printed by the development server, open it with browser.open, then \
     use browser.inspect, browser.screenshot, browser.click, browser.type, and browser.scroll to \
@@ -1156,6 +1159,7 @@ public struct HermesAdapter: AgentAdapter {
     - browser.get_state {nodeID}
     - browser.refresh/browser.back/browser.forward {nodeID}
     - browser.inspect {nodeID}
+    - browser.sequence {nodeID,steps:[{action,target,text?}]}
     - browser.click {nodeID,elementID,pageRevision?}
     - browser.type {nodeID,elementID,text,pageRevision?}
     - browser.scroll {nodeID,deltaX,deltaY,pageRevision?}

@@ -4,6 +4,7 @@ import OttoBrowser
 import OttoCore
 import OttoModels
 import OttoServices
+import PDFKit
 import SwiftUI
 import WebKit
 
@@ -1263,6 +1264,10 @@ struct BrowserWebView: NSViewRepresentable {
               throw BrowserRuntimeError.pageInteractionUnavailable(nodeID)
             }
             return try await self.assessInteraction(webView, request: request)
+          },
+          readPDF: { @MainActor [weak self, weak webView, nodeID] element in
+            guard let self, let webView else { throw BrowserRuntimeError.pageInteractionUnavailable(nodeID) }
+            return try await self.readPDF(webView, element: element)
           }
         )
       }
@@ -1335,6 +1340,52 @@ struct BrowserWebView: NSViewRepresentable {
 
     func closePopupWindows() { popupWindows.closeAll() }
 
+    /// Fetch through this tab's authenticated session. Only a direct link on this origin is
+    /// eligible. Fetch in an isolated world so the page cannot replace fetch or its limits.
+    private func readPDF(_ webView: WKWebView, element: BrowserResolvedElement) async throws -> Data {
+      let link = try await webView.callAsyncJavaScript(
+        """
+        const page = window.__ottoAgentPage;
+        if (page?.revision !== revision) return null;
+        const link = page.elements.get(id);
+        return link?.isConnected && link.tagName === 'A' ? link.href : null;
+        """,
+        arguments: ["revision": element.pageRevision, "id": element.elementID], in: nil, contentWorld: .page)
+      guard let href = link as? String else { throw BrowserRuntimeError.stalePageSnapshot }
+      let value = try await webView.callAsyncJavaScript(
+        """
+        const url = new URL(href);
+        if (!['https:', 'http:', 'blob:'].includes(url.protocol) || url.origin !== location.origin)
+          throw Error('Expected a same-site PDF link');
+        const limit = 8 * 1024 * 1024;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+          const response = await fetch(url, {mode:'same-origin', signal:controller.signal});
+          if (!response.ok) throw Error('PDF download failed: ' + response.status);
+          const reader = response.body.getReader();
+          const chunks = [];
+          let size = 0;
+          while (true) {
+            const {value, done} = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > limit) throw Error('PDF exceeds 8 MiB');
+            for (let i = 0; i < value.length; i += 8192)
+              chunks.push(String.fromCharCode(...value.subarray(i, i + 8192)));
+          }
+          return btoa(chunks.join(''));
+        } finally { clearTimeout(timer); controller.abort(); }
+        """,
+        arguments: ["href": href], in: nil, contentWorld: .defaultClient)
+      guard let encoded = value as? String, let data = Data(base64Encoded: encoded),
+        data.starts(with: Data("%PDF-".utf8)), let pdf = PDFDocument(data: data), pdf.pageCount > 0
+      else {
+        throw CocoaError(.fileReadCorruptFile)
+      }
+      return data
+    }
+
     private func inspectPage(_ webView: WKWebView, nodeID: UUID) async throws
       -> BrowserPageSnapshot
     {
@@ -1366,14 +1417,15 @@ struct BrowserWebView: NSViewRepresentable {
         try target.throwIfFailed(nodeID: nodeID, elementID: request.elementID)
         if let x = target.x, let y = target.y {
           let point = CGPoint(x: x, y: y)
-          await agentCursor.move(toPagePoint: point, in: webView)
+          let showCursor = webView.window?.isVisible == true && !webView.isHiddenOrHasHiddenAncestor
+          if showCursor { await agentCursor.move(toPagePoint: point, in: webView) }
           // A real mouse press through WebKit arrives as trusted input, which some sites require
           // and which matches what a person does. Fall back to scripted events when the point
           // is covered by something else or the page is not in a window.
           if request.kind == .click, target.hit == true,
             BrowserAgentCursor.nativeClick(atPagePoint: point, in: webView)
           {
-            agentCursor.press()
+            if showCursor { agentCursor.press() }
             return BrowserInteractionResult(
               nodeID: nodeID,
               pageRevision: request.revision,
@@ -1381,7 +1433,7 @@ struct BrowserWebView: NSViewRepresentable {
               message: "Clicked element"
             )
           }
-          if request.kind == .click { agentCursor.press() }
+          if showCursor, request.kind == .click { agentCursor.press() }
         }
       }
       let json = try await evaluateString(browserInteractionScript(requestJSON), in: webView)

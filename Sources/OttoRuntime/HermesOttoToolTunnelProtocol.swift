@@ -12,7 +12,7 @@ public enum HermesOttoToolTunnelProtocol {
     "node.list",
     "browser.open", "browser.open_tab", "browser.get_selection",
     "browser.navigate", "browser.get_state", "browser.refresh", "browser.back",
-    "browser.forward", "browser.inspect", "browser.click", "browser.type",
+    "browser.forward", "browser.inspect", "browser.sequence", "browser.click", "browser.type",
     "browser.scroll", "browser.screenshot",
     "terminal.run", "terminal.wait", "terminal.read_output", "terminal.stop_process",
     "skill.list", "skill.read",

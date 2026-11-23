@@ -117,6 +117,7 @@ public struct MCPBridge: Sendable {
           // These operations include native approval and private human sign-in. A ten-second
           // timeout can abandon a still-live request and provoke an unsafe retry by the caller.
           AgentPermissionPrompt.responseTimeoutMilliseconds
+        case "browser.sequence": 60_000
         case "event.wait", "terminal.wait":
           // These tools deliberately park the control request. Give the socket slightly longer
           // than the requested wait so the tool can return a typed timeout observation rather
@@ -167,7 +168,7 @@ public struct MCPBridge: Sendable {
   static let alwaysLoadedTools: Set<String> = [
     "node.list", "agent.ask_user", "docs.create",
     "browser.open", "browser.open_tab", "browser.navigate", "browser.get_state",
-    "browser.inspect", "browser.click", "browser.type", "browser.scroll",
+    "browser.inspect", "browser.sequence", "browser.click", "browser.type", "browser.scroll",
     "browser.screenshot", "browser.get_selection",
   ]
 

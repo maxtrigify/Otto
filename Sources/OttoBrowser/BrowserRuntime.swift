@@ -92,6 +92,8 @@ public actor BrowserRuntime {
   private var captureHandlers: [UUID: BrowserCaptureHandler] = [:]
   private var captureHandlerOwners: [UUID: UUID] = [:]
   private var pageSnapshotHandlers: [UUID: BrowserPageSnapshotHandler] = [:]
+  public typealias PDFReader = @MainActor @Sendable (BrowserResolvedElement) async throws -> Data
+  private var pdfReaders: [UUID: PDFReader] = [:]
   private var interactionHandlers: [UUID: BrowserInteractionHandler] = [:]
   private var interactionAssessmentHandlers: [UUID: BrowserInteractionAssessmentHandler] = [:]
   private var pageHandlerOwners: [UUID: UUID] = [:]
@@ -310,8 +312,10 @@ public actor BrowserRuntime {
     ownerID: UUID? = nil,
     snapshot: @escaping BrowserPageSnapshotHandler,
     interact: @escaping BrowserInteractionHandler,
-    assess: BrowserInteractionAssessmentHandler? = nil
+    assess: BrowserInteractionAssessmentHandler? = nil,
+    readPDF: PDFReader? = nil
   ) {
+    pdfReaders[nodeID] = readPDF
     pageSnapshotHandlers[nodeID] = snapshot
     interactionHandlers[nodeID] = interact
     interactionAssessmentHandlers[nodeID] = assess
@@ -320,11 +324,17 @@ public actor BrowserRuntime {
 
   public func unregisterPageHandler(nodeID: UUID, ownerID: UUID? = nil) {
     if let ownerID, pageHandlerOwners[nodeID] != ownerID { return }
+    pdfReaders[nodeID] = nil
     pageSnapshotHandlers[nodeID] = nil
     interactionHandlers[nodeID] = nil
     interactionAssessmentHandlers[nodeID] = nil
     pageSnapshots[nodeID] = nil
     pageHandlerOwners[nodeID] = nil
+  }
+
+  public func readPDF(nodeID: UUID, element: BrowserResolvedElement) async throws -> Data {
+    guard let reader = pdfReaders[nodeID] else { throw BrowserRuntimeError.pageInteractionUnavailable(nodeID) }
+    return try await reader(element)
   }
 
   public func inspectPage(nodeID: UUID) async throws -> BrowserPageSnapshot {
