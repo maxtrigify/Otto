@@ -4,6 +4,18 @@ All notable changes to Otto (called Muse before 0.2.0) are documented here. Each
 published verbatim as the in-app update notes and on the download site, so write for users:
 lead with what they can now do, not how it was implemented.
 
+## 0.2.19 — 2026-11-25
+
+### New
+
+- **Bots check their own work before it reaches you.** Give a bot standards in plain words, such as "Under 60 seconds" or "Spell Clippng with two p's" (Edit bot → Advanced → Standards), or add some to a single ticket. When the bot hands a ticket back, a model from a different family checks the work against them, using only your brief, the work and what Otto measured itself (which files exist, their contents, how long a video runs), never the bot's chat. Anything that fails goes back to the bot to fix, up to twice, and the ticket shows what was checked: what passed, what was fixed and what the checker couldn't judge, which always comes to you. When you send work back, "Keep this for next time?" turns your note into standards, tries them on that work and only offers the ones that would have caught the problem. Uses a model key from Settings → Models (issue #127).
+- **Make one bot your CEO.** Tick "This bot is my CEO" when you hire or edit a bot. Give it a goal as a ticket and it splits the work up, hands the parts to your other bots, checks what comes back and hands you the finished result. You choose which bots report to it, and its page in Tickets shows what it does without asking, what it asks first and what it never does.
+- **Tickets: hand a piece of work to a bot and follow how it goes.** A new Tickets place in the sidebar lists work you have given to your bots. Write what needs doing, the limits and what you expect back, pick a bot, and it starts straight away. The bot hands the work back or tells you what it is stuck on; anything waiting on you sits at the top and in Activity. Open a ticket to read the story of how it went, approve the result or send it back with a note. Bots can make tickets for each other too, and a bot never reviews its own work.
+
+### Improved
+
+- **Agents get through web pages in fewer steps.** An agent can now do several things on a page in one go, such as click, type, wait and download a PDF, instead of one action at a time.
+
 ## 0.2.18 — 2026-11-17
 
 ### New

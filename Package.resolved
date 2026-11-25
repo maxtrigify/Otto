@@ -47,23 +47,6 @@
       }
     },
     {
-      "identity" : "livekit-wakeword",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/livekit/livekit-wakeword",
-      "state" : {
-        "revision" : "95448a7559c453fcd87645bd67b247ffb45f85b0"
-      }
-    },
-    {
-      "identity" : "onnxruntime-swift-package-manager",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/microsoft/onnxruntime-swift-package-manager",
-      "state" : {
-        "revision" : "b7fb7f7dea8a2469e6335d95a61b8f36d0dc83b2",
-        "version" : "1.24.2"
-      }
-    },
-    {
       "identity" : "swift-algorithms",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-algorithms.git",

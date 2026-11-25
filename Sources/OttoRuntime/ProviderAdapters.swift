@@ -141,6 +141,8 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       var preapproved = Self.ottoAlwaysAllowedTools
       if request.permissionMode == .workspaceWrite {
         preapproved += request.ottoSelfConfirmingTools
+        // A role such as CEO lets this one agent run its team without a prompt per ticket.
+        preapproved += request.ottoRoleTools
       }
       if request.permissionMode != .unrestricted {
         arguments += [
@@ -198,8 +200,15 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
   }
 
-  /// Otto tools that only read the person's own skill library.
-  static let ottoAlwaysAllowedTools = ["skill.list", "skill.read"]
+  /// Otto tools a bot never needs to ask before using: reading the person's own skill
+  /// library, and reporting on a ticket it was given. Otto itself checks that only the bot a
+  /// ticket is assigned to can hand it back or block it, and handed-back work still waits for
+  /// its reviewer. Creating, assigning and reviewing tickets start other bots, so they stay
+  /// behind the prompt.
+  static let ottoAlwaysAllowedTools = [
+    "skill.list", "skill.read", "ticket.list", "ticket.get", "ticket.note", "ticket.complete",
+    "ticket.block",
+  ]
 
   static let ottoWorkspaceGuidance = """
     You are working in Otto. Users access conversations in Chat and files in Documents. Otto tools are available through \
@@ -574,8 +583,9 @@ public struct CodexAdapter: AgentAdapter {
     // ("requires approval, but approval policy is never") before Otto can ask. Only those tools
     // are pre-approved, keyed by their raw MCP name; every other Otto tool keeps Codex's own
     // approval policy, and read-only runs pre-approve nothing.
-    if request.permissionMode != .readOnly, !request.ottoSelfConfirmingTools.isEmpty {
-      let entries = request.ottoSelfConfirmingTools.map { name in
+    let codexApproved = request.ottoSelfConfirmingTools + request.ottoRoleTools
+    if request.permissionMode != .readOnly, !codexApproved.isEmpty {
+      let entries = codexApproved.map { name in
         "\"\(tomlEscaped(name))\"={approval_mode=\"approve\"}"
       }
       arguments += ["--config", "mcp_servers.otto.tools={\(entries.joined(separator: ","))}"]

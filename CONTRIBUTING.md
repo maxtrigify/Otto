@@ -24,7 +24,8 @@ Tests that launch provider CLIs (Claude Code, Codex, Cursor and others) only run
 tools are installed. The suite never makes paid API calls.
 
 `scripts/dev-app.sh reload` installs a self-reloading **Otto Dev** app in
-`~/Applications`. It creates a local self-signed identity on first run.
+`~/Applications`. It creates a local self-signed identity on first run. Otto Dev keeps its own
+spaces and sessions, apart from an installed Otto (see `docs/dev-prod-workflow.md`).
 
 ## Pull requests
 

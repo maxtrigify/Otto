@@ -229,7 +229,8 @@ extension HiddenBrowserTests {
     let compactBytes = try JSONEncoder().encode(found).count
     let fullBytes = try JSONEncoder().encode(page).count
     #expect(compactBytes < fullBytes)
-    print("Invoice search returned \(compactBytes) JSON bytes; full inspection returned \(fullBytes).")
+    print(
+      "Invoice search returned \(compactBytes) JSON bytes; full inspection returned \(fullBytes).")
     let downloads = found.matchedControls.prefix(3).map {
       BrowserSequenceInput.Step(action: .downloadPDF, target: $0)
     }

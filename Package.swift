@@ -57,10 +57,10 @@ let package = Package(
     .package(url: "https://github.com/apple/swift-nio-ssl.git", exact: "2.37.2"),
     // Kokoro speech on Core ML for the local voice engine. Apache 2.0, no GPL parts.
     .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.7"),
-    .package(
-      url: "https://github.com/livekit/livekit-wakeword",
-      revision: "95448a7559c453fcd87645bd67b247ffb45f85b0"
-    ),
+    // Wake word and ONNX Runtime are kept in this repository: Microsoft's ONNX Runtime Swift
+    // package and its binary download stopped resolving in November 2026. See
+    // Vendor/onnxruntime-swift-package-manager/README.md.
+    .package(path: "Vendor/livekit-wakeword"),
   ],
   targets: [
     .target(name: "OttoModels"),
@@ -181,6 +181,7 @@ let package = Package(
       name: "OttoServices",
       dependencies: [
         "OttoApplicationTools", "OttoBrowser", "OttoCommercial", "OttoControl", "OttoCore",
+        "OttoHarness",
         "OttoDocuments",
         "OttoMedia", "OttoMemory", "OttoModels", "OttoObservability",
         "OttoRuntime", "OttoTools", "OttoWorktrees", "OttoRemote", "OttoSecurity", "OttoHooks",

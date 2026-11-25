@@ -272,6 +272,9 @@ public struct AgentLaunchRequest: Sendable, Equatable {
   /// the provider level to avoid a second prompt. Never the whole server: tools such as
   /// `terminal.run` carry no Otto card and must stay behind the provider's own approval.
   public var ottoSelfConfirmingTools: [String]
+  /// Otto tools this particular agent may use without the provider asking, because of a role
+  /// the person gave it (the CEO bot's ticket tools). Otto still enforces each tool's own rules.
+  public var ottoRoleTools: [String] = []
   /// Otto's own workspace, where Otto stages chat attachments. Nil, or equal to `workspacePath`,
   /// when the run starts there; otherwise the run starts in a project's source folder.
   public var ottoWorkspacePath: String?
@@ -367,6 +370,9 @@ public struct AgentControlPlane: Sendable {
   /// Otto's own workspace. Otto keeps its per-run files (bootstrap copies, chat images) here even
   /// when a session starts in a project's source folder, so it never writes into that folder.
   public var workspacePath: String?
+  /// Tools an agent's role lets it use without a provider prompt, looked up per launch so a
+  /// role given or taken away applies from the agent's next turn.
+  public var roleTools: @Sendable (UUID) async -> [String] = { _ in [] }
   private let tokenProvider: @Sendable (UUID, UUID?) async -> String
 
   public init(

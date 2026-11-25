@@ -333,7 +333,9 @@ public actor BrowserRuntime {
   }
 
   public func readPDF(nodeID: UUID, element: BrowserResolvedElement) async throws -> Data {
-    guard let reader = pdfReaders[nodeID] else { throw BrowserRuntimeError.pageInteractionUnavailable(nodeID) }
+    guard let reader = pdfReaders[nodeID] else {
+      throw BrowserRuntimeError.pageInteractionUnavailable(nodeID)
+    }
     return try await reader(element)
   }
 

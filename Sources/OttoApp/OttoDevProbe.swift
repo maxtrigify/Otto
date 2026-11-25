@@ -1,8 +1,10 @@
 #if DEBUG
   import AppKit
   import Foundation
+  import OttoModels
   import OttoServices
   import OttoTools
+  import SwiftUI
 
   /// Development only: lets agent shells, which usually lack Screen Recording and Accessibility
   /// permission, exercise Otto Dev end to end. Post the distributed notification
@@ -12,6 +14,7 @@
   ///   permission:<agent UUID>:approve|deny:<report file>  what the chat card's Approve/Deny do
   ///   settings[:<page>]                        open the Settings window, optionally on a page
   ///   go:<place>                               show Home, or a Chat place: conversation, browser, files…
+  ///   standards:propose:<ticket number>:<note> what "Keep this for next time?" would offer
   ///   brief:<output file>                      the lines Home derives from Otto's own state
   ///   board:give:<item id>:<agent>             on the open whiteboard, what "Give this to…" does;
   ///                                            agent is Claude Code, Codex or a bot's name
@@ -24,6 +27,7 @@
     static let shared = OttoDevProbe()
     static let openSettingsNotification = Notification.Name("io.openotto.dev.probe.openSettings")
     static let goNotification = Notification.Name("io.openotto.dev.probe.go")
+    static let ticketNotification = Notification.Name("io.openotto.dev.probe.ticket")
     static let boardNotification = Notification.Name("io.openotto.dev.probe.board")
     static let homeNotification = Notification.Name("io.openotto.dev.probe.home")
     private weak var services: ApplicationServices?
@@ -71,6 +75,130 @@
       } else if command.hasPrefix("board:") {
         NotificationCenter.default.post(
           name: Self.boardNotification, object: String(command.dropFirst(6)))
+      } else if command.hasPrefix("ticket:"), !command.hasPrefix("ticket:remove:"),
+        !command.hasPrefix("ticket:answer:"), !command.hasPrefix("ticket:start:")
+      {
+        // ticket:new opens the New ticket form; ticket:open:<number> opens that ticket.
+        NotificationCenter.default.post(
+          name: Self.ticketNotification, object: String(command.dropFirst(7)))
+      } else if command.hasPrefix("standards:propose:") {
+        // standards:propose:<number>:<note>  what "Keep this for next time?" offers, as JSON in
+        // /tmp/tickets-snap/proposals-<number>.json.
+        let parts = command.dropFirst(18).split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let number = Int(parts[0]), let services,
+          let ticket = services.tickets.ticket(number: number)
+        else { return }
+        let out = "/tmp/tickets-snap/proposals-\(number).json"
+        Task {
+          do {
+            let proposals = try await services.proposeStandards(ticketID: ticket.id, note: parts[1])
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted]
+            try encoder.encode(proposals).write(to: URL(fileURLWithPath: out))
+            Self.log("standards proposed T-\(number): \(proposals.count)")
+          } catch {
+            Self.log("standards propose failed T-\(number): \(error.localizedDescription)")
+          }
+        }
+      } else if command.hasPrefix("ticket:start:") {
+        // ticket:start:<number>  the person's Start on a part the CEO is waiting to hand out.
+        guard let number = Int(command.dropFirst(13)), let services,
+          let ticket = services.tickets.ticket(number: number)
+        else { return }
+        Task {
+          do {
+            try await services.startHeldTicket(id: ticket.id)
+            Self.log("ticket started T-\(number)")
+          } catch {
+            Self.log("ticket start failed T-\(number): \(error.localizedDescription)")
+          }
+        }
+      } else if command.hasPrefix("ticket:answer:") {
+        // ticket:answer:<number>:<text>  the person's answer to a stuck ticket.
+        let parts = command.dropFirst(14).split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let number = Int(parts[0]), let services,
+          let ticket = services.tickets.ticket(number: number)
+        else { return }
+        Task {
+          do {
+            try await services.answerTicket(id: ticket.id, text: parts[1])
+            Self.log("ticket answered T-\(number)")
+          } catch {
+            Self.log("ticket answer failed T-\(number): \(error.localizedDescription)")
+          }
+        }
+      } else if command.hasPrefix("ticket:remove:") {
+        // ticket:remove:<number>  deletes a test ticket.
+        guard let number = Int(command.dropFirst(14)), let services,
+          let ticket = services.tickets.ticket(number: number)
+        else { return }
+        try? services.deleteTicket(id: ticket.id)
+        Self.log("ticket removed T-\(number)")
+      } else if command.hasPrefix("bot:remove:") {
+        // bot:remove:<name>  removes a bot that bot:create made, and only those.
+        let name = String(command.dropFirst(11))
+        guard let services,
+          let profile = services.agentProfiles.exactMatch(name: name),
+          profile.instructions == "You are \(name), a test bot in Otto Dev."
+        else {
+          Self.log("bot remove refused \(name): not a probe-made bot")
+          return
+        }
+        do {
+          try services.deleteAgentProfile(id: profile.id)
+          Self.log("bot removed \(name)")
+        } catch {
+          Self.log("bot remove failed \(name): \(error.localizedDescription)")
+        }
+      } else if command.hasPrefix("ceo:rule:") {
+        // ceo:rule:<does|asks|never>:<text>  adds a rule in the person's own words.
+        let parts = command.dropFirst(9).split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let level = CEORules.Custom.Level(rawValue: parts[0]) else {
+          return
+        }
+        try? services?.addCEORule(level: level, text: parts[1])
+        Self.log("ceo rule added \(parts[0]): \(parts[1])")
+      } else if command == "ceo:unrule" {
+        // ceo:unrule  removes every rule the person wrote.
+        for rule in services?.ceoRules.custom ?? [] { try? services?.removeCEORule(id: rule.id) }
+        Self.log("ceo own rules removed")
+      } else if command.hasPrefix("ceo:power:") {
+        // ceo:power:<control>:<choice>  the same change as picking from a rule's menu.
+        let parts = command.dropFirst(10).split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let control = CEOPower.Control(rawValue: parts[0]) else {
+          return
+        }
+        try? services?.setCEOPower(control, choice: parts[1])
+        let rules = services?.ceoRules
+        Self.log(
+          "ceo power \(parts[0])=\(parts[1]) -> handOut=\(rules?.handOut.rawValue ?? "?") "
+            + "reviews=\(rules?.reviews.rawValue ?? "?") finish=\(rules?.finish.rawValue ?? "?") "
+            + "approves=\(rules?.approvesForPerson ?? false) parts=\(rules?.maxParts ?? 0) "
+            + "day=\(rules?.maxPerDay ?? 0)")
+      } else if command.hasPrefix("ceo:") {
+        // ceo:set:<bot name> gives a bot the CEO role; ceo:clear takes it away.
+        let rest = String(command.dropFirst(4))
+        if rest == "clear" {
+          try? services?.setCEO(profileID: nil)
+          Self.log("ceo cleared")
+        } else if rest.hasPrefix("set:"),
+          let profile = services?.agentProfiles.exactMatch(name: String(rest.dropFirst(4)))
+        {
+          try? services?.setCEO(profileID: profile.id)
+          Self.log("ceo set \(profile.name)")
+        }
+      } else if command.hasPrefix("bot:create:") {
+        // bot:create:<name>  a throwaway saved bot, since no tool can hire one yet.
+        let name = String(command.dropFirst(11))
+        do {
+          _ = try services?.saveAgentProfile(
+            AgentProfile(
+              name: name, instructions: "You are \(name), a test bot in Otto Dev.",
+              provider: .claudeCode))
+          Self.log("bot created \(name)")
+        } catch {
+          Self.log("bot create failed \(name): \(error.localizedDescription)")
+        }
       } else if command.hasPrefix("home:") {
         NotificationCenter.default.post(
           name: Self.homeNotification, object: String(command.dropFirst(5)))
@@ -177,6 +305,35 @@
         text = "ERROR: \(error)"
       }
       try? text.write(toFile: output, atomically: true, encoding: .utf8)
+    }
+  }
+
+  /// `ticket:hire` opens the Hire a bot sheet, so its layout can be checked from a shell.
+  struct DevProbeHireSheet: ViewModifier {
+    @Binding var showing: Bool
+    func body(content: Content) -> some View {
+      content.onReceive(
+        NotificationCenter.default.publisher(for: OttoDevProbe.ticketNotification)
+      ) { note in
+        if (note.object as? String) == "hire" { showing = true }
+        if (note.object as? String) == "hire-close" { showing = false }
+      }
+    }
+  }
+
+  /// `ticket:ceotab:<chat|tickets|powers>` opens the CEO bot's chat on that tab.
+  struct DevProbeCEOTab: ViewModifier {
+    let open: (CEOChatTab) -> Void
+    func body(content: Content) -> some View {
+      content.onReceive(
+        NotificationCenter.default.publisher(for: OttoDevProbe.ticketNotification)
+      ) { note in
+        let command = note.object as? String ?? ""
+        guard command.hasPrefix("ceotab:"),
+          let tab = CEOChatTab(rawValue: String(command.dropFirst(7)))
+        else { return }
+        open(tab)
+      }
     }
   }
 #endif

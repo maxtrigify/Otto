@@ -301,6 +301,7 @@ public enum ChatSidebarList: String, Codable, Sendable {
 public enum ChatSurfaceDestination: String, Codable, CaseIterable, Identifiable, Sendable {
   case conversation = "Chat"
   case activity = "Activity"
+  case tickets = "Tickets"
   case files = "Files & notes"
   case routines = "Routines"
   case dashboards = "Dashboards"

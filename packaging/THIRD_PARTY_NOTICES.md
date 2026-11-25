@@ -95,7 +95,7 @@ Apache License 2.0:
 - swift-server/async-http-client and swift-service-lifecycle
 - hummingbird-project/hummingbird, hummingbird-websocket and swift-websocket
 - adam-fowler/compress-nio
-- livekit/livekit-wakeword
+- livekit/livekit-wakeword (its Swift package is kept in `Vendor/livekit-wakeword`)
 - FluidInference/FluidAudio (on-device speech recognition, speech synthesis and voice
   activity detection). It includes VBx (Apache License 2.0), fastcluster (BSD 2-Clause) and
   the NemoTextProcessing text normaliser (Apache License 2.0); their licence texts are in FluidAudio's
@@ -106,7 +106,8 @@ licenses.
 
 MIT License:
 - migueldeicaza/SwiftTerm (see above)
-- microsoft/onnxruntime-swift-package-manager (ONNX Runtime)
+- microsoft/onnxruntime-swift-package-manager (ONNX Runtime). The bindings and the macOS
+  binary are kept in `Vendor/onnxruntime-swift-package-manager`, with where they came from.
 
 ## Photon messaging bridge
 

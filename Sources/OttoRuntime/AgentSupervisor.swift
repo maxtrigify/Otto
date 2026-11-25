@@ -483,9 +483,11 @@ public actor AgentSupervisor {
   /// otto-mcp bridge with a scrubbed child environment, so the bridge's credentials must be
   /// written into the provider's MCP server configuration, not just this process's env.
   private func enriched(
-    _ request: AgentLaunchRequest, controlEnvironment: [String: String] = [:]
+    _ request: AgentLaunchRequest, controlEnvironment: [String: String] = [:],
+    roleTools: [String] = []
   ) -> AgentLaunchRequest {
     var request = request
+    if request.ottoRoleTools.isEmpty { request.ottoRoleTools = roleTools }
     if request.ottoMCPExecutable == nil {
       request.ottoMCPExecutable = controlPlane?.mcpExecutable
     }
@@ -558,9 +560,10 @@ public actor AgentSupervisor {
       accountRequest.resumeSessionID = nil
     }
     recordLaunch(id, account: accountRequest.account, provider: adapter.provider)
+    let roleTools = await controlPlane?.roleTools(id) ?? []
     let prepared = await preparedBootstrap(
-      for: enriched(accountRequest, controlEnvironment: controlEnv), nodeID: id,
-      provider: adapter.provider)
+      for: enriched(accountRequest, controlEnvironment: controlEnv, roleTools: roleTools),
+      nodeID: id, provider: adapter.provider)
     let specification = Self.applyingAccount(
       try await adapter.buildLaunchSpec(prepared.request), account: accountRequest.account)
     try await resourceScheduler.acquire(id)
@@ -599,9 +602,10 @@ public actor AgentSupervisor {
       accountRequest.resumeSessionID = nil
     }
     recordLaunch(id, account: accountRequest.account, provider: adapter.provider)
+    let roleTools = await controlPlane?.roleTools(id) ?? []
     let prepared = await preparedBootstrap(
-      for: enriched(accountRequest, controlEnvironment: controlEnv), nodeID: id,
-      provider: adapter.provider)
+      for: enriched(accountRequest, controlEnvironment: controlEnv, roleTools: roleTools),
+      nodeID: id, provider: adapter.provider)
     let specification = Self.applyingAccount(
       try await adapter.buildLaunchSpec(prepared.request), account: accountRequest.account)
     let spawnedID = try spawn(
@@ -631,7 +635,7 @@ public actor AgentSupervisor {
     let controlEnv = await controlEnvironment(nodeID: id, canvasID: canvasID)
     var resumedRequest = enriched(
       try await withAccount(request, nodeID: id, provider: adapter.provider),
-      controlEnvironment: controlEnv)
+      controlEnvironment: controlEnv, roleTools: await controlPlane?.roleTools(id) ?? [])
     let accountID = resumedRequest.account?.accountID
     // A different account has a different provider home, so the old session does not exist
     // there: start a fresh provider session and let Otto's own context carry the thread.

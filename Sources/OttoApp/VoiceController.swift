@@ -842,7 +842,7 @@ final class VoiceController: ObservableObject {
       else { return VoiceScreenContext(place: "Browser") }
       return VoiceScreenContext(
         place: "Browser", kind: "web page", showing: node.displayName, nodeID: node.id, url: url)
-    case .activity, .files, .routines, .dashboards, .skills:
+    case .activity, .tickets, .files, .routines, .dashboards, .skills:
       return VoiceScreenContext(place: navigation.destination.rawValue)
     }
   }

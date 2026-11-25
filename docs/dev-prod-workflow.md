@@ -10,6 +10,13 @@ Two installed apps, two branches:
 | Bundle ID | `io.openotto.desktop.dev` | `io.openotto.desktop` |
 | Install location | `~/Applications/Otto Dev.app` | `/Applications/Otto.app` |
 | Script | `scripts/dev-app.sh` | `scripts/prod-app.sh` |
+| Spaces and sessions | Its own: `~/Library/Application Support/Otto Dev`, starting in `~/Documents/Otto Dev Workspace` | `~/Library/Application Support/Otto` and your real spaces |
+
+Otto Dev never opens the spaces the installed Otto uses, so bots, tickets and sessions made while
+trying a build stay out of real work. Sign-ins and keys are shared, so bots still run. To open
+your real spaces from Otto Dev on purpose, quit it and run
+`defaults write io.openotto.desktop.dev OttoDevUsesRealSpaces -bool YES` (delete the key to go
+back), or launch it with `OTTO_DEV_REAL_SPACES=1`.
 
 ## Day-to-day loop
 

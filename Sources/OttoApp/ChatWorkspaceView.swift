@@ -152,6 +152,12 @@ struct ChatWorkspaceView: View {
   @State private var sideChatAgentIDs: [UUID: UUID] = [:]
   @State private var creatingSideChatFor: UUID?
   @State private var sideChatError: String?
+  /// The ticket open in the Tickets place, if any.
+  @State private var ticketSelection: UUID?
+  /// Which of the CEO bot's tabs is showing, and for which bot, so another bot opens on Chat.
+  @State private var ceoTab = CEOChatTab.chat
+  @State private var ceoTabProfileID: UUID?
+  @State private var ceoTicketSelection: UUID?
   @State private var showingHire = false
   @State private var showingTeam = false
   /// Not private so snapshot tests can open the New session menu.
@@ -523,6 +529,20 @@ struct ChatWorkspaceView: View {
       )
     )
     .modifier(SessionLaunchErrorAlert(message: $sessionLaunchError))
+    #if DEBUG
+      .modifier(DevProbeHireSheet(showing: $showingHire))
+      .modifier(
+        DevProbeCEOTab { tab in
+          guard let chief = services.ceoProfile else { return }
+          selectedProfileID = chief.id
+          selectedTeamID = nil
+          selectedSessionID = nil
+          sidebarList = .bots
+          destination = .conversation
+          ceoTabProfileID = chief.id
+          ceoTab = tab
+        })
+    #endif
     .sheet(item: $editingBot) { profile in
       HireBotSheet(services: services, editing: profile) { _ in }
         .environment(\.ottoPalette, palette)
@@ -711,6 +731,8 @@ struct ChatWorkspaceView: View {
           count: ActivityNeedsYou(
             services: services, activity: services.botActivity, reviews: services.homeReviews
           ).count)
+        destinationRow(
+          .tickets, symbol: "checklist", count: services.tickets.open.count)
         destinationRow(
           .routines, symbol: "clock", count: services.routines.routines.count)
         destinationRow(
@@ -1132,6 +1154,11 @@ struct ChatWorkspaceView: View {
       }
     case .activity:
       activityInbox
+    case .tickets:
+      TicketsView(
+        services: services, tickets: services.tickets, selection: $ticketSelection,
+        avatar: { avatarPresentation($0) },
+        openAgent: { id in openTicketChat(id) })
     case .files:
       resourceBrowser(
         title: "Files & notes",
@@ -1501,9 +1528,26 @@ struct ChatWorkspaceView: View {
     return id
   }
 
+  /// Opens the chat a ticket's work is happening in: the bot's own chat, or a session.
+  private func openTicketChat(_ id: UUID) {
+    if let entry = roster.first(where: { $0.nodeID == id }) {
+      selectedProfileID = entry.profile.id
+      selectedTeamID = nil
+      destination = .conversation
+      Task { await openEntry(entry) }
+    } else if let node = allAgentNodes.first(where: { $0.id == id }) {
+      selectSession(node)
+    }
+  }
+
   private var activityInbox: some View {
     ActivityInboxView(
       services: services, activity: services.botActivity, reviews: services.homeReviews,
+      tickets: services.tickets,
+      openTicket: { id in
+        ticketSelection = id
+        destination = .tickets
+      },
       agentName: { id in allAgentNodes.first { $0.id == id }?.displayName },
       openAgent: { id in
         if let node = allAgentNodes.first(where: { $0.id == id }) { selectSession(node) }
@@ -1541,6 +1585,64 @@ struct ChatWorkspaceView: View {
       {
         projectContextBar(channelID: channelID, node: node)
       }
+      if let chief = ceoInChat {
+        CEOChatTabs(
+          name: chief.profile.name, selection: currentCEOTab,
+          openTickets: services.tickets.open.filter {
+            $0.assigneeProfileID == chief.profile.id || $0.creator == .bot(chief.profile.id)
+          }.count,
+          select: { tab in
+            ceoTabProfileID = chief.profile.id
+            ceoTab = tab
+          })
+      }
+      if let chief = ceoInChat, currentCEOTab != .chat {
+        ceoTabContent(chief)
+      } else {
+        conversationBody(for: node)
+      }
+    }
+  }
+
+  /// The CEO bot whose chat is open, if that is what is showing.
+  private var ceoInChat: BotRosterEntry? {
+    guard selectedTeamID == nil, selectedSessionID == nil, let entry = selectedEntry,
+      services.isCEO(entry.profile.id)
+    else { return nil }
+    return entry
+  }
+
+  private var currentCEOTab: CEOChatTab {
+    ceoTabProfileID == selectedProfileID ? ceoTab : .chat
+  }
+
+  @ViewBuilder private func ceoTabContent(_ chief: BotRosterEntry) -> some View {
+    switch currentCEOTab {
+    case .chat:
+      EmptyView()
+    case .tickets:
+      TicketsView(
+        services: services, tickets: services.tickets, selection: $ceoTicketSelection,
+        avatar: { avatarPresentation($0) },
+        openAgent: { id in
+          ceoTab = .chat
+          openTicketChat(id)
+        }, scope: chief.profile)
+    case .powers:
+      TicketCEOView(
+        services: services, chief: chief.profile, roster: roster,
+        avatar: { avatarPresentation($0) },
+        close: { ceoTab = .chat },
+        newTicket: { ceoTab = .tickets },
+        report: { _ in }, embedded: true
+      )
+      .foregroundStyle(palette.paper)
+      .background(palette.workspaceSurface)
+    }
+  }
+
+  @ViewBuilder private func conversationBody(for node: OttoNode) -> some View {
+    VStack(spacing: 0) {
       GeometryReader { geometry in
         let minimumPanelWidth = min(300.0, geometry.size.width * 0.5)
         let maximumPanelWidth = max(minimumPanelWidth, geometry.size.width - 280)
@@ -2977,7 +3079,8 @@ struct ChatWorkspaceView: View {
       Task { await openEntry(entry) }
     } label: {
       sidebarRowLabel(
-        title: entry.profile.name,
+        title: services.isCEO(entry.profile.id)
+          ? "\(entry.profile.name) · CEO" : entry.profile.name,
         active: active,
         dot: entry.needsYou ? palette.cyan : nil,
         running: isBotRunning(entry)
@@ -3989,6 +4092,11 @@ struct ChatWorkspaceView: View {
       if let job = entry?.profile.jobTitle, !job.isEmpty {
         detailLine("PRIMARY JOB", job)
       }
+      if let profile = entry?.profile, services.isCEO(profile.id) {
+        detailLine(
+          "ROLE",
+          "CEO · hands tickets to \(services.ceoReports().count) bots and reviews their work")
+      }
       detailLine("HARNESS", providerName(node))
       if let profile = entry?.profile {
         pluginShowcase(services.harnessPlugins(for: profile.provider), provider: profile.provider)
@@ -4520,6 +4628,11 @@ struct HireBotSheet: View {
   @State private var errorMessage: String?
   @State private var showingAdvanced = false
   @State private var showingLocalModelSettings = false
+  /// "This bot is my CEO": applied when the bot is saved.
+  @State private var isCEO = false
+  /// What this bot's work must get right, checked before review (#127). Saved with the bot.
+  @State private var standardsDraft: [BotStandard] = []
+  @State private var newStandard = ""
 
   private let colors = ["#397b69", "#ad6a66", "#526b8e", "#a46e21", "#087f83"]
 
@@ -4535,6 +4648,8 @@ struct HireBotSheet: View {
     let appearance = services.botAppearance.appearance(for: profile.id)
     _name = State(initialValue: profile.name)
     _jobTitle = State(initialValue: profile.jobTitle ?? profile.role)
+    _isCEO = State(initialValue: services.isCEO(profile.id))
+    _standardsDraft = State(initialValue: services.botStandards(profile.id))
     _instructions = State(initialValue: profile.instructions)
     _provider = State(initialValue: profile.provider)
     _accountID = State(initialValue: profile.accountID)
@@ -4670,10 +4785,45 @@ struct HireBotSheet: View {
         hireField("SHORT NAME", text: $name, prompt: "Beck")
         hireField(
           "RESPONSIBILITY", text: $jobTitle, prompt: "e.g. Reviews every PR before it merges")
+        ceoToggle
       }
     }
     .padding(.horizontal, 28)
     .padding(.top, 22)
+  }
+
+  /// One bot can run the others: Otto gives it a manager's brief and lets it hand out and
+  /// review tickets. Ticking it here moves the role from whichever bot had it.
+  private var ceoToggle: some View {
+    let current = services.ceoProfile
+    let replaces = current.flatMap { $0.id == editing?.id ? nil : $0.name }
+    return Toggle(isOn: $isCEO) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("This bot is my CEO").font(.ottoDisplay(13).weight(.medium))
+          .foregroundStyle(palette.paper)
+        Text(
+          isCEO && replaces != nil
+            ? "Takes over from \(replaces ?? ""). It splits tickets up, hands them to your "
+              + "other bots and checks what comes back."
+            : "It splits tickets up, hands them to your other bots and checks what comes back."
+        )
+        .font(.ottoDisplay(11.5)).foregroundStyle(palette.muted)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .toggleStyle(.checkbox)
+    .padding(.top, 2)
+    .padding(.bottom, 12)
+    .accessibilityIdentifier("hire.ceo")
+  }
+
+  /// Gives or takes away the CEO role to match the tick box, leaving another bot's role alone.
+  private func applyCEO(to profile: AgentProfile) {
+    if isCEO {
+      try? services.setCEO(profileID: profile.id)
+    } else if services.isCEO(profile.id) {
+      try? services.setCEO(profileID: nil)
+    }
   }
 
   private var hireFaceSection: some View {
@@ -4868,6 +5018,7 @@ struct HireBotSheet: View {
   private var advancedSettings: some View {
     VStack(alignment: .leading, spacing: 16) {
       advancedInstructions
+      advancedStandards
       advancedHarness
       advancedModel
       advancedTools
@@ -4892,6 +5043,65 @@ struct HireBotSheet: View {
         .background(palette.ink.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.paper.opacity(0.1)))
     }
+  }
+
+  private var advancedStandards: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      advancedLabel("STANDARDS")
+      Text(
+        "What good looks like. When this bot hands a ticket back, another model checks the work "
+          + "against these and sends failures back to fix before you see it."
+      )
+      .font(.ottoDisplay(11.5)).foregroundStyle(palette.muted)
+      .fixedSize(horizontal: false, vertical: true)
+      ForEach(standardsDraft) { standard in
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          VStack(alignment: .leading, spacing: 1) {
+            Text(standard.text).font(.ottoDisplay(12.5)).foregroundStyle(palette.paper)
+              .fixedSize(horizontal: false, vertical: true)
+            Text(standardSourceLine(standard)).font(.ottoDisplay(10.5))
+              .foregroundStyle(palette.muted)
+          }
+          Spacer(minLength: 6)
+          Button {
+            standardsDraft.removeAll { $0.id == standard.id }
+          } label: {
+            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+          }
+          .buttonStyle(.plain).foregroundStyle(palette.muted)
+          .help("Remove this standard")
+        }
+        .padding(.vertical, 4)
+      }
+      HStack(spacing: 8) {
+        TextField("Add a standard in plain words, e.g. Under 60 seconds", text: $newStandard)
+          .textFieldStyle(.roundedBorder)
+          .onSubmit(addDraftStandard)
+          .accessibilityIdentifier("hire.standard")
+        Button("Add", action: addDraftStandard)
+          .disabled(newStandard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      }
+    }
+  }
+
+  private func standardSourceLine(_ standard: BotStandard) -> String {
+    switch standard.source {
+    case .person: "You wrote this"
+    case .note(let ticket): "From your note on \(ticket)"
+    }
+  }
+
+  private func addDraftStandard() {
+    let text = newStandard.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty else { return }
+    standardsDraft.append(BotStandard(text: text))
+    newStandard = ""
+  }
+
+  /// Saves the standards with the bot. One still typed in the box counts.
+  private func applyStandards(to profile: AgentProfile) {
+    addDraftStandard()
+    try? services.setBotStandards(standardsDraft, for: profile.id)
   }
 
   private var advancedHarness: some View {
@@ -5203,6 +5413,8 @@ struct HireBotSheet: View {
             photoSourceURL: pendingPhotoURL,
             existingPhotoPath: existingPhotoPath
           ))
+        applyCEO(to: profile)
+        applyStandards(to: profile)
         hired(profile)
         dismiss()
       } catch {
@@ -5231,6 +5443,8 @@ struct HireBotSheet: View {
             colorHex: colorHex,
             photoSourceURL: pendingPhotoURL
           ))
+        applyCEO(to: profile)
+        applyStandards(to: profile)
         hired(profile)
         dismiss()
       } catch {

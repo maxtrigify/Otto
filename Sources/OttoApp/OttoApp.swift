@@ -45,11 +45,10 @@ struct OttoApp: App {
             applicationSupport: URL(fileURLWithPath: $0),
             originalWorkspacePath: commandLineValue(for: "--workspace") ?? previewRoot.path)
         }
-        : .live(originalWorkspacePath: defaultWorkspacePath())
+        : liveProfileRegistry()
     #else
       let isIsolatedPreview = false
-      let profileRegistry: OttoProfileRegistry? = .live(
-        originalWorkspacePath: defaultWorkspacePath())
+      let profileRegistry: OttoProfileRegistry? = liveProfileRegistry()
     #endif
     // Each profile is its own place: its folder, its sessions database and its "About me".
     let explicitWorkspace = commandLineValue(for: "--workspace")
@@ -379,8 +378,38 @@ private func commandLineValue(for flag: String) -> String? {
   return ProcessInfo.processInfo.arguments[index + 1]
 }
 
+/// The released app's spaces, or Otto Dev's own so a build being tried can't write into them.
+@MainActor
+private func liveProfileRegistry() -> OttoProfileRegistry {
+  guard isSeparateDevelopmentApp(),
+    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+      .first
+  else { return .live(originalWorkspacePath: defaultWorkspacePath()) }
+  return OttoProfileRegistry(
+    applicationSupport: OttoDevelopmentSpace.applicationSupport(in: support),
+    originalWorkspacePath: defaultWorkspacePath(), originalName: "Otto Dev")
+}
+
+private func isSeparateDevelopmentApp() -> Bool {
+  OttoDevelopmentSpace.isSeparate(
+    bundleIdentifier: Bundle.main.bundleIdentifier,
+    environment: ProcessInfo.processInfo.environment,
+    realSpacesDefault: UserDefaults.standard.bool(
+      forKey: OttoDevelopmentSpace.realSpacesDefaultsKey))
+}
+
 private func defaultWorkspacePath() -> String {
   let fileManager = FileManager.default
+  if isSeparateDevelopmentApp(),
+    let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+  {
+    let folder = OttoDevelopmentSpace.workspace(in: documents)
+    if (try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
+      fileManager.isWritableFile(atPath: folder.path)
+    {
+      return folder.path
+    }
+  }
   let candidates = [
     fileManager.urls(for: .documentDirectory, in: .userDomainMask).first.map {
       OttoPaths.preferredUserFolder(

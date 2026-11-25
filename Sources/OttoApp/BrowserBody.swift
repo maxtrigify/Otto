@@ -1266,7 +1266,9 @@ struct BrowserWebView: NSViewRepresentable {
             return try await self.assessInteraction(webView, request: request)
           },
           readPDF: { @MainActor [weak self, weak webView, nodeID] element in
-            guard let self, let webView else { throw BrowserRuntimeError.pageInteractionUnavailable(nodeID) }
+            guard let self, let webView else {
+              throw BrowserRuntimeError.pageInteractionUnavailable(nodeID)
+            }
             return try await self.readPDF(webView, element: element)
           }
         )
@@ -1342,7 +1344,8 @@ struct BrowserWebView: NSViewRepresentable {
 
     /// Fetch through this tab's authenticated session. Only a direct link on this origin is
     /// eligible. Fetch in an isolated world so the page cannot replace fetch or its limits.
-    private func readPDF(_ webView: WKWebView, element: BrowserResolvedElement) async throws -> Data {
+    private func readPDF(_ webView: WKWebView, element: BrowserResolvedElement) async throws -> Data
+    {
       let link = try await webView.callAsyncJavaScript(
         """
         const page = window.__ottoAgentPage;
@@ -1350,7 +1353,8 @@ struct BrowserWebView: NSViewRepresentable {
         const link = page.elements.get(id);
         return link?.isConnected && link.tagName === 'A' ? link.href : null;
         """,
-        arguments: ["revision": element.pageRevision, "id": element.elementID], in: nil, contentWorld: .page)
+        arguments: ["revision": element.pageRevision, "id": element.elementID], in: nil,
+        contentWorld: .page)
       guard let href = link as? String else { throw BrowserRuntimeError.stalePageSnapshot }
       let value = try await webView.callAsyncJavaScript(
         """

@@ -286,6 +286,12 @@ public final class ApplicationServices: ObservableObject {
   public let skills = SkillLibraryStore()
   /// Drafts waiting on Home for the person to approve, comment on or reject.
   public let homeReviews: HomeReviewStore
+  /// Work handed to bots as tickets, with the story of how each one went.
+  public let tickets: TicketStore
+  /// Which bot, if any, is this space's CEO, and who reports to it.
+  public let ceo: CEOStore
+  /// What each bot's work must get right, checked before review (#127).
+  public let standards: StandardsStore
   public let office: OfficeStore
   /// App-wide profile list. Nil in isolated previews and tests that do not exercise profiles.
   public let profiles: OttoProfileRegistry?
@@ -407,6 +413,16 @@ public final class ApplicationServices: ObservableObject {
   private var routineStoreForwarding: AnyCancellable?
   private var appConnectionsForwarding: AnyCancellable?
   private var homeReviewsForwarding: AnyCancellable?
+  private var ticketsForwarding: AnyCancellable?
+  /// Tests stand in for handing a ticket to a bot: profile, the message and the hidden brief.
+  /// Returns the chat the work runs in. Nil in the app, where the bot's own chat is used.
+  var ticketDispatchOverride: (@MainActor (UUID, String, String) async throws -> UUID)?
+  /// How long a ticket waits for its bot to take the brief before saying it didn't arrive.
+  var ticketDispatchTimeout: Duration = .seconds(90)
+  /// Tests stand in for the checker model. Nil in the app, which calls the picked model.
+  var standardsJudgeOverride: (any StandardsJudge)?
+  /// Tests say which providers have keys. Nil in the app, which reads Settings → Models.
+  var checkerKeysOverride: Set<OttoHarnessProvider>?
   /// Tests stand in for the agent that wrote a reviewed draft: gets its node and the prompt,
   /// returns its answer. Nil in the app, where the prompt goes to the real session.
   var reviewAgentOverride: (@MainActor (UUID, String) async throws -> String?)?
@@ -482,6 +498,9 @@ public final class ApplicationServices: ObservableObject {
     self.dailyBrief = DailyBriefStore(workspacePath: workspacePath)
     self.homeCards = HomeCardsStore(workspacePath: workspacePath)
     self.homeReviews = HomeReviewStore(workspacePath: workspacePath)
+    self.tickets = TicketStore(workspacePath: workspacePath)
+    self.ceo = CEOStore(workspacePath: workspacePath)
+    self.standards = StandardsStore(workspacePath: workspacePath)
     self.office = OfficeStore(workspacePath: workspacePath)
     self.botContext = BotChannelContextStore(workspacePath: workspacePath)
     self.botActivity = BotActivityStore(workspacePath: workspacePath)
@@ -565,6 +584,10 @@ public final class ApplicationServices: ObservableObject {
     }
     // Home's "Needs you" count includes drafts waiting for review.
     self.homeReviewsForwarding = homeReviews.objectWillChange.sink { [weak self] _ in
+      self?.objectWillChange.send()
+    }
+    // The sidebar's Tickets count and Activity's "Needs you" follow the ticket list.
+    self.ticketsForwarding = tickets.objectWillChange.sink { [weak self] _ in
       self?.objectWillChange.send()
     }
   }
@@ -683,11 +706,14 @@ public final class ApplicationServices: ObservableObject {
       try await registerBriefTools()
       try await registerHomeCardTools()
       try await registerHomeReviewTools()
+      try await registerTicketTools()
+      try await registerStandardsTools()
       try await registerOfficeTools()
       try await registerProfileTools()
       botPresence.start()
       botActivity.start(eventBus: supervisor.eventBus)
       startBotEventProjection()
+      startTicketWatch()
       Task { [weak self] in
         guard let stateChanges = self?.canvasRecorder.stateChanges else { return }
         for await active in stateChanges {
@@ -708,25 +734,29 @@ public final class ApplicationServices: ObservableObject {
         authenticator: authenticator
       )
       fullAccessToken = token
-      await supervisor.setControlPlane(
-        AgentControlPlane(
-          socketPath: socketPath,
-          mcpExecutable: Self.ottoMCPExecutablePath(),
-          workspaceID: store.activeCanvas.id,
-          selfConfirmingTools: await registry.definitions().filter(\.requiresConfirmation).map(
-            \.name),
-          workspacePath: workspacePath,
-          tokenProvider: { [authenticator] nodeID, canvasID in
-            await authenticator.issue(
-              actorID: "otto-agent-\(nodeID.uuidString)",
-              scopes: Set(ToolScope.allCases).subtracting([.globalDestructive]),
-              lifetime: 60 * 60 * 24 * 7,
-              source: .agent,
-              sourceNodeID: nodeID,
-              sourceCanvasID: canvasID
-            )
-          }
-        ))
+      var controlPlane = AgentControlPlane(
+        socketPath: socketPath,
+        mcpExecutable: Self.ottoMCPExecutablePath(),
+        workspaceID: store.activeCanvas.id,
+        selfConfirmingTools: await registry.definitions().filter(\.requiresConfirmation).map(
+          \.name),
+        workspacePath: workspacePath,
+        tokenProvider: { [authenticator] nodeID, canvasID in
+          await authenticator.issue(
+            actorID: "otto-agent-\(nodeID.uuidString)",
+            scopes: Set(ToolScope.allCases).subtracting([.globalDestructive]),
+            lifetime: 60 * 60 * 24 * 7,
+            source: .agent,
+            sourceNodeID: nodeID,
+            sourceCanvasID: canvasID
+          )
+        }
+      )
+      // The CEO bot runs its team's tickets without a provider prompt for each one.
+      controlPlane.roleTools = { [weak self] nodeID in
+        await MainActor.run { self?.preapprovedTools(forNode: nodeID) ?? [] }
+      }
+      await supervisor.setControlPlane(controlPlane)
       await installMemoryBootstrapProvider()
       await installAccountProvider()
       isOnline = true
@@ -921,7 +951,11 @@ public final class ApplicationServices: ObservableObject {
         }.joined(separator: "\n\n")
       }
       let helpers = await self?.botSubagentInstructions(profileID: profile.0) ?? ""
-      let protocolText = BotMessaging.protocolTeaching + "\n\n" + helpers
+      // The CEO's brief is Otto's, not the person's: it follows the role, not the bot.
+      let ceoBrief = await self?.ceoBrief(profileID: profile.0) ?? ""
+      let protocolText =
+        BotMessaging.protocolTeaching + "\n\n" + helpers
+        + (ceoBrief.isEmpty ? "" : "\n\n" + ceoBrief)
       var extras = """
 
         ## Custom agent instructions
@@ -955,7 +989,7 @@ public final class ApplicationServices: ObservableObject {
       return AgentBootstrapPacket(
         text: text,
         hash:
-          "\(bootstrap.contentHash):profile-\(profile.0.uuidString)-r\(profile.1)-m\(Self.stableTextFingerprint(notes ?? ""))"
+          "\(bootstrap.contentHash):profile-\(profile.0.uuidString)-r\(profile.1)-m\(Self.stableTextFingerprint(notes ?? ""))-c\(Self.stableTextFingerprint(ceoBrief))"
       )
     }
   }

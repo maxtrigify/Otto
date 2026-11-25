@@ -240,7 +240,8 @@ public enum ApplicationToolBootstrap {
     try await registry.register(BrowserBackTool(store: store, runtime: browserRuntime))
     try await registry.register(BrowserForwardTool(store: store, runtime: browserRuntime))
     try await registry.register(BrowserGetStateTool(store: store, runtime: browserRuntime))
-    try await registry.register(BrowserSequenceTool(store: store, runtime: browserRuntime, workspacePath: workspacePath))
+    try await registry.register(
+      BrowserSequenceTool(store: store, runtime: browserRuntime, workspacePath: workspacePath))
     try await registry.register(BrowserInspectTool(store: store, runtime: browserRuntime))
     try await registry.register(BrowserClickTool(store: store, runtime: browserRuntime))
     try await registry.register(BrowserTypeTool(store: store, runtime: browserRuntime))

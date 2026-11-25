@@ -192,6 +192,32 @@ struct AgentPermissionTests {
     #expect(spec.arguments.last == "List the repository files.")
   }
 
+  @Test("A role's tools skip the provider prompt for that agent only, and never when read-only")
+  func roleToolsArePreapproved() async throws {
+    let adapter = ClaudeCodeAdapter(executablePath: "/bin/echo")
+    var request = AgentLaunchRequest(
+      workspacePath: FileManager.default.currentDirectoryPath,
+      prompt: "Run the team.",
+      permissionMode: .workspaceWrite,
+      ottoMCPExecutable: "/usr/local/bin/otto-mcp")
+    let plain = try await adapter.buildLaunchSpec(request)
+    let plainIndex = try #require(plain.arguments.firstIndex(of: "--allowedTools"))
+    #expect(!plain.arguments[plainIndex + 1].contains("ticket_create"))
+
+    request.ottoRoleTools = ["ticket.create", "ticket.assign", "ticket.review"]
+    let ceo = try await adapter.buildLaunchSpec(request)
+    let ceoIndex = try #require(ceo.arguments.firstIndex(of: "--allowedTools"))
+    #expect(
+      ceo.arguments[ceoIndex + 1].hasSuffix(
+        "mcp__otto__ticket_create,mcp__otto__ticket_assign,mcp__otto__ticket_review"))
+    #expect(!ceo.arguments[ceoIndex + 1].contains("terminal_run"))
+
+    request.permissionMode = .readOnly
+    let readOnly = try await adapter.buildLaunchSpec(request)
+    let readOnlyIndex = try #require(readOnly.arguments.firstIndex(of: "--allowedTools"))
+    #expect(!readOnly.arguments[readOnlyIndex + 1].contains("ticket_create"))
+  }
+
   @Test(
     "Claude pre-approves only skill reads and the Otto tools Otto confirms itself, never the whole server"
   )
@@ -208,7 +234,7 @@ struct AgentPermissionTests {
     let index = try #require(spec.arguments.firstIndex(of: "--allowedTools"))
     #expect(
       spec.arguments[index + 1]
-        == "mcp__otto__skill_list,mcp__otto__skill_read,mcp__otto__smtp_send,mcp__otto__calendar_create_event"
+        == "mcp__otto__skill_list,mcp__otto__skill_read,mcp__otto__ticket_list,mcp__otto__ticket_get,mcp__otto__ticket_note,mcp__otto__ticket_complete,mcp__otto__ticket_block,mcp__otto__smtp_send,mcp__otto__calendar_create_event"
     )
     // A server-wide grant would let terminal.run, agent.spawn, ... skip every prompt.
     #expect(!spec.arguments.contains("mcp__otto"))
@@ -226,7 +252,10 @@ struct AgentPermissionTests {
       ))
     // Read-only sessions may still read skills without a prompt, but nothing that acts.
     let readOnlyIndex = try #require(readOnly.arguments.firstIndex(of: "--allowedTools"))
-    #expect(readOnly.arguments[readOnlyIndex + 1] == "mcp__otto__skill_list,mcp__otto__skill_read")
+    #expect(
+      readOnly.arguments[readOnlyIndex + 1]
+        == "mcp__otto__skill_list,mcp__otto__skill_read,mcp__otto__ticket_list,mcp__otto__ticket_get,mcp__otto__ticket_note,mcp__otto__ticket_complete,mcp__otto__ticket_block"
+    )
 
     let noList = try await adapter.buildLaunchSpec(
       AgentLaunchRequest(
@@ -236,7 +265,10 @@ struct AgentPermissionTests {
         ottoMCPExecutable: "/usr/local/bin/otto-mcp"
       ))
     let noListIndex = try #require(noList.arguments.firstIndex(of: "--allowedTools"))
-    #expect(noList.arguments[noListIndex + 1] == "mcp__otto__skill_list,mcp__otto__skill_read")
+    #expect(
+      noList.arguments[noListIndex + 1]
+        == "mcp__otto__skill_list,mcp__otto__skill_read,mcp__otto__ticket_list,mcp__otto__ticket_get,mcp__otto__ticket_note,mcp__otto__ticket_complete,mcp__otto__ticket_block"
+    )
 
     let bypass = try await adapter.buildLaunchSpec(
       AgentLaunchRequest(

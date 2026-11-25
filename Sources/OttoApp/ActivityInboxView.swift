@@ -93,6 +93,8 @@ struct ActivityNeedsYou {
   let stuck: [AgentWatchdogFinding]
   /// Saved decisions that survive a restart, minus the ones the live runtime already shows.
   let saved: [BotActivityItem]
+  /// Tickets waiting on the person: work to check, a question, or a bot that went quiet.
+  let tickets: [Ticket]
 
   @MainActor init(
     services: ApplicationServices, activity: BotActivityStore, reviews: HomeReviewStore
@@ -101,6 +103,7 @@ struct ActivityNeedsYou {
       $0.state == .waitingPermission || $0.state == .waitingUser
     }
     self.attention = attention
+    self.tickets = services.tickets.needingPerson
     self.reviews = reviews.onHome.filter(\.needsPerson)
     self.stuck = services.watchdogFindings.values
       .filter { finding in
@@ -115,7 +118,9 @@ struct ActivityNeedsYou {
     }
   }
 
-  var count: Int { reviews.count + attention.count + stuck.count + saved.count }
+  var count: Int {
+    reviews.count + attention.count + stuck.count + saved.count + tickets.count
+  }
 }
 
 /// The Activity place as an inbox: what needs a person first, acted on in place, then what
@@ -124,6 +129,8 @@ struct ActivityInboxView: View {
   @ObservedObject var services: ApplicationServices
   @ObservedObject var activity: BotActivityStore
   @ObservedObject var reviews: HomeReviewStore
+  @ObservedObject var tickets: TicketStore
+  let openTicket: (UUID) -> Void
   /// nil when the session no longer exists.
   let agentName: (UUID) -> String?
   let openAgent: (UUID) -> Void
@@ -216,6 +223,9 @@ struct ActivityInboxView: View {
       }
       .padding(.bottom, 8)
     }
+    ForEach(needs.tickets) { ticket in
+      ticketCard(ticket)
+    }
     ForEach(attention) { item in
       attentionCard(item)
     }
@@ -284,6 +294,49 @@ struct ActivityInboxView: View {
       .buttonStyle(.bordered)
     }
     .accessibilityIdentifier("activity.needsYou.agent")
+  }
+
+  /// A ticket waiting on the person. The decision itself is made on the ticket, where the
+  /// brief and the story are, so this is one line and a way in.
+  private func ticketCard(_ ticket: Ticket) -> some View {
+    let owner =
+      ticket.assigneeProfileID.map { services.ticketPartyName(.bot($0)) } ?? "A bot"
+    let kind: String
+    let title: String
+    let caption: String
+    switch ticket.status {
+    case .blocked:
+      kind = "Answer"
+      title = "\(owner) is stuck on \(ticket.label)"
+      caption = ticket.question ?? ticket.title
+    case .review:
+      kind = "Review"
+      title = "\(owner) handed back \(ticket.label)"
+      caption = ticket.title
+    case .todo where ticket.isHeld:
+      kind = "Start"
+      title = "\(ticket.label) is waiting for you to start it for \(owner)"
+      caption = ticket.title
+    case .todo:
+      kind = "Retry"
+      title = "\(ticket.label) didn’t reach \(owner)"
+      caption = ticket.title
+    default:
+      kind = "Check"
+      title = "\(owner) went quiet on \(ticket.label)"
+      caption = ticket.title
+    }
+    return card(
+      kind: kind, tint: palette.signal, title: title, caption: caption, time: ticket.updatedAt
+    ) {
+      Button {
+        openTicket(ticket.id)
+      } label: {
+        Label("Open ticket", systemImage: "arrow.right")
+      }
+      .buttonStyle(.bordered)
+    }
+    .accessibilityIdentifier("activity.needsYou.ticket")
   }
 
   private func attentionReason(_ item: AgentAttentionItem) -> String {
