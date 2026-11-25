@@ -97,6 +97,9 @@ fi
   # System library targets need their real module map, not a Swift placeholder, or package
   # resolution fails with "missing system target module map". The iPhone build never links it.
   find Sources/CSQLite -type f -print0
+  # Local packages named in Package.swift (wake word, ONNX Runtime) must exist for the package
+  # graph to load, though the iPhone build never links them.
+  find Vendor -type f -print0
 ) | /usr/bin/rsync -a --from0 --files-from=- "$REPO_ROOT/" "$SOURCE_SNAPSHOT/"
 
 PLACEHOLDER="$SOURCE_SNAPSHOT/scripts/fixtures/OttoMobilePackagePlaceholder.swift"
