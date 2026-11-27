@@ -273,6 +273,8 @@ struct OttoApp: App {
         accounts: services.websiteAccounts, profiles: services.agentProfiles.activeProfiles)
     case .connectors:
       ConnectorsSettingsView(services: services)
+    case .repos:
+      ReposSettingsView(services: services)
     case .cloud:
       BoatCloudView(cloud: services.boatCloud)
     case .backup:
@@ -315,7 +317,7 @@ struct OttoApp: App {
 
 enum OttoSettingsPage: String, CaseIterable, Identifiable {
   case voice, shortcuts, appearance, notifications, ottoOnScreen, desktop, agents, models,
-    accounts, summarizer, websites, connectors, cloud, backup
+    accounts, summarizer, websites, connectors, repos, cloud, backup
 
   static let storageKey = "otto.settings.selectedPage"
 
@@ -335,6 +337,7 @@ enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .summarizer: "Summarizer"
     case .websites: "Websites"
     case .connectors: "Connectors"
+    case .repos: "Repos"
     case .cloud: "Cloud"
     case .backup: "Backup"
     }
@@ -354,6 +357,7 @@ enum OttoSettingsPage: String, CaseIterable, Identifiable {
     case .summarizer: "text.badge.star"
     case .websites: "lock.shield"
     case .connectors: "point.3.connected.trianglepath.dotted"
+    case .repos: "shippingbox"
     case .cloud: "cloud"
     case .backup: "externaldrive"
     }
